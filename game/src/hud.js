@@ -34,11 +34,19 @@ export function createHud() {
     minimap: element('minimap'),
     zone: element('zone-label'),
     missionList: element('mission-list'),
+
     placeMenu: element('place-menu'),
     placeMenuTitle: element('place-menu-title'),
     placeMenuSubtitle: element('place-menu-subtitle'),
     placeMenuRows: element('place-menu-rows'),
     placeMenuClose: element('place-menu-close'),
+
+    gangsPanel: element('gangs-panel'),
+    gangsDistricts: element('gangs-districts'),
+    gangsLegend: element('gangs-legend'),
+    statsPanel: element('stats-panel'),
+    statsGrid: element('stats-grid'),
+
     dialogue: element('dialogue'),
     dialogueText: element('dialogue-text'),
     subtitle: element('subtitle'),
@@ -63,9 +71,14 @@ export function createHud() {
     jetpackColor: null,
     objective: null,
     dialogue: null,
+
     regions: null,
     rep: null,
+    districts: null,
+
   };
+  const gangsButtons = [element('btn-gangs'), element('btn-gangs-hud')];
+  const statsButtons = [element('btn-stats'), element('btn-stats-title')];
   const mapContext = context2d(hud.minimap);
   let placeMenuReturnFocus = null;
 
@@ -357,8 +370,103 @@ export function createHud() {
     if (isPlaceMenuOpen()) hud.placeMenuRows?.children[index]?.click();
   }
 
-  function drawMinimap(player, wanted, missions, blips, cameraYaw, regionSnapshot = null, extras = null) {
+  function setDetailPanel(panel, buttons, visible) {
+    panel?.classList.toggle('visible', visible);
+    panel?.setAttribute('aria-hidden', String(!visible));
+    for (const button of buttons) button?.setAttribute('aria-expanded', String(visible));
+  }
 
+  function showGangs(districts, gangs, resolveOwner) {
+    if (!hud.gangsPanel || !hud.gangsDistricts) return;
+    setDetailPanel(hud.gangsPanel, gangsButtons, true);
+    const key = districts.map(({ id, owner, progress }) => `${id}:${owner}:${Math.round(progress)}`).join('|');
+    if (cache.districts === key) return;
+    cache.districts = key;
+    if (hud.gangsLegend) {
+      hud.gangsLegend.replaceChildren(...gangs.map((gang) => {
+        const label = document.createElement('span');
+        label.textContent = gang.name;
+        label.style.color = gang.color;
+        return label;
+      }));
+    }
+    hud.gangsDistricts.replaceChildren(...districts.map((district) => {
+      const owner = resolveOwner(district.owner);
+      const row = document.createElement('div');
+      row.className = 'district-row';
+      row.dataset.district = district.id;
+      const name = document.createElement('span');
+      name.textContent = district.name;
+      const label = document.createElement('span');
+      label.className = 'district-owner';
+      label.textContent = owner.name;
+      label.style.color = owner.color;
+      const status = document.createElement('div');
+      status.className = 'district-progress';
+      if (district.owner === 'player') status.textContent = 'Controlled by you';
+      else {
+        const progress = Math.round(district.progress);
+        const bar = document.createElement('progress');
+        bar.max = 100;
+        bar.value = progress;
+        bar.setAttribute('aria-label', `${district.name} capture progress`);
+        status.append(bar, `${progress}%`);
+      }
+      row.append(name, label, status);
+      return row;
+    }));
+  }
+
+  function hideGangs() {
+    setDetailPanel(hud.gangsPanel, gangsButtons, false);
+  }
+
+  function showStats(stats, districtTotal) {
+    if (!hud.statsPanel || !hud.statsGrid) return;
+    const elapsed = Math.floor(stats.playTimeSeconds ?? 0);
+    const playTime = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
+    const fired = stats.shotsFired ?? 0;
+    const hits = stats.shotsHit ?? 0;
+    const foot = stats.distanceOnFootMeters ?? 0;
+    const driving = stats.distanceDrivingMeters ?? 0;
+    const places = stats.placesVisited ?? [];
+    const number = (value) => Math.round(value ?? 0).toLocaleString('en-US');
+    const entries = [
+      ['Play time', playTime],
+      ['Missions completed', number(stats.missionsCompleted)],
+      ['Enemies defeated', number(stats.kills)],
+      ['Cars stolen', number(stats.carsStolen)],
+      ['Shots fired', number(fired)],
+      ['Shots hit', number(hits)],
+      ['Accuracy', `${fired ? number(100 * hits / fired) : 0}%`],
+      ['Districts owned', `${stats.districtsOwned ?? 0} / ${districtTotal}`],
+      ['Distance on foot', `${number(foot)} m`],
+      ['Distance driving', `${number(driving)} m`],
+      ['Total distance', `${number(foot + driving)} m`],
+      ['Deaths', number(stats.deaths)],
+      ['Money earned', `$${number(stats.moneyEarnedTotal)}`],
+      ['Money spent', `$${number(stats.moneySpentTotal)}`],
+      ['Times busted', number(stats.bustedCount)],
+      [`Places visited (${places.length})`, places.join(' · ') || 'None yet', 'places'],
+    ];
+    hud.statsGrid.replaceChildren(...entries.map(([label, value, className]) => {
+      const row = document.createElement('div');
+      if (className) row.className = className;
+      const term = document.createElement('dt');
+      const detail = document.createElement('dd');
+      term.textContent = label;
+      detail.textContent = value;
+      row.append(term, detail);
+      return row;
+    }));
+    setDetailPanel(hud.statsPanel, statsButtons, true);
+  }
+
+  function hideStats() {
+    setDetailPanel(hud.statsPanel, statsButtons, false);
+  }
+
+  function drawMinimap(player, wanted, missions, blips, cameraYaw, regionSnapshot = null, extras = null, zones = []) {
     if (!mapContext || !hud.minimap || !player?.state) return;
     const width = hud.minimap.width;
     const height = hud.minimap.height;
@@ -382,6 +490,7 @@ export function createHud() {
     mapContext.scale(-scale, -scale);
     mapContext.translate(-actor.x, -actor.z);
 
+
     if (extras?.rural) {
       const { minX, maxX, minZ, maxZ } = extras.rural;
       mapContext.fillStyle = '#30472e';
@@ -392,6 +501,26 @@ export function createHud() {
       for (const { minX, maxX, minZ, maxZ } of extras.dirtRoads) {
         mapContext.fillRect(minX, minZ, maxX - minX, maxZ - minZ);
       }
+    }
+
+    mapContext.fillStyle = 'rgba(44, 120, 138, 0.55)';
+    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.oceanStart, CITY.oceanWidth, 1600);
+    mapContext.fillStyle = 'rgba(196, 172, 120, 0.4)';
+    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.beachStart, CITY.oceanWidth, CITY.beachEnd - CITY.beachStart);
+    if (Array.isArray(zones)) {
+      mapContext.save();
+      mapContext.lineWidth = 1 / scale;
+      for (const { x, z, w, h, color, alpha } of zones) {
+        if (![x, z, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || !color) continue;
+        mapContext.fillStyle = color;
+        mapContext.globalAlpha = Number.isFinite(alpha) ? alpha : 0.25;
+        mapContext.fillRect(x, z, w, h);
+        mapContext.strokeStyle = color;
+        mapContext.globalAlpha = 0.65;
+        mapContext.strokeRect(x, z, w, h);
+      }
+      mapContext.restore();
+
     }
 
     mapContext.fillStyle = 'rgba(132, 140, 145, 0.5)';
@@ -406,10 +535,6 @@ export function createHud() {
     for (const block of CITY.parkBlocks) {
       mapContext.fillRect(CITY.nodeMin + (block[0] + 0.5) * pitch - 20, CITY.nodeMin + (block[1] + 0.5) * pitch - 20, 40, 40);
     }
-    mapContext.fillStyle = 'rgba(44, 120, 138, 0.55)';
-    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.oceanStart, CITY.oceanWidth, 1600);
-    mapContext.fillStyle = 'rgba(196, 172, 120, 0.4)';
-    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.beachStart, CITY.oceanWidth, CITY.beachEnd - CITY.beachStart);
 
     if (Array.isArray(regionSnapshot?.regions)) {
       for (const region of regionSnapshot.regions) {
@@ -426,6 +551,7 @@ export function createHud() {
         }
       }
     }
+
 
     if (Array.isArray(missions)) {
       for (const mission of missions) {
@@ -507,10 +633,17 @@ export function createHud() {
     showMissionList,
     hideMissionList,
     toggleMissionList,
+
     showPlaceMenu,
     hidePlaceMenu,
     isPlaceMenuOpen,
     selectPlaceMenuRow,
+
+    showGangs,
+    hideGangs,
+    showStats,
+    hideStats,
+
     drawMinimap,
     setVisible,
     show() { setVisible(true); },

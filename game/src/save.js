@@ -1,10 +1,12 @@
 // Versioned localStorage persistence. Invalid or incompatible data is ignored safely.
 import { ASSETS } from './assets.js';
-import { MISSIONS, SAVE_KEY, SAVE_VERSION } from './config.js';
+import { GANGS, MISSIONS, SAVE_KEY, SAVE_VERSION } from './config.js';
 import { normalizeSafehouseSave } from './safehouses.js';
+import { normalizeStats } from './stats.js';
 
 const LEGACY_SAVE_KEY = 'solmar.save.v2';
 const ASSET_IDS = new Set(ASSETS.map(({ id }) => id));
+const GANG_OWNERS = new Set(GANGS.factions.map(({ id }) => id));
 
 function safeStorage() {
   try {
@@ -29,6 +31,20 @@ function normalizeBest(value) {
   return best;
 }
 
+function normalizeDistricts(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const districts = {};
+  for (const { id } of GANGS.districts) {
+    const { owner, progress } = value[id] ?? {};
+    if (GANG_OWNERS.has(owner)) {
+      districts[id] = { owner, progress: Math.max(0, Math.min(100, finiteNumber(progress, 0))) };
+    } else if (owner === 'player' || owner === 'neutral') {
+      districts[id] = { owner, progress: 0 };
+    }
+  }
+  return districts;
+}
+
 function normalizeSave(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const current = value.version === SAVE_VERSION;
@@ -44,6 +60,8 @@ function normalizeSave(value) {
     rep: Math.max(0, Math.min(100000, Number.isFinite(value.rep) ? Math.floor(value.rep) : 0)),
     missions,
     best: normalizeBest(value.best),
+    districts: normalizeDistricts(value.districts),
+    stats: normalizeStats(value.stats),
     muted: value.muted === true,
     seed: Number.isInteger(value.seed) ? value.seed >>> 0 : 1,
     assets,

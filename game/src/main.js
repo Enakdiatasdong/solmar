@@ -18,12 +18,17 @@ import { createAudio } from './audio.js';
 import { createHud } from './hud.js';
 import { createMissions } from './missions.js';
 
+
 import { createRegions } from './regions.js';
 import { createRep } from './rep.js';
 
 import { ASSETS, createAssets } from './assets.js';
 import { RESTAURANTS, createRestaurants } from './restaurants.js';
 import { SAFEHOUSES, createSafehouses } from './safehouses.js';
+
+
+import { createGangs } from './gangs.js';
+import { createStats } from './stats.js';
 
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
@@ -40,11 +45,15 @@ const DOM_IDS = [
   'complete-time', 'btn-resume', 'btn-restart-pause',
   // Keep this inventory aligned with hud.js; every element is optional.
 
+
   'hud', 'health-fill', 'health-text', 'cash-value', 'income-value', 'wanted-stars', 'speed-value',
   'speed-box', 'vehicle-name', 'jetpack-box', 'jetpack-bar', 'jetpack-fill', 'jetpack-text',
   'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
   'dialogue', 'dialogue-text', 'subtitle', 'hint', 'region-panel', 'region-current', 'region-list', 'rep-panel', 'rep-rank', 'rep-points', 'rep-progress', 'rep-next', 'mission-stats', 'place-menu', 'place-menu-title',
   'place-menu-subtitle', 'place-menu-rows', 'place-menu-close',
+
+  'gangs-panel', 'btn-gangs', 'btn-gangs-hud', 'btn-gangs-close',
+  'stats-panel', 'btn-stats', 'btn-stats-title', 'btn-stats-close',
 
 ];
 const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
@@ -92,7 +101,7 @@ function makeGame(seedValue, shotName = null) {
     knockPed: traffic.knockPed,
     resolvePlayerCollision: (x, z, radius) => resolveCollisions(city.colliders, x, z, radius),
   };
-  const combat = createCombat(renderer.scene, () => player, () => combatCity);
+  const combat = createCombat(renderer.scene, () => player, () => combatCity, seedValue ^ 0xc05);
   const audio = createAudio();
   const hud = createHud();
   const landmarks = createLandmarks({ scene: renderer.scene, city, districts, hud });
@@ -101,6 +110,7 @@ function makeGame(seedValue, shotName = null) {
     // missions.js asks for a one-shot siren cue; audio.js exposes a wanted-level updater.
     audio: { ...audio, siren: () => audio.updateSiren(police.state.wanted) },
   });
+
 
   const regions = createRegions({ scene: renderer.scene, missions });
   const rep = createRep();
@@ -121,6 +131,10 @@ function makeGame(seedValue, shotName = null) {
     onSetRespawn: (place) => { state.respawn = { x: place.x, z: place.z }; },
   });
 
+
+  const gangs = createGangs({ scene: renderer.scene, city, player, combat, hud, seed: seedValue, awardCash });
+  const stats = createStats(() => gangs.state.districts);
+
   const orbit = player.orbit;
   const input = createInput(canvas);
   const clock = { accumulator: 0, last: null };
@@ -135,6 +149,9 @@ function makeGame(seedValue, shotName = null) {
   let shotFrameId = null;
   let booted = false;
   let shotGeneration = 0;
+  let openPanel = '';
+  let panelTrigger = null;
+  let gangsPanelUpdatedAt = 0;
 
   function announce(message) {
     if (nodes.status) nodes.status.textContent = message;
@@ -193,6 +210,7 @@ function makeGame(seedValue, shotName = null) {
   function setScreen(name) {
     const screen = SCREEN_ALIASES[name] || name;
     if (screen !== 'playing' && !Object.hasOwn(OVERLAYS, screen)) return false;
+    closePanel(false);
     state.screen = screen;
     clearInput();
     resetClock();
@@ -251,10 +269,12 @@ function makeGame(seedValue, shotName = null) {
 
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
+    blips.push(...gangs.getBlips());
     // Mission markers are already included by getBlips(), so do not draw a second copy.
     hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw, regionSnapshot, {
       rural: districts.bounds, dirtRoads: districts.state.dirtRoads, landmarks: landmarkBlips,
-    });
+    }, gangs.getMinimapZones());
+    if (openPanel === 'gangs' && state.elapsed - gangsPanelUpdatedAt >= 0.25) renderGangsPanel();
 
   }
 
@@ -285,9 +305,13 @@ function makeGame(seedValue, shotName = null) {
     return writeSave({
       cash: state.cash, rep: rep.state.points, missions: missions.completedIds, best: { ...state.missionBest },
       muted: state.muted, seed: seedValue, version: SAVE_VERSION,
+
       assets: assets.serialize(),
       mealsEaten: restaurants.state.mealsEaten,
       safehouses: safehouses.serialize(),
+
+      districts: gangs.serialize(), stats: stats.serialize(),
+
     });
   }
 
@@ -345,6 +369,9 @@ function makeGame(seedValue, shotName = null) {
       started: true, elapsed: 0, lastSave: 0, finalMission: null, bustedFine: 0,
       pedHitCooldown: 0, shotsFired: 0, pauseReason: '',
     });
+    stats.reset();
+    if (save) stats.restore(save.stats);
+    gangs.reset(save?.districts);
     Object.assign(orbit, { yaw: SPAWN.heading, pitch: CAMERA.pitch, distance: CAMERA.distance });
     audio.setMuted(state.muted);
     if (!shotMode) audio.unlock();
@@ -390,16 +417,23 @@ function makeGame(seedValue, shotName = null) {
     announce('Playing SOLMAR.');
   }
 
+  function awardCash(amount) {
+    state.cash += amount;
+    stats.recordMoneyEarned(amount);
+  }
+
   function completeMission(event) {
     const mission = missions.list.find((item) => item.id === event?.mission?.id);
     if (!mission || state.completed.includes(mission.id)) return false;
     state.completed.push(mission.id);
-    state.cash += mission.reward;
+    awardCash(mission.reward);
     rep.addPoints(REP.mission, 'Mission complete');
     if (mission.id === JETPACK_REWARD_JOB && !jetpack.state.owned) {
       jetpack.unlock();
       hud.toast('Jetpack unlocked. Press J to use it.', 'mission', 4);
     }
+    stats.recordMissionComplete();
+
     const elapsed = Number.isFinite(event.elapsed) && event.elapsed >= 0 ? event.elapsed : null;
     if (elapsed !== null) {
       state.missionBest[mission.id] = Math.min(state.missionBest[mission.id] ?? Infinity, elapsed);
@@ -436,6 +470,8 @@ function makeGame(seedValue, shotName = null) {
     if (state.screen !== 'playing') return;
     state.bustedFine = Math.min(state.cash, Math.round(POLICE.fine * (1 + police.state.wanted * 0.2)));
     state.cash -= state.bustedFine;
+    stats.recordMoneySpent(state.bustedFine);
+    stats.recordBusted();
     leaveCar();
     jetpack.deactivate();
     missions.fail('Busted.');
@@ -452,7 +488,11 @@ function makeGame(seedValue, shotName = null) {
 
   function gameOver() {
     if (state.screen !== 'playing') return;
+
     jetpack.deactivate();
+
+    stats.recordDeath();
+
     missions.fail('Jax went down.');
     state.finalMission = null;
     setScreen('gameover');
@@ -492,7 +532,11 @@ function makeGame(seedValue, shotName = null) {
   const missionList = hud.hud?.missionList || nodes['mission-list'];
   function showJobs(toggle = false) {
     if (state.screen !== 'playing' && state.screen !== 'paused') return;
+
     hud.hidePlaceMenu();
+
+    closePanel();
+
     if (toggle && missionList?.classList.contains('open')) {
       hud.hideMissionList();
       return;
@@ -515,6 +559,40 @@ function makeGame(seedValue, shotName = null) {
       row.classList.toggle('locked', mission.locked);
     });
     if (!missionList) hud.toast('Find the gold job beacon and press E.', 'info', 3);
+  }
+
+  function closePanel(restoreFocus = true) {
+    if (openPanel === 'gangs') hud.hideGangs();
+    if (openPanel === 'stats') hud.hideStats();
+    openPanel = '';
+    if (restoreFocus) panelTrigger?.focus();
+    panelTrigger = null;
+  }
+
+  function renderGangsPanel() {
+    hud.showGangs(gangs.state.districts, gangs.state.gangs, gangs.getOwner);
+    gangsPanelUpdatedAt = state.elapsed;
+  }
+
+  function showPanel(kind, trigger) {
+    if (openPanel === kind) { closePanel(); return; }
+    closePanel(false);
+    clearInput();
+    hud.hideMissionList();
+    openPanel = kind;
+    panelTrigger = trigger;
+    if (kind === 'gangs') {
+      renderGangsPanel();
+    } else {
+      const save = state.screen === 'menu' && !state.started ? readSave() : null;
+      const snapshot = stats.snapshot();
+      if (save) {
+        Object.assign(snapshot, save.stats);
+        snapshot.districtsOwned = Object.values(save.districts).filter((district) => district.owner === 'player').length;
+      }
+      hud.showStats(snapshot, gangs.state.districts.length);
+    }
+    nodes[`btn-${kind}-close`]?.focus();
   }
 
   function chooseJob(id) {
@@ -644,7 +722,11 @@ function makeGame(seedValue, shotName = null) {
     if (!player.enterCar(car)) return;
     if (stealing) {
       car.state.stolen = true;
+
       rep.addPoints(REP.theft, 'Stole a car');
+
+      stats.recordCarStolen();
+
       // The coupe job raises its own wanted level when it observes the entry.
       if (car !== missions.state.car) police.addWanted(POLICE.steal, 'Vehicle theft');
       hud.toast('Stolen ride. The SMPD noticed.', 'danger', 3);
@@ -679,6 +761,8 @@ function makeGame(seedValue, shotName = null) {
       saveNow();
     }
     if (state.screen === 'menu') {
+      if (openPanel && actions & ACTION_PAUSE) { closePanel(); return; }
+      if (openPanel && actions & ACTION_CONFIRM) return;
       if (actions & (ACTION_CONFIRM | ACTION_RESTART)) startRun(false);
       else if (actions & ACTION_MENU) { startRun(false); showJobs(); }
       return;
@@ -715,23 +799,32 @@ function makeGame(seedValue, shotName = null) {
         police.addWanted(1, 'Assault');
       }
     }
-    if (actions & ACTION_FIRE && combat.shoot()) {
-      state.shotsFired += 1;
-      audio.gunshot();
-      if (police.distanceToNearest(player.state.x, player.state.z) < POLICE.hear) {
-        rep.addPoints(REP.fireNearCop, 'Shots fired near a cop');
-        police.addWanted(POLICE.gunNearCop, 'Shots fired');
+
+    if (actions & ACTION_FIRE) {
+      const hits = combat.state.hits;
+      if (combat.shoot()) {
+        state.shotsFired += 1;
+        stats.recordShot(combat.state.hits - hits);
+        audio.gunshot();
+        if (police.distanceToNearest(player.state.x, player.state.z) < POLICE.hear) {
+          rep.addPoints(REP.fireNearCop, 'Shots fired near a cop');
+          police.addWanted(POLICE.gunNearCop, 'Shots fired');
+        }
+        hud.toast(`Pistol ammo: ${combat.state.ammo}`, 'info', 1.2);
       }
-      hud.toast(`Pistol ammo: ${combat.state.ammo}`, 'info', 1.2);
+
     }
   }
 
   function step(dt = STEP) {
     if (state.screen !== 'playing' || !Number.isFinite(dt) || dt <= 0) return;
     dt = Math.min(dt, MAX_FRAME);
+
     assets.update(dt);
     safehouses.update();
     const controls = hud.isPlaceMenuOpen() ? {} : input.state();
+    const { x, z } = player.state;
+
     state.elapsed += dt;
     districts.update(dt);
     state.pedHitCooldown = Math.max(0, state.pedHitCooldown - dt);
@@ -779,9 +872,20 @@ function makeGame(seedValue, shotName = null) {
     rep.noteWanted(police.state.wanted, { awardEscape: false });
     syncRider();
     landmarks.update(dt, player);
+    const position = player.state;
+    stats.addDistance(Math.hypot(position.x - x, position.z - z), Boolean(position.inCar));
+    for (const place of landmarks.list) {
+      if (Math.hypot(position.x - place.x, position.z - place.z) <= 25) stats.visitPlace(place.name);
+    }
+    for (const { name, center } of gangs.state.districts) {
+      if (Math.hypot(position.x - center.x, position.z - center.z) <= 25) stats.visitPlace(name);
+    }
+    stats.update(dt, combat.state.enemies);
+
     // Handle arrest before missions.fail() can clear the police's busted flag.
     if (!player.state.alive || player.state.health <= 0) { gameOver(); return; }
     if (police.state.busted) { busted(); return; }
+    gangs.update(dt);
     const active = missions.active;
     missions.update(dt);
     rep.noteWanted(police.state.wanted, { awardEscape: false });
@@ -864,6 +968,12 @@ function makeGame(seedValue, shotName = null) {
     bind('btn-restart-pause', restart);
     bind('btn-restart', restart);
     bind('btn-continue-story', continueAfterMission);
+    bind('btn-gangs', (event) => showPanel('gangs', event.currentTarget));
+    bind('btn-gangs-hud', (event) => showPanel('gangs', event.currentTarget));
+    bind('btn-gangs-close', () => closePanel());
+    bind('btn-stats', (event) => showPanel('stats', event.currentTarget));
+    bind('btn-stats-title', (event) => showPanel('stats', event.currentTarget));
+    bind('btn-stats-close', () => closePanel());
     function selectMission(event) {
       const row = event.target?.closest?.('[data-mission]');
       if (!row || !missionList?.contains(row)) return;
@@ -935,7 +1045,7 @@ function makeGame(seedValue, shotName = null) {
   const game = {
 
     seed: seedValue, city, districts, landmarks, renderer, player, jetpack, vehicles, traffic, police, combat, audio,
-    hud, missions, regions, rep, assets, restaurants, safehouses, input, state, orbit, setScreen, startRun, restart, pause, resume,
+    hud, missions, regions, rep, assets, restaurants, safehouses, gangs, stats, input, state, orbit, setScreen, startRun, restart, pause, resume,
 
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
     leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,

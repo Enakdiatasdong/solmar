@@ -146,6 +146,36 @@ export const MISSIONS = {
   markerRadius: 3.4,
 };
 
+/** Fictional turf owners and non-overlapping districts across the city grid. */
+export const GANGS = {
+  factions: [
+    { id: 'vipers', name: 'Crimson Vipers', color: '#e5484d', hex: 0xe5484d },
+    { id: 'kings', name: 'Harbor Kings', color: '#3f8cff', hex: 0x3f8cff },
+    { id: 'jackals', name: 'Neon Jackals', color: '#ffb020', hex: 0xffb020 },
+  ],
+  districts: [
+    { id: 'alta-vieja', name: 'Alta Vieja', rect: { minX: -360, maxX: 360, minZ: -360, maxZ: -120 } },
+    { id: 'cobre', name: 'Cobre Ward', rect: { minX: -360, maxX: -120, minZ: -120, maxZ: 120 } },
+    { id: 'luma', name: 'Luma Centro', rect: { minX: -120, maxX: 120, minZ: -120, maxZ: 240 } },
+    { id: 'prisma', name: 'Prisma Heights', rect: { minX: 120, maxX: 360, minZ: -120, maxZ: 120 } },
+    { id: 'brisa', name: 'Brisa Harbor', rect: { minX: -360, maxX: -120, minZ: 120, maxZ: 360 } },
+    { id: 'coral', name: 'Coral Strand', rect: { minX: -120, maxX: 120, minZ: 240, maxZ: 360 } },
+    { id: 'luz-marina', name: 'Luz Marina', rect: { minX: 120, maxX: 360, minZ: 120, maxZ: 360 } },
+  ],
+  progressPerKill: 34,
+  captureReward: 400,
+  incomePerDistrict: 25,
+  incomeEverySeconds: 60,
+  membersPerDistrict: 2,
+  respawnSeconds: 25,
+  progressDecayDelaySeconds: 20,
+  progressDecayPerSecond: 2,
+  playerColor: '#49c6b8',
+  playerName: 'You',
+  neutralColor: '#8a94a0',
+  neutralName: 'Neutral',
+};
+
 export const COMBAT = {
   pistolAmmo: 24,
   maxAmmo: 60,

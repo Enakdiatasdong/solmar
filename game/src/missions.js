@@ -207,7 +207,7 @@ export function createMissions(ctx) {
   }
 
   function resetMissionActors() {
-    combat?.clearEnemies?.();
+    combat?.clearEnemies?.((enemy) => Boolean(enemy.gangId));
     removeMissionCar();
   }
 
@@ -316,10 +316,8 @@ export function createMissions(ctx) {
       state.car.id = 'owned-coupe';
       state.car.kind = 'parked';
       state.car = null;
-    } else {
-      removeMissionCar();
     }
-    combat?.clearEnemies?.();
+    resetMissionActors();
     setAvailableMarkers();
     return event;
   }
