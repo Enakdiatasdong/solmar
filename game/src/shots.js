@@ -9,12 +9,13 @@ function setReady(value) {
 }
 
 function prepareFreshRun(game) {
-  const { player, vehicles, police, combat, missions, state, orbit } = game;
+  const { player, vehicles, police, combat, missions, vehicleJobs, state, orbit } = game;
   player.reset();
   missions.reset();
   missions.setProgress([]);
   police.clear();
   combat.reset();
+  vehicleJobs.reset();
 
   for (let index = vehicles.cars.length - 1; index >= 0; index -= 1) {
     const car = vehicles.cars[index];

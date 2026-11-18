@@ -12,6 +12,25 @@ const wheelMaterial = new THREE.MeshLambertMaterial({ color: 0x1d1e21 });
 const glassMaterial = new THREE.MeshLambertMaterial({ color: 0x24323c });
 const lightMaterial = new THREE.MeshLambertMaterial({ color: 0xfff1c0, emissive: 0xffcf7a, emissiveIntensity: 0.6 });
 const brakeMaterial = new THREE.MeshLambertMaterial({ color: 0xa32f2a, emissive: 0x8c1f1c, emissiveIntensity: 0.5 });
+const serviceBoxGeometry = new THREE.BoxGeometry(1, 1, 1);
+const serviceWhiteMaterial = new THREE.MeshLambertMaterial({ color: 0xf4f0de });
+const serviceRedMaterial = new THREE.MeshLambertMaterial({ color: 0xd34340, emissive: 0x9f2927, emissiveIntensity: 0.45 });
+const taxiSignMaterial = new THREE.MeshLambertMaterial({ color: 0xffe398, emissive: 0xc58c31, emissiveIntensity: 0.45 });
+const deliveryMarkMaterial = new THREE.MeshLambertMaterial({ color: 0x3b9d9a });
+
+const SERVICE_SPECS = [
+  { body: 0xe9b743, cabin: 0x3a3020, name: 'Sun taxi', variant: 'sedan', job: 'taxi' },
+  { body: 0xf2f2e9, cabin: 0xd8d9d4, name: 'Coast ambulance', variant: 'van', job: 'ambulance' },
+  { body: 0xe0e0d8, cabin: 0x30343a, name: 'Pier van', variant: 'van', job: 'delivery' },
+];
+
+function serviceBox(group, material, x, y, z, width, height, depth) {
+  const mesh = new THREE.Mesh(serviceBoxGeometry, material);
+  mesh.position.set(x, y, z);
+  mesh.scale.set(width, height, depth);
+  group.add(mesh);
+  return mesh;
+}
 
 function buildCarMesh(spec) {
   const group = new THREE.Group();
@@ -50,6 +69,21 @@ function buildCarMesh(spec) {
     cabin.position.set(0, 1.12, -0.35);
     roof.position.set(0, 1.38, -0.35);
     body.scale.set(1, 0.9, 1);
+  }
+
+  if (spec.job === 'taxi') {
+    serviceBox(group, taxiSignMaterial, 0, 1.78, -0.1, 0.85, 0.34, 0.38);
+    serviceBox(group, glassMaterial, 0, 1.78, 0.1, 0.44, 0.12, 0.02);
+  } else if (spec.job === 'ambulance') {
+    serviceBox(group, serviceWhiteMaterial, 0, 1.32, -0.65, 1.9, 1.05, 1.35);
+    serviceBox(group, serviceRedMaterial, 0, 2.05, 0.45, 1.22, 0.22, 0.32);
+    for (const side of [-1, 1]) {
+      serviceBox(group, serviceRedMaterial, side * 0.96, 1.35, -0.65, 0.05, 0.62, 0.19);
+      serviceBox(group, serviceRedMaterial, side * 0.97, 1.35, -0.65, 0.05, 0.19, 0.62);
+    }
+  } else if (spec.job === 'delivery') {
+    serviceBox(group, serviceWhiteMaterial, 0, 1.3, -0.65, 1.9, 1.05, 1.4);
+    for (const side of [-1, 1]) serviceBox(group, deliveryMarkMaterial, side * 0.96, 1.3, -0.65, 0.05, 0.42, 0.85);
   }
 
   for (const side of [-1, 1]) {
@@ -172,6 +206,18 @@ export function createVehicles(city, scene) {
           spots.push({ x, z, heading: Math.atan2(edge.dx, edge.dz) });
         }
       }
+    }
+    // Add service vehicles before the boot-time parked snapshot. They remain available on
+    // every restart, and their permits make an ordinary job entry free of a theft penalty.
+    const start = city?.spawnPoints?.player ?? { x: 0, z: 96 };
+    for (let index = 0; index < SERVICE_SPECS.length; index += 1) {
+      const spec = SERVICE_SPECS[index];
+      if (cars.some((car) => car.id === `job-${spec.job}`)) continue;
+      const anchor = { x: start.x + (index - 1) * 30, z: start.z + 24 };
+      const choices = spots.filter((spot) => !cars.some((car) => Math.hypot(car.state.x - spot.x, car.state.z - spot.z) < 12));
+      choices.sort((a, b) => Math.hypot(a.x - anchor.x, a.z - anchor.z) - Math.hypot(b.x - anchor.x, b.z - anchor.z));
+      const spot = choices[0];
+      if (spot) addCar(spec, spot, spot.heading, { id: `job-${spec.job}`, kind: 'parked', stolen: true });
     }
     random.shuffle(spots);
     let spawned = 0;

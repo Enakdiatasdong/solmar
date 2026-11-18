@@ -14,6 +14,7 @@ import { createCombat } from './combat.js';
 import { createAudio } from './audio.js';
 import { createHud } from './hud.js';
 import { createMissions } from './missions.js';
+import { createVehicleJobs } from './vehicle-jobs.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
@@ -75,10 +76,26 @@ function makeGame(seedValue, shotName = null) {
   const combat = createCombat(renderer.scene, () => player, () => combatCity);
   const audio = createAudio();
   const hud = createHud();
+  let storyObjective = '';
+  let vehicleObjective = '';
+  function setStoryObjective(text) {
+    storyObjective = text;
+    hud.setObjective(vehicleObjective || storyObjective);
+  }
+  function setVehicleObjective(text) {
+    vehicleObjective = text;
+    hud.setObjective(vehicleObjective || storyObjective);
+  }
   const missions = createMissions({
-    scene: renderer.scene, city, player, vehicles, police, combat, hud,
+    scene: renderer.scene, city, player, vehicles, police, combat,
+    hud: { ...hud, setObjective: setStoryObjective },
     // missions.js asks for a one-shot siren cue; audio.js exposes a wanted-level updater.
     audio: { ...audio, siren: () => audio.updateSiren(police.state.wanted) },
+  });
+  const vehicleJobs = createVehicleJobs({
+    scene: renderer.scene, city, player, vehicles,
+    hud: { ...hud, setObjective: setVehicleObjective },
+    onComplete: completeVehicleJob,
   });
   const orbit = player.orbit;
   const input = createInput(canvas);
@@ -177,7 +194,7 @@ function makeGame(seedValue, shotName = null) {
     hud.setCash(state.cash);
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
-    const blips = missions.getBlips();
+    const blips = [...missions.getBlips(), ...vehicleJobs.getBlips()];
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
     // Mission markers are already included by getBlips(), so do not draw a second copy.
@@ -194,6 +211,7 @@ function makeGame(seedValue, shotName = null) {
     player.state.speed = 0;
     player.state.vy = 0;
     player.state.grounded = true;
+    vehicleJobs.fail('You left the vehicle.');
   }
 
   function cleanPoliceCars() {
@@ -218,6 +236,7 @@ function makeGame(seedValue, shotName = null) {
     const save = continueSave ? readSave() : null;
     leaveCar();
     missions.reset();
+    vehicleJobs.reset();
     police.clear();
     combat.reset();
     // Restore the original fleet instead of retaining mission/cruiser objects from an old run.
@@ -263,7 +282,7 @@ function makeGame(seedValue, shotName = null) {
     setScreen('playing');
     hud.setDialogue('', '');
     hud.setHint('');
-    hud.setObjective('Explore Solmar. Find a gold beacon for a job, or press M.');
+    setStoryObjective('Explore Solmar. Find a gold beacon for a job, or press M.');
     hud.toast(save ? 'Welcome back to Solmar.' : 'Solmar. The coast is yours, Jax.', 'mission', 4);
     renderer.updateCamera(1, player, orbit, 0);
     refreshHud();
@@ -288,11 +307,22 @@ function makeGame(seedValue, shotName = null) {
     announce('Playing SOLMAR.');
   }
 
+  function awardReward(reward) {
+    state.cash += reward;
+    audio.chime();
+  }
+
+  function completeVehicleJob(event) {
+    awardReward(event.reward);
+    refreshHud();
+    saveNow();
+  }
+
   function completeMission(event) {
     const mission = missions.list.find((item) => item.id === event?.mission?.id);
     if (!mission || state.completed.includes(mission.id)) return false;
     state.completed.push(mission.id);
-    state.cash += mission.reward;
+    awardReward(mission.reward);
     const elapsed = Number.isFinite(event.elapsed) && event.elapsed >= 0 ? event.elapsed : null;
     if (elapsed !== null) {
       state.missionBest[mission.id] = Math.min(state.missionBest[mission.id] ?? Infinity, elapsed);
@@ -310,7 +340,6 @@ function makeGame(seedValue, shotName = null) {
     if (player.state.inCar && !vehicles.cars.includes(player.state.inCar)) leaveCar();
     cleanPoliceCars();
     setScreen('mission-complete');
-    audio.chime();
     refreshHud();
     saveNow();
     announce(`Mission complete: ${mission.title}. Earned $${mission.reward}.`);
@@ -321,6 +350,7 @@ function makeGame(seedValue, shotName = null) {
     if (state.screen !== 'playing') return;
     state.bustedFine = Math.min(state.cash, Math.round(POLICE.fine * (1 + police.state.wanted * 0.2)));
     state.cash -= state.bustedFine;
+    vehicleJobs.fail('Busted.');
     leaveCar();
     missions.fail('Busted.');
     police.clear();
@@ -335,6 +365,7 @@ function makeGame(seedValue, shotName = null) {
 
   function gameOver() {
     if (state.screen !== 'playing') return;
+    vehicleJobs.fail('Jax went down.');
     missions.fail('Jax went down.');
     state.finalMission = null;
     setScreen('gameover');
@@ -357,7 +388,7 @@ function makeGame(seedValue, shotName = null) {
     }
     missions.takeEvents();
     setScreen('playing');
-    hud.setObjective('Back in Solmar. Follow a gold beacon or press M for jobs.');
+    setStoryObjective('Back in Solmar. Follow a gold beacon or press M for jobs.');
     refreshHud();
     announce('Released. Back to work.');
   }
@@ -367,34 +398,55 @@ function makeGame(seedValue, shotName = null) {
     state.finalMission = null;
     setScreen('playing');
     const allDone = missions.completedCount() === missions.list.length;
-    hud.setObjective(allDone ? 'All jobs complete. The coast is yours to explore.' : 'Next job marked on the map. Press M to pick one.');
+    setStoryObjective(allDone ? 'All story jobs complete. The coast is yours to explore.' : 'Next job marked on the map. Press M to pick one.');
     announce(allDone ? 'Story complete. Explore Solmar.' : 'Playing SOLMAR. A new job is available.');
   }
 
   const missionList = hud.hud?.missionList || nodes['mission-list'];
+  let vehicleJobRows = [];
+  function syncVehicleJobRows(entries = vehicleJobs.getEntries()) {
+    vehicleJobRows.forEach(({ row, label }, index) => {
+      const entry = entries[index];
+      if (!entry) return;
+      if (label && label.textContent !== entry.title) label.textContent = entry.title;
+      row.classList.toggle('active', entry.active);
+    });
+  }
+
   function showJobs(toggle = false) {
     if (state.screen !== 'playing' && state.screen !== 'paused') return;
     if (toggle && missionList?.classList.contains('open')) {
       hud.hideMissionList();
       return;
     }
-    hud.showMissionList(missions.list, missions.list.findIndex((mission) => mission.active));
+    const entries = vehicleJobs.getEntries();
+    const jobs = [...missions.list, ...entries];
+    hud.showMissionList(jobs, jobs.findIndex((mission) => mission.active));
     // hud.js creates rows at show time without data attributes. Bind through their container.
     const rows = missionList?.querySelectorAll('.mission-row') ?? [];
+    vehicleJobRows = [];
     rows.forEach((row, index) => {
-      const mission = missions.list[index];
+      const mission = jobs[index];
       if (!mission) return;
       row.setAttribute('data-mission', mission.id);
       row.setAttribute('role', 'button');
       row.setAttribute('tabindex', state.screen === 'paused' ? '-1' : '0');
       row.setAttribute('aria-disabled', String(state.screen === 'paused' || mission.locked || mission.completed));
       row.classList.toggle('locked', mission.locked);
+      if (index >= missions.list.length) vehicleJobRows.push({ row, label: row.querySelector('.mission-name') });
     });
+    syncVehicleJobRows(entries);
     if (!missionList) hud.toast('Find the gold job beacon and press E.', 'info', 3);
   }
 
   function chooseJob(id) {
     if (state.screen !== 'playing') return false;
+    const vehicleJob = vehicleJobs.getEntries().find((item) => item.id === id);
+    if (vehicleJob) {
+      if (!vehicleJob.active && vehicleJob.hint) hud.toast(vehicleJob.hint, 'info', 4);
+      hud.hideMissionList();
+      return false;
+    }
     const mission = missions.list.find((item) => item.id === id);
     if (!mission || !missions.start(id)) {
       hud.toast('That job is not available yet.', 'info', 2);
@@ -526,6 +578,8 @@ function makeGame(seedValue, shotName = null) {
     if (police.state.busted) { busted(); return; }
     const active = missions.active;
     missions.update(dt);
+    vehicleJobs.update(dt);
+    if (missionList?.classList.contains('open')) syncVehicleJobRows();
     cleanPoliceCars();
     for (const event of missions.takeEvents()) {
       if (event.type === 'complete' && completeMission(event)) return;
@@ -539,7 +593,7 @@ function makeGame(seedValue, shotName = null) {
     const car = player.state.inCar;
     const job = !car && missions.nearestStart(player.state.x, player.state.z);
     const nearestCar = !car && vehicles.nearest(player.state.x, player.state.z, 4.6);
-    hud.setHint(car ? 'E — exit car' : job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state.stolen ? 'E — drive' : 'E — use this car') : '');
+    hud.setHint(car ? 'E — exit car' : job ? `E — start ${job.title}` : nearestCar ? `E — drive ${nearestCar.spec.name}` : '');
     refreshHud();
     if (state.elapsed - state.lastSave >= 15) { saveNow(); state.lastSave = state.elapsed; }
   }
@@ -655,7 +709,7 @@ function makeGame(seedValue, shotName = null) {
 
   const game = {
     seed: seedValue, city, renderer, player, vehicles, traffic, police, combat, audio,
-    hud, missions, input, state, orbit, setScreen, startRun, restart, pause, resume,
+    hud, missions, vehicleJobs, input, state, orbit, setScreen, startRun, restart, pause, resume,
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
     leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,
     missingElements: DOM_IDS.filter((id) => !nodes[id]),
