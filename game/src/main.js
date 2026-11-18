@@ -18,7 +18,7 @@ import { createVehicleJobs } from './vehicle-jobs.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
-  ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_MENU, ACTION_MUTE,
+  ACTION_BUY_AMMO, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_MENU, ACTION_MUTE,
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RESTART, createInput,
 } from './input.js';
 import { stageShot } from './shots.js';
@@ -30,7 +30,7 @@ const DOM_IDS = [
   'complete-time', 'btn-resume', 'btn-restart-pause',
   // Keep this inventory aligned with hud.js; every element is optional.
   'hud', 'health-fill', 'health-text', 'cash-value', 'wanted-stars', 'speed-value',
-  'speed-box', 'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
+  'speed-box', 'weapon-box', 'weapon-text', 'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
   'dialogue', 'dialogue-text', 'subtitle', 'hint',
 ];
 const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
@@ -73,7 +73,7 @@ function makeGame(seedValue, shotName = null) {
     knockPed: traffic.knockPed,
     resolvePlayerCollision: (x, z, radius) => resolveCollisions(city.colliders, x, z, radius),
   };
-  const combat = createCombat(renderer.scene, () => player, () => combatCity);
+  const combat = createCombat(renderer.scene, () => player, () => combatCity, createRandom(seedValue ^ 0xc06b47));
   const audio = createAudio();
   const hud = createHud();
   let storyObjective = '';
@@ -98,7 +98,7 @@ function makeGame(seedValue, shotName = null) {
     onComplete: completeVehicleJob,
   });
   const orbit = player.orbit;
-  const input = createInput(canvas);
+  const input = createInput(canvas, () => state.screen === 'playing' && !player.state.inCar);
   const clock = { accumulator: 0, last: null };
   const state = {
     screen: 'menu', cash: MISSIONS.startCash, completed: [], missionBest: {},
@@ -126,6 +126,8 @@ function makeGame(seedValue, shotName = null) {
     input.takeActions();
     input.takeOrbit();
     input.takeWheel();
+    input.takeWeapon();
+    input.takeWeaponWheel();
   }
 
   function syncRider() {
@@ -194,6 +196,7 @@ function makeGame(seedValue, shotName = null) {
     hud.setCash(state.cash);
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
+    hud.setWeapon(combat.state.weapon);
     const blips = [...missions.getBlips(), ...vehicleJobs.getBlips()];
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
@@ -485,6 +488,31 @@ function makeGame(seedValue, shotName = null) {
     announce('Driving. Space is the handbrake; E exits.');
   }
 
+  function selectWeapon(index) {
+    if (state.screen !== 'playing' || player.state.inCar || !combat.selectWeapon(index)) return false;
+    hud.setWeapon(combat.state.weapon);
+    hud.toast(combat.state.weapon.name, 'info', 1.2);
+    return true;
+  }
+
+  function buyAmmo() {
+    if (state.screen !== 'playing' || player.state.inCar) return false;
+    const weapon = combat.state.weapon;
+    const result = combat.buyAmmo(weapon.id, weapon.shopAmount, weapon.shopCost, (cost) => {
+      if (state.cash < cost) return false;
+      state.cash -= cost;
+      return true;
+    });
+    if (!result.ok) {
+      hud.toast(result.reason === 'cash' ? 'Not enough cash' : 'Ammo is full', 'info', 2);
+      return false;
+    }
+    hud.toast(`${weapon.name}: ${weapon.ammo} ammo · $${state.cash} remaining`, 'info', 2.4);
+    refreshHud();
+    saveNow();
+    return true;
+  }
+
   function handleActions(actions) {
     if (actions & ACTION_MUTE) {
       state.muted = audio.toggleMute();
@@ -515,8 +543,15 @@ function makeGame(seedValue, shotName = null) {
       return;
     }
     if (actions & ACTION_PAUSE) { pause(); return; }
+    const weaponIndex = input.takeWeapon();
+    const weaponWheel = input.takeWeaponWheel();
+    if (weaponIndex !== null) selectWeapon(weaponIndex);
+    if (weaponWheel && !player.state.inCar && !input.isDragging()) {
+      selectWeapon((combat.state.weaponIndex + Math.sign(weaponWheel) + combat.state.weapons.length) % combat.state.weapons.length);
+    }
     if (actions & ACTION_MENU) showJobs(true);
     if (actions & ACTION_ENTER) enterOrExit();
+    if (actions & ACTION_BUY_AMMO) buyAmmo();
     if (actions & ACTION_PUNCH) {
       const hit = combat.punch();
       if (hit) audio.thud();
@@ -526,7 +561,7 @@ function makeGame(seedValue, shotName = null) {
       state.shotsFired += 1;
       audio.gunshot();
       if (police.distanceToNearest(player.state.x, player.state.z) < POLICE.hear) police.addWanted(POLICE.gunNearCop, 'Shots fired');
-      hud.toast(`Pistol ammo: ${combat.state.ammo}`, 'info', 1.2);
+      hud.setWeapon(combat.state.weapon);
     }
   }
 
@@ -711,7 +746,7 @@ function makeGame(seedValue, shotName = null) {
     seed: seedValue, city, renderer, player, vehicles, traffic, police, combat, audio,
     hud, missions, vehicleJobs, input, state, orbit, setScreen, startRun, restart, pause, resume,
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
-    leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,
+    leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, selectWeapon, buyAmmo, step,
     missingElements: DOM_IDS.filter((id) => !nodes[id]),
   };
   return game;

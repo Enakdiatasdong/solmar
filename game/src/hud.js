@@ -23,6 +23,8 @@ export function createHud() {
     stars: element('wanted-stars'),
     speed: element('speed-value'),
     speedBox: element('speed-box'),
+    weapon: element('weapon-text'),
+    weaponBox: element('weapon-box'),
     objective: element('objective-text'),
     objectiveBox: element('objective-box'),
     toasts: element('toasts'),
@@ -117,6 +119,12 @@ export function createHud() {
     cache.objective = text;
     if (hud.objectiveBox) hud.objectiveBox.style.display = text ? 'block' : 'none';
     setText(hud.objective, text);
+  }
+
+  function setWeapon(weapon, visible = true) {
+    if (hud.weaponBox) hud.weaponBox.style.display = visible && weapon ? 'block' : 'none';
+    if (!weapon) return;
+    setText(hud.weapon, `${weapon.name} ${weapon.ammo}/${weapon.maxAmmo}`);
   }
 
   function toast(message, kind = 'info', seconds = 3.4) {
@@ -296,6 +304,7 @@ export function createHud() {
     setCash: setMoney,
     setWanted,
     setSpeed,
+    setWeapon,
     setMission,
     setObjective: setMission,
     toast,

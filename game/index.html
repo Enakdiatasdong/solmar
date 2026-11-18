@@ -54,6 +54,8 @@
   #cash-value { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: var(--gold); font-variant-numeric: tabular-nums; }
   #speed-box { display: none; align-items: center; gap: 8px; }
   #speed-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #weapon-box { max-width: 230px; padding: 8px 12px; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #weapon-text { color: var(--ink); }
 
   #objective-box { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); max-width: min(560px, 62vw); display: none; text-align: center; }
   #objective-text { font-size: 14px; font-weight: 650; letter-spacing: 0.01em; color: var(--ink); }
@@ -179,6 +181,7 @@
       <div class="hud-panel" id="speed-box">
         <span id="speed-value">0 KM/H</span>
       </div>
+      <div class="hud-panel" id="weapon-box"><span id="weapon-text">Pistol 24/60</span></div>
     </div>
   </div>
   <div id="objective-box"><div id="objective-text"></div></div>
@@ -208,7 +211,10 @@
       <div><b>Space</b> jump / handbrake</div>
       <div><b>E</b> enter / exit car</div>
       <div><b>F</b> punch</div>
-      <div><b>Click</b> pistol</div>
+      <div><b>Click</b> fire / throw</div>
+      <div><b>1–5 / Wheel</b> weapon (on foot)</div>
+      <div><b>B</b> buy current ammo</div>
+      <div><b>Ctrl-wheel</b> camera zoom</div>
       <div><b>M</b> jobs menu</div>
       <div><b>P / Esc</b> pause</div>
     </div>
@@ -279,7 +285,7 @@
   <div class="touch-actions">
     <button type="button" data-touch="run" aria-label="sprint">RUN</button>
     <button type="button" data-touch="enter" aria-label="enter car">CAR</button>
-    <button type="button" data-touch="fire" aria-label="pistol">●</button>
+    <button type="button" data-touch="fire" aria-label="fire weapon">●</button>
     <button type="button" data-touch="punch" aria-label="punch">✊</button>
     <button type="button" data-touch="menu" aria-label="jobs">JOBS</button>
   </div>

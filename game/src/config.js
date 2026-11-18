@@ -126,12 +126,38 @@ export const MISSIONS = {
   markerRadius: 3.4,
 };
 
+const PISTOL = {
+  id: 'pistol', name: 'Pistol', ammo: 24, maxAmmo: 60,
+  damage: 45, range: 70, fireCooldown: 0.24, shopAmount: 12, shopCost: 20,
+};
+
 export const COMBAT = {
-  pistolAmmo: 24,
-  maxAmmo: 60,
-  pistolDamage: 45,
-  pistolRange: 70,
-  fireCooldown: 0.24,
+  pistolAmmo: PISTOL.ammo,
+  maxAmmo: PISTOL.maxAmmo,
+  pistolDamage: PISTOL.damage,
+  pistolRange: PISTOL.range,
+  fireCooldown: PISTOL.fireCooldown,
+  weapons: [
+    PISTOL,
+    {
+      id: 'scattergun', name: 'Scattergun', ammo: 6, maxAmmo: 24,
+      damage: 80, range: 23, fireCooldown: 0.78, spread: 0.12,
+      shopAmount: 6, shopCost: 45,
+    },
+    {
+      id: 'street-smg', name: 'Street SMG', ammo: 32, maxAmmo: 96,
+      damage: 20, range: 55, fireCooldown: 0.095, shopAmount: 24, shopCost: 55,
+    },
+    {
+      id: 'longshot', name: 'Longshot rifle', ammo: 5, maxAmmo: 20,
+      damage: 105, range: 115, fireCooldown: 1.05, shopAmount: 5, shopCost: 70,
+    },
+    {
+      id: 'fire-bottle', name: 'Fire bottle', ammo: 2, maxAmmo: 6,
+      damage: 60, range: 24, fireCooldown: 1.2, blastRadius: 4.5,
+      shopAmount: 2, shopCost: 60,
+    },
+  ],
   enemyHealth: 60,
   enemySpeed: 3.4,
   enemyFireRate: 1.5,
