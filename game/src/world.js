@@ -24,7 +24,7 @@ function stableHash(x, z, salt = 0) {
 }
 
 /** Each tower gets a coordinate-seeded glass pattern without advancing the shared city RNG. */
-function makeTowerFacadeTextures(seed) {
+function makeTowerFacadeTextures(seed, downtown) {
   const canvas = document.createElement('canvas');
   const emissiveCanvas = document.createElement('canvas');
   canvas.width = emissiveCanvas.width = 256;
@@ -45,7 +45,7 @@ function makeTowerFacadeTextures(seed) {
   emissiveContext.fillRect(0, 0, canvas.width, canvas.height);
 
   // Ground-floor storefront band with broad display glass and pale stone piers.
-  const shopTop = Math.floor(canvas.height * 0.89);
+  const shopTop = Math.floor(canvas.height * (downtown ? 0.93 : 0.89));
   context.fillStyle = '#d4c8b4';
   context.fillRect(0, shopTop - 7, canvas.width, 7);
   context.fillStyle = '#233c4c';
@@ -65,11 +65,12 @@ function makeTowerFacadeTextures(seed) {
       const x = column * cellW + 3;
       const y = row * cellH + 3;
       const paneHash = stableHash(seed + column * 0.37, seed * 0.71 + row * 0.23, 3);
-      const lit = y < shopTop && paneHash < litRatio;
-      if (y >= shopTop) continue;
+      if (downtown ? y + cellH > shopTop : y >= shopTop) continue;
+      const lit = paneHash < litRatio;
       if (lit) {
-        context.fillStyle = paneHash > litRatio * 0.58 ? '#58acd0' : '#3e8bb6';
-        emissiveContext.fillStyle = '#7edbff';
+        const warm = downtown && paneHash < litRatio * 0.58;
+        context.fillStyle = warm ? '#9b8975' : paneHash > litRatio * 0.58 ? '#58acd0' : '#3e8bb6';
+        emissiveContext.fillStyle = warm ? '#ffc77c' : '#7edbff';
         emissiveContext.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
       } else {
         const blue = 52 + Math.floor(paneHash * 21) + tintShift;
@@ -82,7 +83,18 @@ function makeTowerFacadeTextures(seed) {
   context.fillStyle = '#8cb4c5';
   for (let column = 0; column <= columns; column += 1) context.fillRect(column * cellW, 0, 2, shopTop);
   context.fillStyle = '#547a91';
-  for (let row = 0; row <= rows; row += 1) context.fillRect(0, row * cellH, canvas.width, 2);
+  for (let row = 0; row <= rows; row += 1) {
+    if (downtown && row * cellH >= shopTop) break;
+    context.fillRect(0, row * cellH, canvas.width, 2);
+  }
+  if (downtown) {
+    const reflection = context.createLinearGradient(0, 0, canvas.width, shopTop);
+    reflection.addColorStop(0, 'rgba(120,191,239,0.34)');
+    reflection.addColorStop(0.46, 'rgba(88,150,223,0.18)');
+    reflection.addColorStop(0.7, 'rgba(40,95,157,0)');
+    context.fillStyle = reflection;
+    context.fillRect(0, 0, canvas.width, shopTop);
+  }
 
   const makeTexture = (source) => {
     const texture = new THREE.CanvasTexture(source);
@@ -663,6 +675,10 @@ export function createCity(random, reservedPlaces = []) {
   const colliders = [];
   const decoCaps = [];
   const labels = [];
+  const downtownTowers = [];
+  const downtownRandom = createRandom(0x5016a2);
+  const { minX, maxX, minZ, maxZ } = CITY.downtown;
+  const inDowntown = (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
   const reserved = Array.isArray(reservedPlaces)
     ? reservedPlaces.filter((place) => Number.isFinite(place?.x) && Number.isFinite(place?.z))
     : [];
@@ -679,21 +695,23 @@ export function createCity(random, reservedPlaces = []) {
   ];
   const facadeVariants = facadePatterns.map((variant) => makeFacadeTexture(random, variant));
   const towerPattern = { tower: true };
-  const towerFacadeVariants = Array.from({ length: 8 }, (_, variant) => makeTowerFacadeTextures(variant * 137 + 29));
   const towerFacadeMaterials = new Map();
+  const downtownFacades = new Map();
 
-  function towerFacadeMaterial(cx, cz, seed = 0) {
-    const variant = Math.floor(stableHash(cx + (Number.isFinite(seed) ? seed : 0) * 0.001, cz, 6) * towerFacadeVariants.length);
-    if (towerFacadeMaterials.has(variant)) return towerFacadeMaterials.get(variant);
-    const textures = towerFacadeVariants[variant];
-    const material = new THREE.MeshLambertMaterial({
-      color: shade(0x739bb0, (variant - 3.5) * 0.012),
-      map: textures.map,
-      emissive: 0x1d6283,
-      emissiveMap: textures.emissiveMap,
+  function towerFacadeMaterial(cx, cz, seed = 0, downtown = false) {
+    const variant = Math.floor(stableHash(cx + seed * 0.001, cz, 6) * 8);
+    const cache = downtown ? downtownFacades : towerFacadeMaterials;
+    if (cache.has(variant)) return cache.get(variant);
+    const params = {
+      color: shade(downtown ? 0xb4cee7 : 0x739bb0, (variant - 3.5) * 0.012),
+      ...makeTowerFacadeTextures(variant * 137 + 29, downtown),
+      emissive: downtown ? 0xffffff : 0x1d6283,
       emissiveIntensity: 0.38 + (variant % 4) * 0.1,
-    });
-    towerFacadeMaterials.set(variant, material);
+    };
+    const material = downtown
+      ? new THREE.MeshPhongMaterial({ ...params, shininess: 32, specular: 0x607789 })
+      : new THREE.MeshLambertMaterial(params);
+    cache.set(variant, material);
     return material;
   }
 
@@ -729,6 +747,8 @@ export function createCity(random, reservedPlaces = []) {
   group.add(outerGround);
 
   const blockPitch = CITY.pitch;
+  const isDowntownBlock = ({ x, z }) =>
+    inDowntown(x - blockPitch / 2, z - blockPitch / 2) && inDowntown(x + blockPitch / 2, z + blockPitch / 2);
   const sidewalkGeometry = new THREE.BoxGeometry(blockPitch - CITY.road + 2, 0.26, blockPitch - CITY.road + 2);
   const sidewalkMaterial = new THREE.MeshLambertMaterial({ color: PALETTE.sidewalk });
   const sidewalkMesh = new THREE.InstancedMesh(sidewalkGeometry, sidewalkMaterial, CITY.grid * CITY.grid);
@@ -764,6 +784,31 @@ export function createCity(random, reservedPlaces = []) {
   grassMesh.instanceMatrix.needsUpdate = true;
   group.add(sidewalkMesh, grassMesh);
 
+  const downtownCurbs = lotCenters.filter(isDowntownBlock).flatMap(({ x, z }) =>
+    [-27.75, 27.75].flatMap((offset) => [
+      { x: x + offset, y: 0.135, z, width: 0.5, height: 0.27, depth: 56 },
+      { x, y: 0.135, z: z + offset, width: 55, height: 0.27, depth: 0.5 },
+    ]));
+  addWaterfrontInstances(group, 'sidewalk:downtown-curbs', new THREE.BoxGeometry(1, 1, 1), 0x8d8e91, downtownCurbs).receiveShadow = true;
+
+  // Clip the street furniture and paint to the downtown rectangle, keeping the road graph intact.
+  const downtownStreets = [];
+  for (let line = CITY.nodeMin; line <= CITY.nodeMax; line += blockPitch) {
+    for (let start = CITY.nodeMin; start < CITY.nodeMax; start += blockPitch) {
+      for (const northSouth of [false, true]) {
+        const [lineMin, lineMax] = northSouth ? [minX, maxX] : [minZ, maxZ];
+        if (line < lineMin || line > lineMax) continue;
+        const [spanMin, spanMax] = northSouth ? [minZ, maxZ] : [minX, maxX];
+        const end = start + blockPitch;
+        const paintStart = Math.max(start + 14, spanMin);
+        const paintEnd = Math.min(end - 14, spanMax);
+        if (paintStart < paintEnd) {
+          downtownStreets.push({ northSouth, line, paintStart, paintEnd, fullBlock: start >= spanMin && end <= spanMax });
+        }
+      }
+    }
+  }
+
   // Lane dashes: two instanced meshes, one per orientation, broken at every intersection.
   const dashGeometry = new THREE.BoxGeometry(0.32, 0.02, 3.2);
   const dashMaterial = new THREE.MeshBasicMaterial({ color: 0xd7d2c2 });
@@ -772,7 +817,6 @@ export function createCity(random, reservedPlaces = []) {
   const dashesEW = new THREE.InstancedMesh(dashGeometry, dashMaterial, dashCount);
   const dashRotation = new THREE.Matrix4();
   const dashPosition = new THREE.Matrix4();
-  const dashQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, 0));
   let dashNS = 0;
   let dashEW = 0;
   for (let line = 0; line <= CITY.grid; line += 1) {
@@ -783,14 +827,15 @@ export function createCity(random, reservedPlaces = []) {
       const baseX = CITY.nodeMin + cell * blockPitch;
       for (let dash = 0; dash < 4; dash += 1) {
         const offset = 15 + dash * 11;
-        dashPosition.makeTranslation(lineX, 0.035, baseZ + offset);
-        if (dashNS < dashesNS.count) dashesNS.setMatrixAt(dashNS, dashPosition);
-        dashNS += 1;
-        dashRotation.makeRotationY(Math.PI / 2);
-        dashPosition.makeTranslation(baseX + offset, 0.035, lineZ);
-        dashPosition.multiply(dashRotation);
-        if (dashEW < dashesEW.count) dashesEW.setMatrixAt(dashEW, dashPosition);
-        dashEW += 1;
+        if (!inDowntown(lineX, baseZ + offset)) {
+          dashPosition.makeTranslation(lineX, 0.035, baseZ + offset);
+          dashesNS.setMatrixAt(dashNS++, dashPosition);
+        }
+        if (!inDowntown(baseX + offset, lineZ)) {
+          dashRotation.makeRotationY(Math.PI / 2);
+          dashPosition.makeTranslation(baseX + offset, 0.035, lineZ).multiply(dashRotation);
+          dashesEW.setMatrixAt(dashEW++, dashPosition);
+        }
       }
     }
   }
@@ -821,6 +866,20 @@ export function createCity(random, reservedPlaces = []) {
       }
     }
   }
+  const downtownYellow = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.026, 1), yellowMaterial, downtownStreets.length * 2);
+  let downtownYellowIndex = 0;
+  for (const { northSouth, line, paintStart, paintEnd } of downtownStreets) {
+    const center = (paintStart + paintEnd) / 2;
+    const length = paintEnd - paintStart;
+    for (const offset of [-0.42, 0.42]) {
+      markingMatrix.makeScale(northSouth ? 0.28 : length, 1, northSouth ? length : 0.28);
+      markingMatrix.setPosition(northSouth ? line + offset : center, 0.055, northSouth ? center : line + offset);
+      downtownYellow.setMatrixAt(downtownYellowIndex++, markingMatrix);
+    }
+  }
+  downtownYellow.name = 'roads:downtown-double-yellow';
+  downtownYellow.instanceMatrix.needsUpdate = true;
+  group.add(downtownYellow);
   let edgeNSIndex = 0;
   let edgeEWIndex = 0;
   for (let line = 0; line <= CITY.grid; line += 1) {
@@ -848,21 +907,29 @@ export function createCity(random, reservedPlaces = []) {
   edgeEWLines.name = 'roads:white-edge-ew';
   group.add(yellowLines, edgeNSLines, edgeEWLines);
 
-  // Seven white bars on each approach make a readable zebra crossing at every node.
-  const crossNS = new THREE.InstancedMesh(new THREE.BoxGeometry(2.05, 0.028, 0.9), whiteMaterial, (CITY.grid + 1) ** 2 * 2 * 7);
-  const crossEW = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.028, 2.05), whiteMaterial, (CITY.grid + 1) ** 2 * 2 * 7);
+  // Longer bars and narrower gaps give downtown intersections a full pedestrian crossing.
+  const crossingCapacity = (CITY.grid + 1) ** 2 * 2 * 10;
+  const crossNS = new THREE.InstancedMesh(new THREE.BoxGeometry(2.05, 0.028, 0.9), whiteMaterial, crossingCapacity);
+  const crossEW = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.028, 2.05), whiteMaterial, crossingCapacity);
   let crossNSIndex = 0;
   let crossEWIndex = 0;
   for (let row = 0; row <= CITY.grid; row += 1) {
     const nodeZ = CITY.nodeMin + row * blockPitch;
     for (let column = 0; column <= CITY.grid; column += 1) {
       const nodeX = CITY.nodeMin + column * blockPitch;
+      const downtown = inDowntown(nodeX, nodeZ);
+      const stripes = downtown ? 10 : 7;
+      const step = downtown ? 1.64 : 2.4;
+      const approach = downtown ? 10.5 : 10;
       for (const side of [-1, 1]) {
-        for (let stripe = 0; stripe < 7; stripe += 1) {
-          markingMatrix.makeTranslation(nodeX - 7.2 + stripe * 2.4, 0.06, nodeZ + side * 10);
+        for (let stripe = 0; stripe < stripes; stripe += 1) {
+          const across = (stripe - (stripes - 1) / 2) * step;
+          markingMatrix.makeScale(downtown ? 0.61 : 1, 1, downtown ? 3.3 : 1);
+          markingMatrix.setPosition(nodeX + across, 0.06, nodeZ + side * approach);
           crossNS.setMatrixAt(crossNSIndex, markingMatrix);
           crossNSIndex += 1;
-          markingMatrix.makeTranslation(nodeX + side * 10, 0.06, nodeZ - 7.2 + stripe * 2.4);
+          markingMatrix.makeScale(downtown ? 3.3 : 1, 1, downtown ? 0.61 : 1);
+          markingMatrix.setPosition(nodeX + side * approach, 0.06, nodeZ + across);
           crossEW.setMatrixAt(crossEWIndex, markingMatrix);
           crossEWIndex += 1;
         }
@@ -904,6 +971,7 @@ export function createCity(random, reservedPlaces = []) {
 
   function addBuilding(cx, cz, width, depth, height, options = {}) {
     const tower = Boolean(options.tower);
+    const downtown = options.downtown === true;
     const variant = options.variant ?? random.int(0, facadeVariants.length - 1);
     const color = options.color ?? random.pick(PALETTE.buildings);
     // Consume the usual random choices before leaving room for a place marker.
@@ -911,10 +979,10 @@ export function createCity(random, reservedPlaces = []) {
       || (cz - depth / 2 < CANAL.width / 2 + 1.5 && cz + depth / 2 > -CANAL.width / 2 - 1.5)) return null;
     const geometry = new THREE.BoxGeometry(width, height, depth);
     const facadeVariant = tower ? towerPattern : facadePatterns[variant];
-    scaleFacadeUVs(geometry, width, height, depth, facadeVariant);
+    if (!downtown) scaleFacadeUVs(geometry, width, height, depth, facadeVariant);
     let solid;
     if (tower) {
-      solid = towerFacadeMaterial(cx, cz, options.towerSeed);
+      solid = towerFacadeMaterial(cx, cz, options.towerSeed, downtown);
     } else {
       solid = facadeMaterial(variant, color);
     }
@@ -934,7 +1002,10 @@ export function createCity(random, reservedPlaces = []) {
     };
     buildings.push(box);
     colliders.push(box);
-    if (height > 24) {
+    if (downtown) {
+      downtownTowers.push(box);
+      addDowntownRoof(cx, cz, width, depth, height + 0.28, roof, options.rooftop);
+    } else if (height > 24) {
       const cap = new THREE.Mesh(new THREE.BoxGeometry(width * (tower ? 0.64 : 0.45), tower ? 2.1 : 1.6, depth * (tower ? 0.64 : 0.45)), roof);
       cap.position.set(cx, 0.28 + height + 0.8, cz);
       cap.castShadow = true;
@@ -978,6 +1049,39 @@ export function createCity(random, reservedPlaces = []) {
       }
     }
     return box;
+  }
+
+  const antennaMaterial = new THREE.MeshLambertMaterial({ color: 0x48515e });
+  const beaconMaterial = new THREE.MeshBasicMaterial({ color: 0xff593e, toneMapped: false });
+  const helipadPaint = new THREE.MeshBasicMaterial({ color: 0xf4d99f });
+  const roofNeon = [0x59dcff, 0xff6eb8].map((color) => new THREE.MeshLambertMaterial({
+    color: 0x284553, emissive: color, toneMapped: false,
+  }));
+
+  function addDowntownRoof(x, z, width, depth, y, roof, detail) {
+    const part = (geometry, material, rise, dx = 0, dz = 0, castShadow = true) => {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x + dx, y + rise, z + dz);
+      mesh.castShadow = castShadow;
+      group.add(mesh);
+    };
+    part(new THREE.BoxGeometry(width * 0.76, 1.2, depth * 0.76), roof, 0.6);
+    if (detail === 'antenna') {
+      part(new THREE.CylinderGeometry(0.09, 0.18, 5.8, 6), antennaMaterial, 4.1);
+      part(new THREE.SphereGeometry(0.21, 6, 4), beaconMaterial, 7, 0, 0, false);
+    } else if (detail === 'helipad') {
+      part(new THREE.BoxGeometry(10, 0.55, 10), antennaMaterial, 1.48);
+      for (const dx of [-1.25, 1.25]) {
+        part(new THREE.BoxGeometry(0.46, 0.035, 4), helipadPaint, 1.78, dx, 0, false);
+      }
+      part(new THREE.BoxGeometry(2.5, 0.035, 0.46), helipadPaint, 1.78, 0, 0, false);
+    } else if (detail === 'neon') {
+      const neon = roofNeon[stableHash(x, z, 5) > 0.5 ? 1 : 0];
+      for (const side of [-1, 1]) {
+        part(new THREE.BoxGeometry(width * 0.77, 0.23, 0.2), neon, 0.97, 0, side * depth * 0.38, false);
+        part(new THREE.BoxGeometry(0.2, 0.23, depth * 0.76), neon, 0.97, side * width * 0.38, 0, false);
+      }
+    }
   }
 
   function blockLayout(center) {
@@ -1024,7 +1128,7 @@ export function createCity(random, reservedPlaces = []) {
     const center = lotCenters[index];
     if (center.isPark) continue;
     const beachfront = center.row === CITY.grid - 1;
-    const downtown = center.column >= 3 && center.column <= 6 && center.row >= 3 && center.row <= 6;
+    const downtown = isDowntownBlock(center);
     const avenueFrontage = center.column >= 3 && center.column <= 6 && center.row === 8;
     const coastalTower = beachfront && center.column >= 3 && center.column <= 6;
     const cells = blockLayout(center);
@@ -1032,20 +1136,23 @@ export function createCity(random, reservedPlaces = []) {
       const cell = cells[cellIndex];
       if (random.chance(0.12) && cells.length > 1) continue;
       const inset = random.range(1.4, 3.2);
+      if (downtown) {
+        // Preserve the old height, facade and color draws for downstream city features.
+        random();
+        random();
+        random();
+        continue;
+      }
       const width = Math.max(6, cell.w - inset * 2);
       const depth = Math.max(6, cell.d - inset * 2);
       let height;
-      if (downtown) {
-        const edge = THREE.MathUtils.clamp((Math.abs(center.x) + Math.abs(center.z) - 72) / 144, 0, 1);
-        height = random.range(44 - edge * 18, 85 - edge * 40);
-      } else if (avenueFrontage) height = random.range(40, 58);
+      if (avenueFrontage) height = random.range(40, 58);
       else if (coastalTower) height = random.range(30, 46);
       else if (beachfront) height = random.range(7, 16);
       else height = random.range(10, 34);
-      // Keep the previous one seeded facade-choice draw per lot cell, even for the new tower set.
-      const variant = beachfront ? random.pick([4, 4, 1, 5]) : downtown ? random.pick([0, 2, 3, 0]) : random.int(0, 5);
+      const variant = beachfront ? random.pick([4, 4, 1, 5]) : random.int(0, 5);
       const color = random.pick(PALETTE.buildings);
-      const tower = downtown || avenueFrontage || coastalTower;
+      const tower = avenueFrontage || coastalTower;
       addBuilding(center.x + cell.x, center.z + cell.z, width, depth, height, tower ? {
         tower: true,
         variant,
@@ -1054,6 +1161,39 @@ export function createCity(random, reservedPlaces = []) {
       } : beachfront ? {
         variant: 3, color: DECO_PASTELS[(center.column + cellIndex) % DECO_PASTELS.length], deco: true,
       } : { variant, color });
+    }
+  }
+
+  // Paired towers leave a passage between each plot and a clear sidewalk around the block.
+  const skylinePeaks = new Map([
+    ['4:4', [96, 'antenna']], ['5:4', [92, 'neon']], ['5:5', [88, 'helipad']], ['3:6', [48, null]],
+  ]);
+  for (const center of lotCenters) {
+    if (!isDowntownBlock(center)) continue;
+    const key = `${center.column}:${center.row}`;
+    if (center.isPark) {
+      // Reuse the original park tower site and leave the fountain plaza open.
+      if (key === '3:3') addBuilding(center.x, center.z, 15, 15, 64, {
+        tower: true, downtown: true, variant: 2, color: 0x527b91, rooftop: 'antenna',
+      });
+      continue;
+    }
+    // Keep deeper setbacks along the Menara Solmar and Pasar Solmar approaches.
+    const splitX = center.row === 4 && (center.column === 4 || center.column === 5) ? false
+      : key === '5:6' || downtownRandom.chance(0.5);
+    for (const side of [-1, 1]) {
+      const along = side * downtownRandom.range(11.5, 12.3);
+      const across = downtownRandom.range(-3, 3);
+      const narrow = downtownRandom.range(16, 20);
+      const wide = downtownRandom.range(23, 31);
+      const central = Math.max(Math.abs(center.x), Math.abs(center.z)) <= CITY.pitch / 2;
+      const [height, rooftop] = (side < 0 && skylinePeaks.get(key)) || [
+        downtownRandom.int(central ? 65 : 49, central ? 84 : 75),
+        downtownRandom.pick([null, null, 'antenna', 'helipad', 'neon']),
+      ];
+      addBuilding(center.x + (splitX ? along : across), center.z + (splitX ? across : along),
+        splitX ? narrow : wide, splitX ? wide : narrow, height,
+        { tower: true, downtown: true, variant: 2, color: 0x527b91, rooftop });
     }
   }
   if (decoCaps.length) {
@@ -1250,6 +1390,30 @@ export function createCity(random, reservedPlaces = []) {
       }
     }
   }
+  const firstDowntownPalm = palmSpots.length;
+  const downtownStreetLamps = [];
+  const furnitureOffset = CITY.road / 2 + 1.4;
+  for (const { northSouth, line, paintStart, paintEnd, fullBlock } of downtownStreets) {
+    if (!fullBlock) continue;
+    const center = (paintStart + paintEnd) / 2;
+    for (const side of [-1, 1]) {
+      const curb = line + side * furnitureOffset;
+      const station = center + side * 15 + downtownRandom.range(-1, 1);
+      const x = northSouth ? curb : station;
+      const z = northSouth ? station : curb;
+      if (!isReserved(x, z) && pointIsClear(colliders, x, z, 0.75)) {
+        palmSpots.push({ x, z, scale: downtownRandom.range(0.85, 1.23) });
+      }
+    }
+    const side = Math.round((line + center - CITY.pitch / 2) / CITY.pitch) % 2 === 0 ? -1 : 1;
+    const curb = line + side * furnitureOffset;
+    const x = northSouth ? curb : center;
+    const z = northSouth ? center : curb;
+    if (!isReserved(x, z) && pointIsClear(colliders, x, z, 0.65)) {
+      const yaw = northSouth ? (side < 0 ? 0 : Math.PI) : side * Math.PI / 2;
+      downtownStreetLamps.push({ x, z, glow: true, yaw });
+    }
+  }
   const frondsPerPalm = 7;
   const trunkMesh = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.2, 0.36, 1, 6).translate(0, 0.5, 0),
@@ -1273,26 +1437,27 @@ export function createCity(random, reservedPlaces = []) {
   let frondIndex = 0;
   for (let palm = 0; palm < palmSpots.length; palm += 1) {
     const spot = palmSpots[palm];
+    const palmRandom = palm >= firstDowntownPalm ? downtownRandom : random;
     const hidden = isReserved(spot.x, spot.z) || inCanal(spot.x, spot.z, 2.4);
     const height = 7.2 * spot.scale;
     palmPosition.set(spot.x, 0.2, spot.z);
     palmScale.set(spot.scale, height, spot.scale);
-    palmQuat.setFromEuler(new THREE.Euler(spot.x * 0.0006, random.range(0, Math.PI * 2), spot.z * 0.0005));
+    palmQuat.setFromEuler(new THREE.Euler(spot.x * 0.0006, palmRandom.range(0, Math.PI * 2), spot.z * 0.0005));
     if (hidden) palmScale.set(0, 0, 0);
     palmMatrix.compose(palmPosition, palmQuat, palmScale);
     trunkMesh.setMatrixAt(palm, palmMatrix);
     const trunkRadius = 0.36 * spot.scale;
     if (!hidden) colliders.push({ minX: spot.x - trunkRadius, maxX: spot.x + trunkRadius, minZ: spot.z - trunkRadius, maxZ: spot.z + trunkRadius, height: 0.2 + height });
     for (let frond = 0; frond < frondsPerPalm; frond += 1) {
-      const angle = (frond / frondsPerPalm) * Math.PI * 2 + random.range(-0.2, 0.2);
-      const tilt = random.range(0.9, 1.35);
+      const angle = (frond / frondsPerPalm) * Math.PI * 2 + palmRandom.range(-0.2, 0.2);
+      const tilt = palmRandom.range(0.9, 1.35);
       palmQuat.setFromEuler(new THREE.Euler(tilt, angle, 0, 'YXZ'));
       palmPosition.set(spot.x, 0.2 + height, spot.z);
       palmScale.set(1.15 * spot.scale, 1.15 * spot.scale, 0.32 * spot.scale);
       if (hidden) palmScale.set(0, 0, 0);
       palmMatrix.compose(palmPosition, palmQuat, palmScale);
       if (frondIndex < frondMesh.count) frondMesh.setMatrixAt(frondIndex, palmMatrix);
-      leafTint.setHex(random.chance(0.5) ? PALETTE.leaf : PALETTE.leafLight).offsetHSL(0, 0, random.range(-0.04, 0.04));
+      leafTint.setHex(palmRandom.chance(0.5) ? PALETTE.leaf : PALETTE.leafLight).offsetHSL(0, 0, palmRandom.range(-0.04, 0.04));
       frondMesh.setColorAt(frondIndex, leafTint);
       frondIndex += 1;
     }
@@ -1303,7 +1468,7 @@ export function createCity(random, reservedPlaces = []) {
   group.add(trunkMesh, frondMesh);
 
   // Streetlights at every other intersection corner.
-  const lampSpots = [];
+  const lampSpots = [...downtownStreetLamps];
   for (let line = 0; line <= CITY.grid; line += 2) {
     for (let cross = 0; cross <= CITY.grid; cross += 2) {
       const x = CITY.nodeMin + line * blockPitch + 11;
@@ -1338,17 +1503,30 @@ export function createCity(random, reservedPlaces = []) {
     blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
   });
   const ordinaryLampGlowMaterial = lampGlowMaterial.clone();
+  const pavementGlow = new THREE.InstancedMesh(new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      map: glowTexture, color: 0xffb969, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    }), downtownStreetLamps.length);
+  pavementGlow.name = 'streetlights:downtown-pavement-glow';
   const lampHalos = [];
   for (let lamp = 0; lamp < lampSpots.length; lamp += 1) {
     const spot = lampSpots[lamp];
     palmMatrix.makeTranslation(spot.x, 0.25, spot.z);
     poleMesh.setMatrixAt(lamp, palmMatrix);
-    palmMatrix.makeTranslation(spot.x + 0.5, 6.5, spot.z);
+    const yaw = spot.yaw ?? 0;
+    const dx = Math.cos(yaw);
+    const dz = -Math.sin(yaw);
+    palmMatrix.makeRotationY(yaw).setPosition(spot.x + dx * 0.5, 6.5, spot.z + dz * 0.5);
     headMesh.setMatrixAt(lamp, palmMatrix);
+    if (lamp < downtownStreetLamps.length) {
+      palmMatrix.makeTranslation(spot.x + dx * 1.5, 0.285, spot.z + dz * 1.5);
+      pavementGlow.setMatrixAt(lamp, palmMatrix);
+    }
     if (glowTexture) {
       const halo = new THREE.Sprite(spot.glow ? lampGlowMaterial : ordinaryLampGlowMaterial);
       halo.name = 'streetlights:halo';
-      halo.position.set(spot.x + 0.5, 6.5, spot.z);
+      halo.position.set(spot.x + dx * 0.5, 6.5, spot.z + dz * 0.5);
       halo.scale.set(3.1, 3.1, 1);
       lampHalos.push({ halo, avenue: spot.glow });
       group.add(halo);
@@ -1357,7 +1535,8 @@ export function createCity(random, reservedPlaces = []) {
   }
   poleMesh.instanceMatrix.needsUpdate = true;
   headMesh.instanceMatrix.needsUpdate = true;
-  group.add(poleMesh, headMesh);
+  pavementGlow.instanceMatrix.needsUpdate = true;
+  group.add(poleMesh, headMesh, pavementGlow);
 
   // Clock-phased signals are visual-only and use the same state for equal shot times and seeds.
   const signalLamps = [];
@@ -1420,6 +1599,10 @@ export function createCity(random, reservedPlaces = []) {
     headMesh.material.emissiveIntensity = 1.2 * evening + 0.6 * lateGlow;
     lampGlowMaterial.opacity = 0.65 * evening + 0.26 * lateGlow;
     ordinaryLampGlowMaterial.opacity = 0.74 * lateGlow;
+    pavementGlow.material.opacity = 0.27 * evening + 0.19 * lateGlow;
+    pavementGlow.visible = Boolean(glowTexture) && pavementGlow.material.opacity > 0;
+    for (const material of downtownFacades.values()) material.emissiveIntensity = 0.12 + 0.48 * evening + 0.68 * lateGlow;
+    for (const material of roofNeon) material.emissiveIntensity = 0.12 + 0.66 * evening + 0.42 * lateGlow;
     for (const { halo, avenue } of lampHalos) {
       halo.visible = avenue ? lampGlowMaterial.opacity > 0 : ordinaryLampGlowMaterial.opacity > 0;
     }
@@ -1617,6 +1800,7 @@ export function createCity(random, reservedPlaces = []) {
     graph,
     roadNetwork: graph,
     buildings,
+    downtownTowers,
     containers,
     colliders,
     setNightFactor,

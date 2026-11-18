@@ -720,6 +720,10 @@ export function createHud() {
     for (const block of CITY.parkBlocks) {
       mapContext.fillRect(CITY.nodeMin + (block[0] + 0.5) * pitch - 20, CITY.nodeMin + (block[1] + 0.5) * pitch - 20, 40, 40);
     }
+    for (const { minX, maxX, minZ, maxZ, height } of extras?.downtownTowers ?? []) {
+      mapContext.fillStyle = height >= 88 ? '#a5c7db' : height >= 65 ? '#789db8' : '#52748f';
+      mapContext.fillRect(minX, minZ, maxX - minX, maxZ - minZ);
+    }
 
     if (Array.isArray(regionSnapshot?.regions)) {
       for (const region of regionSnapshot.regions) {

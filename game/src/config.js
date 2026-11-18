@@ -22,6 +22,7 @@ export const CITY = {
   nodeMax: 360,
   half: 360,
   edge: 369,
+  downtown: { minX: -180, maxX: 180, minZ: -180, maxZ: 180 },
   beachWestStart: -372,
   beachWestEnd: -540,
   // Expansion collectibles use this coast-orientation capability check.

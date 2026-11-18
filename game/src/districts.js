@@ -197,7 +197,6 @@ export function createDistricts({ scene, city, random }) {
     cityGroup.add(roof);
     cylinder(cityGroup, x, height + 5.5, z, 0.36, 8, new THREE.MeshLambertMaterial({ color: 0xe9b953, emissive: 0x7f5421 }), false, 6);
   };
-  tower(CITY.nodeMin + (3 + 0.5) * CITY.pitch, CITY.nodeMin + (3 + 0.5) * CITY.pitch, 64, 0x66748f);
   tower(CITY.nodeMin + (7 + 0.5) * CITY.pitch, CITY.nodeMin + (4 + 0.5) * CITY.pitch, 52, 0x907167);
 
   const clothMaterial = new THREE.MeshLambertMaterial({ color: 0xe0a34a, side: THREE.DoubleSide });
@@ -214,9 +213,8 @@ export function createDistricts({ scene, city, random }) {
     if (x >= ruralBounds.minX && x <= ruralBounds.maxX && z >= ruralBounds.minZ && z <= ruralBounds.maxZ) return 'rural';
     if (isOnSand(x, z) || (x <= CITY.beachWestStart && Math.abs(z) <= CITY.half + 20)) return 'beach';
     if (x >= CITY.airfield.minX && x <= CITY.airfield.maxX && z >= CITY.airfield.minZ && z <= CITY.airfield.maxZ) return 'airfield';
-    const col = Math.floor((x - CITY.nodeMin) / CITY.pitch);
-    const row = Math.floor((z - CITY.nodeMin) / CITY.pitch);
-    if (col >= 3 && col <= 6 && row >= 3 && row <= 6) return 'downtown';
+    const { minX, maxX, minZ, maxZ } = CITY.downtown;
+    if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) return 'downtown';
     return 'city';
   }
   function surfaceAt(x, z) {

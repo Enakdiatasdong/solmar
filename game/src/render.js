@@ -2,7 +2,7 @@
 // car, plus resize handling. Shadows are one directional light with a tight box that moves with
 // the player instead of covering the whole city, which keeps the polygon and draw cost modest.
 import * as THREE from '../vendor/three.module.min.js';
-import { CAMERA, DAYNIGHT, PALETTE, SUNSET_MINUTE, SUNSET_OFFSET, TITLE_CAMERA } from './config.js';
+import { CAMERA, CITY, DAYNIGHT, PALETTE, SUNSET_MINUTE, SUNSET_OFFSET, TITLE_CAMERA } from './config.js';
 
 // Match the light positions on the car meshes. A motorbike has a single center lamp.
 const HEADLIGHT_POSITIONS = {
@@ -141,11 +141,23 @@ export function createRenderer(canvas) {
 
   let appliedMinute;
   let nightFactor;
+  let downtownShadows = false;
   const shadowAnchor = new THREE.Vector3();
 
-  function followSun(x, z) {
+  function followSun(x, z, downtown = downtownShadows) {
+    const distanceScale = downtown ? 2.4 : 1;
+    if (downtown !== downtownShadows) {
+      // Keep the same light angle while admitting distant sunset shadow casters.
+      const shadowCamera = sun.shadow.camera;
+      const extent = downtown ? 115 : 95;
+      shadowCamera.left = shadowCamera.bottom = -extent;
+      shadowCamera.right = shadowCamera.top = extent;
+      shadowCamera.far = 420 + sunDistance * (distanceScale - 1);
+      shadowCamera.updateProjectionMatrix();
+      downtownShadows = downtown;
+    }
     shadowAnchor.set(x, 0, z);
-    sun.position.copy(shadowAnchor).add(sunOffset);
+    sun.position.copy(shadowAnchor).addScaledVector(sunOffset, distanceScale);
     sun.target.position.copy(shadowAnchor);
     sun.target.updateMatrixWorld();
   }
@@ -271,7 +283,9 @@ export function createRenderer(canvas) {
     cameraState.distance = distance;
     cameraState.mode = inCar ? 'car' : 'foot';
     skyDome.position.copy(camera.position);
-    followSun(Math.round(focus.x / 90) * 90, Math.round(focus.z / 90) * 90);
+    const { minX, maxX, minZ, maxZ } = CITY.downtown;
+    const downtown = focus.x >= minX && focus.x <= maxX && focus.z >= minZ && focus.z <= maxZ;
+    followSun(Math.round(focus.x / 90) * 90, Math.round(focus.z / 90) * 90, downtown);
 
     const [lampX, lampY, lampZ] = HEADLIGHT_POSITIONS[inCar?.spec?.variant] ?? HEADLIGHT_POSITIONS.standard;
     headlights.forEach((sprite, index) => {
@@ -295,7 +309,7 @@ export function createRenderer(canvas) {
     cameraState.yaw = Math.atan2(-dx, -dz);
     cameraState.pitch = Math.asin(dy / cameraState.distance);
     skyDome.position.copy(camera.position);
-    followSun(0, 0);
+    followSun(0, 0, false);
     headlights.forEach((sprite) => { sprite.visible = false; });
     snapCamera = true;
     hasPreviousFocus = false;

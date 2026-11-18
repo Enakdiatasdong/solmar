@@ -170,6 +170,16 @@ export function createPolice(city, scene, vehicles) {
     state.heli = null;
   }
 
+  function helicopterHeight(x, z, baseHeight, margin = 7) {
+    for (const tower of city.downtownTowers ?? []) {
+      const dx = Math.max(tower.minX - x, 0, x - tower.maxX);
+      const dz = Math.max(tower.minZ - z, 0, z - tower.maxZ);
+      // Allow room for the tail and the tallest rooftop mast.
+      if (Math.hypot(dx, dz) < margin) baseHeight = Math.max(baseHeight, tower.height + 10);
+    }
+    return baseHeight;
+  }
+
   function spawnHelicopter(player) {
     if (state.heli) return state.heli;
     const built = heliMesh();
@@ -182,7 +192,9 @@ export function createPolice(city, scene, vehicles) {
     ground.rotation.x = -Math.PI / 2;
     scene.add(built.group, spotlight, target, ground);
     const position = targetFor(player);
-    built.group.position.set(position.x + 18, 28, position.z - 18);
+    const x = position.x + 18;
+    const z = position.z - 18;
+    built.group.position.set(x, helicopterHeight(x, z, 28), z);
     spotlight.position.copy(built.group.position);
     spotlight.target = target;
     target.position.set(position.x, 0, position.z);
@@ -201,7 +213,12 @@ export function createPolice(city, scene, vehicles) {
       28 + Math.sin(worldTime * 0.7) * 1.8,
       target.z + Math.sin(heli.orbit) * 18,
     );
-    heli.group.position.lerp(desired, Math.min(1, dt * 0.9));
+    const position = heli.group.position;
+    const approach = Math.min(1, dt * 0.9);
+    const nextX = THREE.MathUtils.lerp(position.x, desired.x, approach);
+    const nextZ = THREE.MathUtils.lerp(position.z, desired.z, approach);
+    const climb = helicopterHeight(nextX, nextZ, desired.y, 11);
+    position.set(nextX, helicopterHeight(nextX, nextZ, THREE.MathUtils.lerp(position.y, climb, approach)), nextZ);
     heli.group.lookAt(target.x, heli.group.position.y, target.z);
     heli.rotor.rotation.y += dt * 18;
     heli.rotorCross.rotation.y += dt * 18;
@@ -212,6 +229,7 @@ export function createPolice(city, scene, vehicles) {
     heli.blueLight.visible = !flash;
     heli.spotlight.position.copy(heli.group.position);
     heli.spotlight.target.position.set(target.x, 0, target.z);
+    heli.spotlight.distance = Math.max(90, position.distanceTo(heli.spotlight.target.position) + 8);
     heli.ground.position.set(target.x, 0.08, target.z);
   }
 

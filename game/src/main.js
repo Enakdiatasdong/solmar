@@ -382,6 +382,7 @@ function makeGame(seedValue, shotName = null) {
       : null;
     hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw, regionSnapshot, {
       rural: districts.bounds, dirtRoads: districts.state.dirtRoads, landmarks: landmarkBlips,
+      downtownTowers: city.downtownTowers,
       searchZone: paperMoon ? { x: player.state.x, z: player.state.z, radius: 120 } : null,
       route: races.getRoute() ?? route,
       storyMarker,
