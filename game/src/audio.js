@@ -95,8 +95,29 @@ export function createAudio() {
       skidSource.connect(skidFilter);
       sources.push(skidSource);
 
+      const jetpack = own(candidate.createGain());
+      jetpack.gain.value = 0;
+      jetpack.connect(master);
+      const jetpackFilter = own(candidate.createBiquadFilter());
+      jetpackFilter.type = 'lowpass';
+      jetpackFilter.frequency.value = 620;
+      jetpackFilter.connect(jetpack);
+      const jetpackNoise = own(candidate.createBufferSource());
+      jetpackNoise.buffer = noise;
+      jetpackNoise.loop = true;
+      jetpackNoise.connect(jetpackFilter);
+      sources.push(jetpackNoise);
+      const jetpackOsc = own(candidate.createOscillator());
+      jetpackOsc.type = 'triangle';
+      jetpackOsc.frequency.value = 55;
+      jetpackOsc.connect(jetpackFilter);
+      sources.push(jetpackOsc);
+
       for (const source of sources) source.start();
-      graph = { master, music, engine, engineA, engineB, engineFilter, siren, sirenOsc, skid, noise };
+      graph = {
+        master, music, engine, engineA, engineB, engineFilter, siren, sirenOsc, skid, noise,
+        jetpack, jetpackOsc, jetpackFilter,
+      };
       context = candidate;
       nextNoteTime = context.currentTime + 0.05;
     } catch {
@@ -188,6 +209,14 @@ export function createAudio() {
     smooth(graph.sirenOsc.frequency, 560 + Math.sin(phase * 4.2) * 190, 0.06);
   }
 
+  function updateJetpack(intensity) {
+    if (!context || context.state === 'closed') return;
+    const level = Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : 0;
+    smooth(graph.jetpack.gain, level * 0.14, 0.05);
+    smooth(graph.jetpackOsc.frequency, 55 + level * 95, 0.08);
+    smooth(graph.jetpackFilter.frequency, 620 + level * 1500, 0.08);
+  }
+
   function gunshot() {
     if (!running()) return;
     const now = context.currentTime;
@@ -275,6 +304,7 @@ export function createAudio() {
     update,
     updateEngine,
     updateSiren,
+    updateJetpack,
     gunshot,
     chime,
     thud,

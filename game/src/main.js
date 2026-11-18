@@ -7,6 +7,7 @@ import {
 import { createRandom, parseSeed } from './random.js';
 import { clampToWorld, createCity, resolveCollisions } from './world.js';
 import { createPlayer } from './player.js';
+import { createJetpack, JETPACK_PRICE } from './jetpack.js';
 import { createVehicles, exitSpot } from './vehicles.js';
 import { createTraffic } from './traffic.js';
 import { createPolice } from './police.js';
@@ -17,7 +18,7 @@ import { createMissions } from './missions.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
-  ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_MENU, ACTION_MUTE,
+  ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_JETPACK, ACTION_MENU, ACTION_MUTE,
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RESTART, createInput,
 } from './input.js';
 import { stageShot } from './shots.js';
@@ -29,7 +30,8 @@ const DOM_IDS = [
   'complete-time', 'btn-resume', 'btn-restart-pause',
   // Keep this inventory aligned with hud.js; every element is optional.
   'hud', 'health-fill', 'health-text', 'cash-value', 'wanted-stars', 'speed-value',
-  'speed-box', 'vehicle-name', 'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
+  'speed-box', 'vehicle-name', 'jetpack-box', 'jetpack-bar', 'jetpack-fill', 'jetpack-text',
+  'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
   'dialogue', 'dialogue-text', 'subtitle', 'hint',
 ];
 const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
@@ -38,6 +40,8 @@ const OVERLAYS = {
   gameover: 'game-over-screen', 'mission-complete': 'complete-screen',
 };
 const MAX_STEPS = 8;
+const JETPACK_SERVICE_RADIUS = 12;
+const JETPACK_REWARD_JOB = 'harbor-job';
 const clamp = THREE.MathUtils.clamp;
 
 function element(id) {
@@ -58,6 +62,7 @@ function makeGame(seedValue, shotName = null) {
   renderer.scene.add(city.group);
   const player = createPlayer(city);
   renderer.scene.add(player.group);
+  const jetpack = createJetpack(renderer.scene, player);
   const vehicles = createVehicles(city, renderer.scene);
   vehicles.spawnStarter();
   vehicles.spawnParked(random);
@@ -123,12 +128,18 @@ function makeGame(seedValue, shotName = null) {
     player.syncMesh();
   }
 
+  function nearLandmark(name) {
+    const spot = city.landmarks[name];
+    return spot && Math.hypot(player.state.x - spot.x, player.state.z - spot.z) <= JETPACK_SERVICE_RADIUS;
+  }
+
   // player.step deliberately does nothing in a car. Keep its position current for every
   // consumer, including missions/police and shots.js, which call vehicle methods directly.
   const enterCar = player.enterCar;
   player.enterCar = (car) => {
     if (!car || car.state.wrecked) return false;
     if (player.state.inCar && player.state.inCar !== car) leaveCar();
+    jetpack.deactivate();
     enterCar(car);
     syncRider();
     return true;
@@ -168,6 +179,7 @@ function makeGame(seedValue, shotName = null) {
       audio.stopMusic();
       audio.updateEngine(0, false, false);
       audio.updateSiren(0);
+      audio.updateJetpack(0);
     }
     return true;
   }
@@ -179,6 +191,8 @@ function makeGame(seedValue, shotName = null) {
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
     hud.setVehicleName(player.state.inCar?.spec?.name);
+    const { fuel, maxFuel, owned, active } = jetpack.state;
+    hud.setJetpack(fuel, maxFuel, owned, active);
     const blips = missions.getBlips();
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
@@ -237,6 +251,7 @@ function makeGame(seedValue, shotName = null) {
       vehicles.setCarPosition(car, x, z, heading);
     }
     player.reset();
+    jetpack.reset();
     Object.assign(player.state, { ...SPAWN, invuln: PLAYER.respawnInvuln });
     player.syncMesh();
     traffic.reset();
@@ -254,6 +269,7 @@ function makeGame(seedValue, shotName = null) {
     missions.state.completed = new Set(state.completed);
     missions.state.bestTimes = { ...state.missionBest };
     missions.setProgress(state.completed);
+    if (missions.state.completed.has(JETPACK_REWARD_JOB)) jetpack.unlock();
     if (save) state.muted = Boolean(save.muted);
     Object.assign(state, {
       started: true, elapsed: 0, lastSave: 0, finalMission: null, bustedFine: 0,
@@ -264,7 +280,7 @@ function makeGame(seedValue, shotName = null) {
     if (!shotMode) audio.unlock();
     setScreen('playing');
     hud.setDialogue('', '');
-    hud.setHint('');
+    hud.setHint(jetpack.state.owned ? 'J — jetpack' : '');
     hud.setObjective('Explore Solmar. Find a gold beacon for a job, or press M.');
     hud.toast(save ? 'Welcome back to Solmar.' : 'Solmar. The coast is yours, Jax.', 'mission', 4);
     renderer.updateCamera(1, player, orbit, 0);
@@ -295,6 +311,10 @@ function makeGame(seedValue, shotName = null) {
     if (!mission || state.completed.includes(mission.id)) return false;
     state.completed.push(mission.id);
     state.cash += mission.reward;
+    if (mission.id === JETPACK_REWARD_JOB && !jetpack.state.owned) {
+      jetpack.unlock();
+      hud.toast('Jetpack unlocked. Press J to use it.', 'mission', 4);
+    }
     const elapsed = Number.isFinite(event.elapsed) && event.elapsed >= 0 ? event.elapsed : null;
     if (elapsed !== null) {
       state.missionBest[mission.id] = Math.min(state.missionBest[mission.id] ?? Infinity, elapsed);
@@ -324,6 +344,7 @@ function makeGame(seedValue, shotName = null) {
     state.bustedFine = Math.min(state.cash, Math.round(POLICE.fine * (1 + police.state.wanted * 0.2)));
     state.cash -= state.bustedFine;
     leaveCar();
+    jetpack.deactivate();
     missions.fail('Busted.');
     police.clear();
     cleanPoliceCars();
@@ -337,6 +358,7 @@ function makeGame(seedValue, shotName = null) {
 
   function gameOver() {
     if (state.screen !== 'playing') return;
+    jetpack.deactivate();
     missions.fail('Jax went down.');
     state.finalMission = null;
     setScreen('gameover');
@@ -413,6 +435,10 @@ function makeGame(seedValue, shotName = null) {
       announce('On foot.');
       return;
     }
+    if (!player.state.grounded) {
+      hud.toast('Land first', 'info', 2);
+      return;
+    }
     const mission = missions.nearestStart(player.state.x, player.state.z);
     if (mission) {
       chooseJob(mission.id);
@@ -433,6 +459,25 @@ function makeGame(seedValue, shotName = null) {
     }
     orbit.yaw = car.state.heading;
     announce('Driving. Space is the handbrake; E exits.');
+  }
+
+  function useJetpack() {
+    if (player.state.inCar) {
+      hud.toast('Exit the car first', 'info', 2);
+    } else if (jetpack.state.owned) {
+      if (!jetpack.toggle()) hud.toast('Jetpack fuel empty. Land to refuel.', 'info', 2.6);
+    } else if (!player.state.grounded) {
+      hud.toast('Land first', 'info', 2);
+    } else if (!nearLandmark('safehouse') && !nearLandmark('garage')) {
+      hud.toast('Jetpack: finish The Big One or buy one ($1500) at the Moreno Garage', 'info', 4.5);
+    } else if (jetpack.buy(state.cash)) {
+      state.cash -= JETPACK_PRICE;
+      hud.toast('Jetpack purchased for $1500. Press J to use it.', 'mission', 4);
+      saveNow();
+    } else {
+      hud.toast('You need $1500 to buy a jetpack.', 'info', 2.6);
+    }
+    refreshHud();
   }
 
   function handleActions(actions) {
@@ -467,6 +512,7 @@ function makeGame(seedValue, shotName = null) {
     if (actions & ACTION_PAUSE) { pause(); return; }
     if (actions & ACTION_MENU) showJobs(true);
     if (actions & ACTION_ENTER) enterOrExit();
+    if (actions & ACTION_JETPACK) useJetpack();
     if (actions & ACTION_PUNCH) {
       const hit = combat.punch();
       if (hit) audio.thud();
@@ -516,9 +562,10 @@ function makeGame(seedValue, shotName = null) {
       player.step(dt, {
         x: Math.sin(orbit.yaw) * forward - Math.cos(orbit.yaw) * right,
         z: Math.cos(orbit.yaw) * forward + Math.sin(orbit.yaw) * right,
-        run: controls.run, jump: controls.jump && player.state.grounded,
+        run: controls.run, jump: controls.jump && player.state.grounded, jetpack: jetpack.state.active,
       }, city.colliders);
     }
+    jetpack.update(dt, controls, nearLandmark('safehouse'));
     traffic.update(dt, player, vehicles);
     combat.update(dt, player);
     police.update(dt, player, combat);
@@ -539,9 +586,12 @@ function makeGame(seedValue, shotName = null) {
     // If a removed mission car was being driven when a mission failed, disembark it safely.
     if (active && !missions.active && player.state.inCar && !vehicles.cars.includes(player.state.inCar)) leaveCar();
     const car = player.state.inCar;
-    const job = !car && missions.nearestStart(player.state.x, player.state.z);
-    const nearestCar = !car && vehicles.nearest(player.state.x, player.state.z, 4.6);
-    hud.setHint(car ? 'E — exit car' : job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state.stolen ? 'E — drive' : 'E — use this car') : '');
+    const onGround = !car && player.state.grounded;
+    const job = onGround && missions.nearestStart(player.state.x, player.state.z);
+    const nearestCar = onGround && vehicles.nearest(player.state.x, player.state.z, 4.6);
+    const interactHint = job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state.stolen ? 'E — drive' : 'E — use this car') : '';
+    const jetpackHint = jetpack.state.owned ? 'J — jetpack' : '';
+    hud.setHint(car ? 'E — exit car' : [interactHint, jetpackHint].filter(Boolean).join(' · '));
     refreshHud();
     if (state.elapsed - state.lastSave >= 15) { saveNow(); state.lastSave = state.elapsed; }
   }
@@ -570,6 +620,7 @@ function makeGame(seedValue, shotName = null) {
       const playing = state.screen === 'playing';
       audio.updateEngine(speed, Boolean(playing && car && input.state().jump && speed > 0.2), Boolean(playing && car));
       audio.updateSiren(playing ? police.state.wanted : 0);
+      audio.updateJetpack(playing && jetpack.state.active ? (jetpack.state.thrusting ? 1 : 0.15) : 0);
       if (playing) audio.update(delta);
     } else if (state.screen === 'menu') renderer.frameTitle();
     renderer.render();
@@ -656,7 +707,7 @@ function makeGame(seedValue, shotName = null) {
   }
 
   const game = {
-    seed: seedValue, city, renderer, player, vehicles, traffic, police, combat, audio,
+    seed: seedValue, city, renderer, player, jetpack, vehicles, traffic, police, combat, audio,
     hud, missions, input, state, orbit, setScreen, startRun, restart, pause, resume,
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
     leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,
