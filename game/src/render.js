@@ -138,6 +138,40 @@ export function createRenderer(canvas) {
     scene.add(sprite);
     return sprite;
   });
+  // Sprites alone disappear behind the car from the follow camera. These two pooled lamps
+  // also illuminate the road and make the light volume readable from behind and the side.
+  const beamGeometry = new THREE.ConeGeometry(4.2, 24, 16, 1, true)
+    .rotateX(-Math.PI / 2).translate(0, 0, 12);
+  const beamMaterial = new THREE.ShaderMaterial({
+    uniforms: { strength: { value: 0 } },
+    vertexShader: 'varying float travel; void main(){ travel = position.z / 24.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: 'uniform float strength; varying float travel; void main(){ float fade = pow(1.0-clamp(travel,0.0,1.0),1.6); gl_FragColor = vec4(1.0,0.9,0.66,strength*fade*0.18); }',
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    side: THREE.DoubleSide, toneMapped: false,
+  });
+  const roadGlowGeometry = new THREE.PlaneGeometry(8.4, 24).rotateX(-Math.PI / 2);
+  const roadGlowMaterial = new THREE.MeshBasicMaterial({
+    map: headlightMap, color: 0xffedbd, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  });
+  const headlightEffects = headlights.map((_, index) => {
+    const cone = new THREE.Mesh(beamGeometry, beamMaterial);
+    const pool = new THREE.Mesh(roadGlowGeometry, roadGlowMaterial);
+    const light = new THREE.SpotLight(0xffedcd, 0, 36, Math.PI / 7, 0.65, 1.5);
+    cone.name = `player:headlight-cone:${index}`;
+    pool.name = `player:headlight-road-glow:${index}`;
+    light.name = `player:headlight-spot:${index}`;
+    cone.visible = pool.visible = light.visible = false;
+    scene.add(cone, pool, light, light.target);
+    return { cone, pool, light };
+  });
+
+  function hideHeadlights() {
+    headlights.forEach((sprite) => { sprite.visible = false; });
+    headlightEffects.forEach(({ cone, pool, light }) => {
+      cone.visible = pool.visible = light.visible = false;
+    });
+  }
 
   let appliedMinute;
   let nightFactor;
@@ -202,7 +236,9 @@ export function createRenderer(canvas) {
       followSun(shadowAnchor.x, shadowAnchor.z);
       nightFactor = value('nightFactor');
       headlightMaterial.opacity = value('headlights');
-      if (headlightMaterial.opacity === 0) headlights.forEach((sprite) => { sprite.visible = false; });
+      beamMaterial.uniforms.strength.value = headlightMaterial.opacity;
+      roadGlowMaterial.opacity = headlightMaterial.opacity * 0.38;
+      if (headlightMaterial.opacity === 0) hideHeadlights();
       appliedMinute = minute;
     }
     setNightFactor?.(nightFactor);
@@ -295,10 +331,23 @@ export function createRenderer(canvas) {
 
     const [lampX, lampY, lampZ] = HEADLIGHT_POSITIONS[inCar?.spec?.variant] ?? HEADLIGHT_POSITIONS.standard;
     headlights.forEach((sprite, index) => {
-      sprite.visible = Boolean(inCar && headlightMaterial.opacity > 0 && (lampX || index === 0));
+      const { cone, pool, light } = headlightEffects[index];
+      sprite.visible = Boolean(inCar && !inCar.state.wrecked && headlightMaterial.opacity > 0 && (lampX || index === 0));
+      cone.visible = pool.visible = light.visible = sprite.visible;
       if (sprite.visible) {
-        sprite.position.set(index === 0 ? -lampX : lampX, lampY, lampZ);
+        const x = index === 0 ? -lampX : lampX;
+        sprite.position.set(x, lampY, lampZ);
         inCar.group.localToWorld(sprite.position);
+        cone.position.copy(sprite.position);
+        cone.quaternion.copy(inCar.group.quaternion);
+        cone.rotateX(Math.atan2(lampY, 24));
+        light.position.copy(sprite.position);
+        light.intensity = 90 * headlightMaterial.opacity;
+        light.target.position.set(x, 0.3, lampZ + 24);
+        inCar.group.localToWorld(light.target.position);
+        pool.position.set(x, 0.31, lampZ + 11);
+        inCar.group.localToWorld(pool.position);
+        pool.rotation.y = inCar.group.rotation.y;
       }
     });
   }
@@ -318,7 +367,7 @@ export function createRenderer(canvas) {
     cameraState.pitch = Math.asin(dy / cameraState.distance);
     skyDome.position.copy(camera.position);
     followSun(0, 0, false);
-    headlights.forEach((sprite) => { sprite.visible = false; });
+    hideHeadlights();
     snapCamera = true;
     hasPreviousFocus = false;
   }
@@ -330,10 +379,15 @@ export function createRenderer(canvas) {
   function dispose() {
     window.removeEventListener('resize', resize);
     scene.remove(skyDome, sun, sun.target, hemi, ...headlights);
+    headlightEffects.forEach(({ cone, pool, light }) => scene.remove(cone, pool, light, light.target));
     skyGeometry.dispose();
     skyMaterial.dispose();
     headlightMap.dispose();
     headlightMaterial.dispose();
+    beamGeometry.dispose();
+    beamMaterial.dispose();
+    roadGlowGeometry.dispose();
+    roadGlowMaterial.dispose();
     if (renderer) renderer.dispose();
   }
 
