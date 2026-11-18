@@ -1,8 +1,8 @@
 // Deterministic screenshot staging using the game's seeded world and its live systems.
-import { CAMERA, MISSIONS, STEP } from './config.js';
+import { CAMERA, MISSIONS, STARTER_CAR, STEP } from './config.js';
 
 const FIXED_STEP_COUNT = 120;
-const STARTER_POSITION = { x: 4.6, z: 100, heading: 0 };
+const STARTER_POSITION = STARTER_CAR;
 
 function setReady(value) {
   if (typeof window !== 'undefined') window.__shotReady = value;
@@ -13,6 +13,8 @@ function prepareFreshRun(game) {
   player.reset();
   missions.reset();
   missions.setProgress([]);
+  game.regions?.reset();
+  game.rep?.reset(0);
   police.clear();
   combat.reset();
 
@@ -42,7 +44,7 @@ function prepareFreshRun(game) {
   orbit.pitch = CAMERA.pitch;
   orbit.distance = CAMERA.distance;
   player.state.x = 7.4;
-  player.state.z = 100;
+  player.state.z = STARTER_CAR.z;
   player.state.heading = 0;
   player.syncMesh();
   missions.takeEvents();

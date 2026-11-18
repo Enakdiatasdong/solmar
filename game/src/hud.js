@@ -1,5 +1,5 @@
 // DOM HUD and canvas minimap. The optional lookups keep the game playable when a screen is absent.
-import { CITY, PALETTE } from './config.js';
+import { CITY, PALETTE, REGIONS } from './config.js';
 
 function element(id) {
   return typeof document === 'undefined' ? null : document.getElementById(id);
@@ -32,6 +32,12 @@ export function createHud() {
     dialogueText: element('dialogue-text'),
     subtitle: element('subtitle'),
     hint: element('hint'),
+    regionCurrent: element('region-current'),
+    regionList: element('region-list'),
+    repRank: element('rep-rank'),
+    repPoints: element('rep-points'),
+    repProgress: element('rep-progress'),
+    repNext: element('rep-next'),
   };
   const cache = {
     health: null,
@@ -42,6 +48,8 @@ export function createHud() {
     inCar: null,
     objective: null,
     dialogue: null,
+    regions: null,
+    rep: null,
   };
   const mapContext = context2d(hud.minimap);
 
@@ -166,10 +174,44 @@ export function createHud() {
     setText(hud.hint, text ? String(text) : '');
   }
 
-  function showMissionList(missions, activeIndex) {
+  function setRegions(snapshot) {
+    if (!snapshot) return;
+    setText(hud.regionCurrent, snapshot.currentRegion?.name ?? 'Solmar');
+    const key = snapshot.regions.map((region) => `${region.id}:${region.open}`).join('|');
+    if (cache.regions === key || !hud.regionList) return;
+    cache.regions = key;
+    hud.regionList.replaceChildren();
+    for (const region of snapshot.regions) {
+      const row = document.createElement('div');
+      row.className = 'region-row' + (region.locked ? ' locked' : '');
+      const name = document.createElement('span');
+      name.textContent = region.name;
+      const access = document.createElement('span');
+      access.textContent = region.open ? 'OPEN' : 'LOCKED';
+      row.append(name, access);
+      hud.regionList.appendChild(row);
+    }
+  }
+
+  function setRep(info) {
+    if (!info) return;
+    setText(hud.repRank, info.name ?? 'Small Fry');
+    setText(hud.repPoints, `${Math.max(0, Math.floor(info.points ?? 0)).toLocaleString('en-US')} REP`);
+    const progress = Math.max(0, Math.min(1, Number(info.progress) || 0));
+    if (hud.repProgress) hud.repProgress.style.width = `${progress * 100}%`;
+    setText(hud.repNext, info.nextAt === null ? 'MAX RANK' : `${(info.nextAt - info.points).toLocaleString('en-US')} TO ${info.nextName}`);
+  }
+
+  function showMissionList(missions, activeIndex, stats = null) {
     if (!hud.missionList) return;
     hud.missionList.replaceChildren();
     const list = Array.isArray(missions) ? missions : [];
+    if (stats) {
+      const block = document.createElement('div');
+      block.className = 'mission-stats';
+      block.textContent = `${stats.rank ?? 'Small Fry'} · ${Number(stats.points ?? 0).toLocaleString('en-US')} REP\n${stats.next ?? 'Max rank'}\n${stats.districts ?? ''}`;
+      hud.missionList.appendChild(block);
+    }
     for (let index = 0; index < list.length; index += 1) {
       const mission = list[index] || {};
       const row = document.createElement('div');
@@ -195,13 +237,13 @@ export function createHud() {
     hud.missionList?.classList.remove('open');
   }
 
-  function toggleMissionList(missions, activeIndex) {
+  function toggleMissionList(missions, activeIndex, stats = null) {
     if (!hud.missionList) return;
     if (hud.missionList.classList.contains('open')) hideMissionList();
-    else showMissionList(missions, activeIndex);
+    else showMissionList(missions, activeIndex, stats);
   }
 
-  function drawMinimap(player, wanted, missions, blips, cameraYaw) {
+  function drawMinimap(player, wanted, missions, blips, cameraYaw, regionSnapshot = null) {
     if (!mapContext || !hud.minimap || !player?.state) return;
     const width = hud.minimap.width;
     const height = hud.minimap.height;
@@ -241,6 +283,22 @@ export function createHud() {
     mapContext.fillRect(-CITY.oceanWidth / 2, CITY.oceanStart, CITY.oceanWidth, 1600);
     mapContext.fillStyle = 'rgba(196, 172, 120, 0.4)';
     mapContext.fillRect(-CITY.oceanWidth / 2, CITY.beachStart, CITY.oceanWidth, CITY.beachEnd - CITY.beachStart);
+
+    if (Array.isArray(regionSnapshot?.regions)) {
+      for (const region of regionSnapshot.regions) {
+        const bounds = region.bounds;
+        const minZ = Math.max(-CITY.edge, bounds.minZ);
+        const maxZ = Math.min(CITY.beachEnd, bounds.maxZ);
+        if (region.locked) {
+          mapContext.fillStyle = REGIONS.mapLocked;
+          mapContext.fillRect(-CITY.edge, minZ, CITY.edge * 2, maxZ - minZ);
+        } else {
+          mapContext.strokeStyle = REGIONS.mapOpen;
+          mapContext.lineWidth = REGIONS.mapLineWidth;
+          mapContext.strokeRect(-CITY.edge, minZ, CITY.edge * 2, maxZ - minZ);
+        }
+      }
+    }
 
     if (Array.isArray(missions)) {
       for (const mission of missions) {
@@ -301,6 +359,8 @@ export function createHud() {
     toast,
     setDialogue,
     setHint,
+    setRegions,
+    setRep,
     showMissionList,
     hideMissionList,
     toggleMissionList,
