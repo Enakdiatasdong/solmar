@@ -7,6 +7,7 @@ import {
 import { createRandom, parseSeed } from './random.js';
 import { clampToWorld, createCity, resolveCollisions } from './world.js';
 import { createDistricts } from './districts.js';
+import { createLandmarks } from './landmarks.js';
 import { createPlayer } from './player.js';
 import { createVehicles, exitSpot } from './vehicles.js';
 import { createTraffic } from './traffic.js';
@@ -77,6 +78,7 @@ function makeGame(seedValue, shotName = null) {
   const combat = createCombat(renderer.scene, () => player, () => combatCity);
   const audio = createAudio();
   const hud = createHud();
+  const landmarks = createLandmarks({ scene: renderer.scene, city, districts, hud });
   const missions = createMissions({
     scene: renderer.scene, city, player, vehicles, police, combat, hud,
     // missions.js asks for a one-shot siren cue; audio.js exposes a wanted-level updater.
@@ -185,13 +187,15 @@ function makeGame(seedValue, shotName = null) {
     const zone = district === 'rural' ? `Desa Utara — ${surface === 'dirt' ? 'Jalan Tanah' : 'Padang Rumput'}`
       : district === 'beach' ? 'Pantai Solmar'
         : district === 'downtown' ? 'Downtown — Kota' : 'Kota Solmar';
-    hud.setZone(zone);
+    hud.setZone(`${zone} · Tempat ${landmarks.state.count}/${landmarks.state.total}`);
     const blips = missions.getBlips();
+    const landmarkBlips = landmarks.getBlips();
+    blips.push(...landmarkBlips);
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
     // Mission markers are already included by getBlips(), so do not draw a second copy.
     hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw, {
-      rural: districts.bounds, dirtRoads: districts.state.dirtRoads,
+      rural: districts.bounds, dirtRoads: districts.state.dirtRoads, landmarks: landmarkBlips,
     });
   }
 
@@ -534,6 +538,7 @@ function makeGame(seedValue, shotName = null) {
     combat.update(dt, player);
     police.update(dt, player, combat);
     syncRider();
+    landmarks.update(dt, player);
     // Handle arrest before missions.fail() can clear the police's busted flag.
     if (!player.state.alive || player.state.health <= 0) { gameOver(); return; }
     if (police.state.busted) { busted(); return; }
@@ -667,7 +672,7 @@ function makeGame(seedValue, shotName = null) {
   }
 
   const game = {
-    seed: seedValue, city, districts, renderer, player, vehicles, traffic, police, combat, audio,
+    seed: seedValue, city, districts, landmarks, renderer, player, vehicles, traffic, police, combat, audio,
     hud, missions, input, state, orbit, setScreen, startRun, restart, pause, resume,
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
     leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,

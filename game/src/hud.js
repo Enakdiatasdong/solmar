@@ -171,6 +171,10 @@ export function createHud() {
     setText(hud.zone, text ? String(text) : '');
   }
 
+  function setLandmark(name) {
+    setText(hud.subtitle, name ? '◆ ' + String(name) : '');
+  }
+
   function showMissionList(missions, activeIndex) {
     if (!hud.missionList) return;
     hud.missionList.replaceChildren();
@@ -330,6 +334,7 @@ export function createHud() {
     setDialogue,
     setHint,
     setZone,
+    setLandmark,
     showMissionList,
     hideMissionList,
     toggleMissionList,
