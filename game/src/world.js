@@ -79,6 +79,59 @@ function makeFacadeTexture(random, variant) {
   return texture;
 }
 
+/** Shared soft falloff for neon spill and lamp halos; generated once per city, never an image. */
+function makeGlowTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.9)');
+  gradient.addColorStop(0.18, 'rgba(255,255,255,0.48)');
+  gradient.addColorStop(0.46, 'rgba(255,255,255,0.14)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 128, 128);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function makeNeonTexture(label, color, caption) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 256;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  const ink = `#${new THREE.Color(color).getHexString()}`;
+  context.fillStyle = '#28152f';
+  context.fillRect(0, 0, 1024, 256);
+  context.strokeStyle = ink;
+  context.lineWidth = 7;
+  context.shadowColor = ink;
+  context.shadowBlur = 22;
+  context.strokeRect(18, 18, 988, 220);
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.font = 'bold 24px sans-serif';
+  context.fillStyle = ink;
+  context.fillText(caption, 512, 53, 900);
+  context.font = '900 112px sans-serif';
+  context.fillText(label, 512, 139, 912);
+  context.shadowBlur = 4;
+  context.fillStyle = '#ffe7f2';
+  context.strokeStyle = '#ffe7f2';
+  context.lineWidth = 1.2;
+  context.strokeText(label, 512, 139, 912);
+  context.font = 'bold 21px sans-serif';
+  context.fillText('SOLMAR  /  SOUTH SHORE', 512, 213, 900);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 2;
+  return texture;
+}
+
 function scaleBoxUVs(geometry, width, height, depth) {
   const uv = geometry.attributes.uv;
   if (!uv) return;
@@ -442,6 +495,80 @@ export function createCity(random, reservedPlaces = []) {
       addBuilding(center.x + cell.x, center.z + cell.z, width, depth, height, { variant });
     }
   }
+
+  // Fictional rooftop neon. Two outward faces keep the lettering readable on BOTH approaches;
+  // a single DoubleSide texture would show mirrored text from the back.
+  const glowTexture = makeGlowTexture();
+  const signFrameMaterial = new THREE.MeshLambertMaterial({ color: 0x302c40 });
+  function addNeonSign({ id, label, caption, color, x, z, y, width, height, baseY = 0.28 }) {
+    const texture = makeNeonTexture(label, color, caption);
+    if (!texture) return null;
+    const sign = new THREE.Group();
+    sign.name = `neon:${id}`;
+    sign.userData.kind = 'neon-sign';
+    sign.userData.label = label;
+    sign.userData.doubleSided = true;
+    sign.position.set(x, y, z);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(width + 0.7, height + 0.7, 0.6), signFrameMaterial);
+    frame.castShadow = true;
+    sign.add(frame);
+    const faceGeometry = new THREE.PlaneGeometry(width, height);
+    const faceMaterial = new THREE.MeshLambertMaterial({
+      color: 0x483046, map: texture, emissive: 0xffffff, emissiveMap: texture,
+      emissiveIntensity: 1.3, toneMapped: false,
+    });
+    const haloMaterial = new THREE.MeshBasicMaterial({
+      map: glowTexture, color, transparent: true, opacity: 0.52,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    });
+    for (const side of [-1, 1]) {
+      const face = new THREE.Mesh(faceGeometry, faceMaterial);
+      face.name = `neon:${id}:${side < 0 ? 'north' : 'south'}`;
+      face.position.z = side * 0.32;
+      face.rotation.y = side < 0 ? Math.PI : 0;
+      sign.add(face);
+      if (glowTexture) {
+        const halo = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.5, height * 2.8), haloMaterial);
+        halo.position.z = side * 0.26;
+        halo.rotation.y = face.rotation.y;
+        sign.add(halo);
+      }
+    }
+    const supportHeight = y - height / 2 - 0.35 - baseY;
+    if (supportHeight > 0) {
+      const supportGeometry = new THREE.CylinderGeometry(0.22, 0.3, supportHeight, 6);
+      for (const side of [-1, 1]) {
+        const support = new THREE.Mesh(supportGeometry, signFrameMaterial);
+        support.position.set(side * width * 0.34, baseY + supportHeight / 2 - y, 0);
+        support.castShadow = true;
+        sign.add(support);
+      }
+    }
+    group.add(sign);
+    return sign;
+  }
+
+  function addRooftopNeon({ targetX, targetZ, ...options }) {
+    const roof = buildings.reduce((nearest, candidate) => {
+      const distance = (box) => ((box.minX + box.maxX) / 2 - targetX) ** 2
+        + ((box.minZ + box.maxZ) / 2 - targetZ) ** 2;
+      return !nearest || distance(candidate) < distance(nearest) ? candidate : nearest;
+    }, null);
+    if (!roof) return null;
+    return addNeonSign({
+      ...options, x: (roof.minX + roof.maxX) / 2, z: (roof.minZ + roof.maxZ) / 2,
+      y: roof.height + 2.8 + options.height / 2, baseY: roof.height,
+    });
+  }
+
+  addRooftopNeon({ id: 'flamingo-fm', label: 'FLAMINGO FM', caption: 'THE SOUND OF THE COAST',
+    color: 0xff2b99, targetX: 36, targetZ: 324, width: 46, height: 11.5 });
+  addRooftopNeon({ id: 'wave-88', label: 'WAVE 88.1', caption: 'AFTER HOURS / ON AIR',
+    color: 0x46e5dc, targetX: -108, targetZ: 252, width: 22, height: 5.5 });
+  addRooftopNeon({ id: 'coral-motel', label: 'CORAL MOTEL', caption: 'VACANCY / OCEAN BREEZE',
+    color: 0xffa776, targetX: 108, targetZ: 324, width: 26, height: 6.5 });
+  addRooftopNeon({ id: 'neon-drive', label: 'NEON DRIVE', caption: 'LATE NIGHTS / OPEN ROAD',
+    color: 0xd16bff, targetX: 180, targetZ: 180, width: 24, height: 6 });
 
   // Beach and ocean on the south edge.
   const beachDepth = CITY.beachEnd - CITY.beachStart;
