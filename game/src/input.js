@@ -8,19 +8,23 @@ export const ACTION_RESTART = 'restart';
 export const ACTION_MENU = 'menu';
 export const ACTION_MUTE = 'mute';
 export const ACTION_JUMP = 'jump';
+export const ACTION_CAMERA = 'camera';
+export const ACTION_RADIO = 'radio';
+export const ACTION_WORKSHOP = 'workshop';
 
 export function createInput(target) {
   const held = new Set(), touchHeld = new Map(), actions = [], disposers = [];
   const look = { dx: 0, dy: 0, zoom: 0 };
-  const actionKeys = { KeyE: ACTION_ENTER, KeyF: ACTION_PUNCH, Enter: ACTION_CONFIRM, Escape: ACTION_PAUSE, KeyP: ACTION_PAUSE, KeyQ: ACTION_PAUSE, KeyR: ACTION_RESTART, KeyN: ACTION_MUTE, KeyM: ACTION_MENU };
+  const actionKeys = { KeyE: ACTION_ENTER, KeyF: ACTION_PUNCH, Enter: ACTION_CONFIRM, Escape: ACTION_PAUSE, KeyP: ACTION_PAUSE, KeyQ: ACTION_RADIO, KeyC: ACTION_CAMERA, KeyG: ACTION_WORKSHOP, KeyR: ACTION_RESTART, KeyN: ACTION_MUTE, KeyM: ACTION_MENU };
   const movement = { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', sprint: 'ShiftLeft', brake: 'Space', jump: 'Space' };
   const touchActions = { enter: ACTION_ENTER, punch: ACTION_PUNCH, fire: ACTION_FIRE, pause: ACTION_PAUSE, jump: ACTION_JUMP, confirm: ACTION_CONFIRM };
   let dragging = false, pointerX = 0, pointerY = 0, moved = 0;
   function on(element, name, handler, options) { element.addEventListener(name, handler, options); disposers.push(() => element.removeEventListener(name, handler, options)); }
   function reset() { held.clear(); touchHeld.clear(); dragging = false; actions.length = 0; look.dx = look.dy = look.zoom = 0; }
   on(window, 'keydown', event => {
-    if (['INPUT', 'TEXTAREA'].includes(event.target.tagName)) return;
-    if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code === 'Tab') event.preventDefault();
+    if (event.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (['Enter', 'Space'].includes(event.code) && event.target.closest?.('button, a, summary')) return;
+    if (event.code.startsWith('Arrow') || event.code === 'Space') event.preventDefault();
     held.add(event.code);
     if (event.repeat) return;
     if (event.code === 'Space') actions.push(ACTION_CONFIRM, ACTION_JUMP);

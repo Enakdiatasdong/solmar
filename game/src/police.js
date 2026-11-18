@@ -1,5 +1,5 @@
 import * as THREE from '../vendor/three.module.min.js';
-import { POLICE, CITY } from './config.js';
+import { POLICE, DIFFICULTY } from './config.js';
 import { resolveCollisions, clampToWorld } from './world.js';
 
 const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
@@ -50,7 +50,7 @@ function createOfficer() {
   return group;
 }
 
-export function createPolice(city, scene, vehicles) {
+export function createPolice(city, scene, vehicles, getDifficulty = () => DIFFICULTY.normal) {
   const state = {
     wanted: 0, heat: 0, decayTimer: 0, outOfSight: true,
     arrestTimer: 0, busted: false, forcedDecay: false,
@@ -86,13 +86,16 @@ export function createPolice(city, scene, vehicles) {
     if (raised) {
       state.decayTimer = 0;
       state.spawnClock = 0;
-      state.deployment = Math.max(0, Math.min(POLICE.maxCars, level + 1) - copCars.length);
+      state.deployment = Math.max(0, patrolCount(level, getDifficulty().aggression) - copCars.length);
     }
     if (!level) { clearActors(); state.deployment = 0; }
   }
   function addWanted(amount = 1, reason = 'Crime reported') {
     state.reason = reason;
     setWanted(state.wanted + amount);
+  }
+  function patrolCount(level, aggression) {
+    return Math.min(POLICE.maxCars, Math.max(1, Math.round((level + 1) * aggression)));
   }
   function nearestNode(point) {
     return city.roadNetwork?.nearestNode?.(point.x, point.z) || null;
@@ -142,7 +145,7 @@ export function createPolice(city, scene, vehicles) {
     footCops.push(cop);
     return cop;
   }
-  function updateCar(car, dt, target) {
+  function updateCar(car, dt, target, aggression) {
     if (car.wrecked) return;
     car.routeClock -= dt;
     if (car.routeClock <= 0) {
@@ -158,7 +161,7 @@ export function createPolice(city, scene, vehicles) {
     const turn = angleDelta(desired, car.heading);
     const oldX = car.x;
     const oldZ = car.z;
-    const cruise = 15 + state.wanted * 2.4;
+    const cruise = (15 + state.wanted * 2.4) * Math.sqrt(aggression);
     vehicles.stepCar(car, dt, {
       forward: Math.abs(turn) > 1.1 && car.speed > 9 ? -0.3 : car.speed < cruise ? 1 : 0,
       right: THREE.MathUtils.clamp(-turn * 1.5, -1, 1),
@@ -185,8 +188,10 @@ export function createPolice(city, scene, vehicles) {
       state.outOfSight = true;
       return;
     }
-    const seenByCars = copCars.some(car => !car.wrecked && distance(car, player) < POLICE.sight && hasLineOfSight(car, player));
-    const seenByFoot = footCops.some(cop => cop.alive && distance(cop, player) < POLICE.sight * 0.8 && hasLineOfSight(cop, player));
+    const aggression = getDifficulty().aggression;
+    const sight = POLICE.sight * Math.sqrt(aggression);
+    const seenByCars = copCars.some(car => !car.wrecked && distance(car, player) < sight && hasLineOfSight(car, player));
+    const seenByFoot = footCops.some(cop => cop.alive && distance(cop, player) < sight * 0.8 && hasLineOfSight(cop, player));
     const seen = seenByCars || seenByFoot;
     state.outOfSight = !seen;
     if (seen || !copCars.length && state.decayTimer === 0) {
@@ -194,13 +199,13 @@ export function createPolice(city, scene, vehicles) {
       state.lastSeen.z = player.z;
     }
     state.spawnClock -= dt;
-    const desiredCars = Math.min(POLICE.maxCars, state.wanted + 1);
+    const desiredCars = patrolCount(state.wanted, aggression);
     if (copCars.length < desiredCars && state.spawnClock <= 0 && (state.deployment > 0 || seen)) {
       spawnCar(player);
       state.deployment = Math.max(0, state.deployment - 1);
-      state.spawnClock = 2;
+      state.spawnClock = 2 / aggression;
     }
-    for (const car of copCars) updateCar(car, dt, state.lastSeen);
+    for (const car of copCars) updateCar(car, dt, state.lastSeen, aggression);
     if (!player.car && footCops.length < Math.min(POLICE.maxFoot, state.wanted) && state.clock > 1 && (seen || state.decayTimer < 3)) spawnFoot(player);
     let arresting = false;
     for (const cop of footCops) {
@@ -214,7 +219,7 @@ export function createPolice(city, scene, vehicles) {
       const heading = Math.atan2(target.x - cop.x, target.z - cop.z);
       cop.heading = heading;
       if (range > 2.1) {
-        const moved = resolveCollisions(city.colliders, cop.x + Math.sin(heading) * dt * 4.3, cop.z + Math.cos(heading) * dt * 4.3, 0.55);
+        const moved = resolveCollisions(city.colliders, cop.x + Math.sin(heading) * dt * 4.3 * aggression, cop.z + Math.cos(heading) * dt * 4.3 * aggression, 0.55);
         cop.x = moved.x;
         cop.z = moved.z;
         cop.group.userData.legs?.forEach((leg, i) => { leg.rotation.x = Math.sin(state.clock * 11 + i * Math.PI) * 0.6; });
@@ -227,10 +232,10 @@ export function createPolice(city, scene, vehicles) {
       if (state.wanted >= 3 && close > 5 && close < 30 && visible) combat?.shootAtPlayer(cop);
     }
     state.arrestTimer = arresting ? state.arrestTimer + dt : Math.max(0, state.arrestTimer - dt * 2);
-    if (state.arrestTimer >= POLICE.arrestTime) state.busted = true;
+    if (state.arrestTimer >= POLICE.arrestTime / aggression) state.busted = true;
     if (seen) state.decayTimer = 0;
     else state.decayTimer += dt;
-    if (state.decayTimer > POLICE.decayDelay) {
+    if (state.decayTimer > POLICE.decayDelay * aggression) {
       state.heat = Math.max(0, state.heat - dt * POLICE.decayRate / (state.wanted >= 3 && !state.forcedDecay ? 1.5 : 1));
       state.wanted = Math.ceil(state.heat);
       if (!state.wanted) clear();

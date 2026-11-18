@@ -7,7 +7,15 @@ export function createHud() {
   const map = byId('minimap');
   const context = map.getContext('2d');
   const money = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  const difficultyChoices = [...document.querySelectorAll('input[name="difficulty"]')];
   let toastCount = 0;
+  function getDifficulty() {
+    return difficultyChoices.find(choice => choice.checked)?.value || 'normal';
+  }
+  function setDifficulty(id) {
+    const choice = difficultyChoices.find(choice => choice.value === id);
+    if (choice) choice.checked = true;
+  }
   function setMoney(value) { byId('cash-value').textContent = `$${money.format(value)}`; }
   function setHealth(value) {
     const health = MathUtils.clamp(value, 0, 100);
@@ -25,6 +33,27 @@ export function createHud() {
     byId('speed-value').textContent = String(Math.round(Math.abs(speed) * 3.6)).padStart(3, '0');
   }
   function setObjective(text = '') { byId('objective-text').textContent = text; }
+  function setClock(day, minutesOfDay) {
+    const hours = String(Math.floor(minutesOfDay / 60)).padStart(2, '0');
+    const minutes = String(Math.floor(minutesOfDay % 60)).padStart(2, '0');
+    byId('clock-day').textContent = `Day ${day}`;
+    byId('clock-time').textContent = `${hours}:${minutes}`;
+  }
+  function setCollectibles(count, total = 20) {
+    byId('collectibles-count').textContent = `${count} / ${total}`;
+  }
+  function setRadio(station, track) {
+    byId('radio-box').hidden = !station;
+    byId('radio-station').textContent = station || '';
+    byId('radio-track').textContent = track || '';
+  }
+  function setConsequence(kind, { fee = 0, cashLost = 0, weaponLost = false } = {}) {
+    const arrest = kind === 'busted';
+    const prefix = arrest ? 'busted' : 'hospital';
+    byId(arrest ? 'busted-fine' : 'hospital-bill').textContent = `−$${money.format(fee)}`;
+    byId(`${prefix}-cash-lost`).textContent = `−$${money.format(cashLost)}`;
+    byId(`${prefix}-weapon-lost`).textContent = weaponLost ? 'Sidearm & ammo' : 'None';
+  }
   function toast(text, kind = '') {
     const item = document.createElement('div');
     item.className = `toast ${kind}`;
@@ -39,7 +68,10 @@ export function createHud() {
     byId('subtitle').textContent = speaker;
     byId('dialogue-text').textContent = text;
   }
-  function setHint(text) { byId('hint').textContent = text; }
+  function setHint(text, enterCar = false) {
+    byId('hint').textContent = text;
+    byId('enter-car-hint').hidden = !enterCar;
+  }
   function setVisible(visible) {
     root.hidden = !visible;
     root.setAttribute('aria-hidden', String(!visible));
@@ -79,10 +111,16 @@ export function createHud() {
     hideMissionList();
     return false;
   }
-  function drawMinimap(city, player, yaw, missions, police) {
+  function drawMinimap(city, player, yaw, missions, police, navigation = {}) {
     const ctx = context;
     const width = map.width, height = map.height;
     const scale = 0.59;
+    const target = navigation.target ?? missions.target;
+    const distance = navigation.distance;
+    const route = navigation.route || [];
+    const distanceRow = byId('gps-distance');
+    distanceRow.hidden = !target || !Number.isFinite(distance);
+    if (!distanceRow.hidden) byId('gps-meters').textContent = `${money.format(Math.max(0, Math.ceil(distance)))} m`;
     const center = { x: width * 0.5, y: height * 0.56 };
     const co = Math.cos(yaw), si = Math.sin(yaw);
     const project = (x, z) => {
@@ -103,28 +141,62 @@ export function createHud() {
     for (const park of city.parks || []) rectangle(park.x,park.z,park.width || 40,park.depth || 40,'#61846a');
     ctx.strokeStyle='#6a7f82';ctx.lineWidth=CITY.roadWidth*scale;
     ctx.beginPath();
-    for (let n=-360;n<=360;n+=72) {
-      let a=project(n,-360),b=project(n,360);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
-      a=project(-360,n);b=project(360,n);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+    for (let n = CITY.nodeMin; n <= CITY.half; n += CITY.pitch) {
+      let a=project(n,CITY.nodeMin),b=project(n,CITY.half);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+      a=project(CITY.nodeMin,n);b=project(CITY.half,n);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
     }
     ctx.stroke();
     rectangle(252,566,17,166,'#d4b88e');
-    if (missions.target) {
-      const a=project(player.x,player.z),b=project(missions.target.x,missions.target.z);
-      ctx.setLineDash([4,5]);ctx.strokeStyle='#ffe1a0';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.setLineDash([]);
+    if (target && route.length) {
+      ctx.save();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      for (const point of route) {
+        const p = project(point.x, point.z);
+        ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = '#10333d';
+      ctx.lineWidth = 7;
+      ctx.stroke();
+      ctx.strokeStyle = '#55ebcd';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
     }
     function blip(point,color,radius=3) {
       let p=project(point.x,point.z);
       p={x:MathUtils.clamp(p.x,8,width-8),y:MathUtils.clamp(p.y,8,height-8)};
       ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,radius,0,Math.PI*2);ctx.fill();
     }
-    if (missions.target) blip(missions.target,'#41efd0',5);
-    else for(const job of missions.list) if(!job.locked&&!job.completed)blip(job.start,'#ffd281',4);
+    if (target) {
+      blip(target, '#10333d', 7);
+      blip(target, '#6af9db', 4.5);
+    }
+    if (!missions.current) {
+      for (const job of missions.list) if (!job.locked && !job.completed && (!target || job.start.x !== target.x || job.start.z !== target.z)) blip(job.start, '#ffd281', 4);
+      for (const race of missions.races || []) {
+        const p = project(race.start.x, race.start.z);
+        if (p.x > 8 && p.x < width - 8 && p.y > 8 && p.y < height - 8) blip(race.start, '#ee9afe', 3.5);
+      }
+    }
+    if (missions.workshop) {
+      const p = project(missions.workshop.x, missions.workshop.z);
+      if (p.x > 8 && p.x < width - 8 && p.y > 8 && p.y < height - 8) blip(missions.workshop, '#84c5fe', 4);
+    }
     for(const cop of [...police.copCars,...police.footCops]) if(cop.alive!==false)blip(cop,'#ff716f',3);
     ctx.save();ctx.translate(center.x,center.y);ctx.rotate(yaw-player.heading);
     ctx.fillStyle='#ffffff';ctx.strokeStyle='#0b1e2a';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-8);ctx.lineTo(-5,6);ctx.lineTo(0,3);ctx.lineTo(5,6);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
     ctx.fillStyle='#eff6e9';ctx.font='10px monospace';ctx.fillText('N',width-18,16);
     ctx.strokeStyle='#ffffff77';ctx.beginPath();ctx.moveTo(width-14,21);ctx.lineTo(width-14-Math.sin(yaw)*11,21+Math.cos(yaw)*11);ctx.stroke();
   }
-  return { setMoney, setCash:setMoney, setHealth, setWanted, setSpeed, setMission:setObjective, setObjective, toast, setDialogue, setHint, setVisible, show:()=>setVisible(true), hide:()=>setVisible(false), showMissionList, hideMissionList, toggleMissionList, drawMinimap, get missionListOpen(){return !byId('mission-list').hidden;}, get toastCount(){return toastCount;} };
+  return {
+    getDifficulty, setDifficulty, setClock, setCollectibles, setRadio, setConsequence,
+    setMoney, setCash: setMoney, setHealth, setWanted, setSpeed, setMission: setObjective, setObjective,
+    toast, setDialogue, setHint, setVisible, show: () => setVisible(true), hide: () => setVisible(false),
+    showMissionList, hideMissionList, toggleMissionList, drawMinimap,
+    get missionListOpen() { return !byId('mission-list').hidden; },
+    get toastCount() { return toastCount; }
+  };
 }

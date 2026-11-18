@@ -13,8 +13,33 @@ export function createVehicles(city, scene) {
   const rubber = new THREE.MeshStandardMaterial({ color: 0x171f29, roughness: 0.9 });
   const chrome = new THREE.MeshStandardMaterial({ color: 0xaac3c6, metalness: 0.75, roughness: 0.3 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x1a4b60, metalness: 0.25, roughness: 0.16 });
-  const lamp = new THREE.MeshStandardMaterial({ color: 0xffedb3, emissive: 0xf9d080, emissiveIntensity: 0.65 });
-  const tail = new THREE.MeshStandardMaterial({ color: 0xdf4d40, emissive: 0x9c221a, emissiveIntensity: 0.5 });
+  const lamp = new THREE.MeshStandardMaterial({ color: 0xffedb3, emissive: 0xffdfaa, emissiveIntensity: 0.08 });
+  const tail = new THREE.MeshStandardMaterial({ color: 0xdf4d40, emissive: 0xd92924, emissiveIntensity: 0.08 });
+  const unlitLamp = new THREE.MeshStandardMaterial({ color: 0xd6bb86, roughness: 0.45 });
+  const unlitTail = new THREE.MeshStandardMaterial({ color: 0x934338, roughness: 0.45 });
+  const beamCanvas = document.createElement('canvas');
+  beamCanvas.width = 64; beamCanvas.height = 128;
+  const beamInk = beamCanvas.getContext('2d');
+  beamInk.scale(1, 2);
+  for (const x of [25, 39]) {
+    const beam = beamInk.createRadialGradient(x, 34, 0, x, 34, 23);
+    beam.addColorStop(0, 'rgba(255,255,255,0.66)');
+    beam.addColorStop(0.45, 'rgba(255,255,255,0.32)');
+    beam.addColorStop(1, 'rgba(255,255,255,0)');
+    beamInk.fillStyle = beam;
+    beamInk.fillRect(0, 0, 64, 64);
+  }
+  const beamMaterial = new THREE.MeshBasicMaterial({ color: 0xffdb9a, map: new THREE.CanvasTexture(beamCanvas), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  const beamGeometry = new THREE.PlaneGeometry(8, 22).rotateX(-Math.PI / 2).translate(0, 0.16, 12.5);
+  const playerLights = new THREE.Group();
+  for (const side of [-1, 1]) {
+    const spot = new THREE.SpotLight(0xffe2ad, 0, 37, 0.32, 0.75, 1.55);
+    spot.position.set(side * 0.72, 0.99, 2.38);
+    spot.target.position.set(side * 1.32, 0.16, 19);
+    playerLights.add(spot, spot.target);
+  }
+  playerLights.visible = false;
+  scene.add(playerLights);
   function spawnCar(options = {}) {
     const kind = options.kind || 'parked';
     const group = new THREE.Group();
@@ -32,9 +57,10 @@ export function createVehicles(city, scene) {
     box(2.1, 0.12, 0.16, chrome, 0, 0.62, 2.3);
     box(2.1, 0.12, 0.16, chrome, 0, 0.62, -2.3);
     box(0.82, 0.18, 0.03, rubber, 0, 0.85, 2.3);
+    const headlights = [], taillights = [];
     for (const side of [-1, 1]) {
-      box(0.46, 0.2, 0.06, lamp, side * 0.73, 0.96, 2.29);
-      box(0.48, 0.18, 0.06, tail, side * 0.73, 0.95, -2.29);
+      headlights.push(box(0.46, 0.2, 0.06, unlitLamp, side * 0.73, 0.96, 2.29));
+      taillights.push(box(0.48, 0.18, 0.06, unlitTail, side * 0.73, 0.95, -2.29));
       box(0.19, 0.13, 0.35, paint, side * 1.15, 1.29, 0.5);
       box(0.03, 0.045, 0.31, chrome, side * 1.08, 1.1, -0.15);
     }
@@ -60,7 +86,10 @@ export function createVehicles(city, scene) {
       smoke.add(puff);
     }
     smoke.visible = false;
-    const car = { id: `ride-${++sequence}`, x: options.x ?? 0, z: options.z ?? 0, heading: options.heading ?? 0, speed: options.speed ?? 0, health: options.health ?? 100, group, wheels, smoke, sirens, kind, owned: !!options.owned, stolen: false, driver: null, wrecked: false, removed: false, distance: 0, bumpCooldown: 0 };
+    const beam = new THREE.Mesh(beamGeometry, beamMaterial);
+    beam.visible = false;
+    group.add(beam);
+    const car = { id: `ride-${++sequence}`, x: options.x ?? 0, z: options.z ?? 0, heading: options.heading ?? 0, speed: options.speed ?? 0, health: options.health ?? 100, group, paint, bodyMat, wheels, smoke, sirens, headlights, taillights, beam, lightsOn: false, kind, owned: !!options.owned, stolen: false, driver: null, wrecked: false, removed: false, distance: 0, bumpCooldown: 0 };
     group.position.set(car.x, 0, car.z); group.rotation.y = car.heading;
     scene.add(group); cars.push(car); return car;
   }
@@ -147,6 +176,27 @@ export function createVehicles(city, scene) {
       for (const wheel of car.wheels) wheel.rotation.x = car.distance / 0.44;
     }
   }
+  function updateNight(level, playerCar) {
+    const isNight = level > 0.01;
+    lamp.emissiveIntensity = level * 3.8;
+    tail.emissiveIntensity = level * 1.65;
+    beamMaterial.opacity = level * 0.39;
+    playerLights.visible = !!playerCar && isNight && !playerCar.wrecked && !playerCar.removed;
+    if (playerLights.visible) {
+      playerLights.position.set(playerCar.x, 0, playerCar.z);
+      playerLights.rotation.y = playerCar.heading;
+      for (const object of playerLights.children) if (object.isSpotLight) object.intensity = level * 140;
+    }
+    for (const car of cars) {
+      const active = isNight && !car.wrecked && !!car.driver;
+      if (active !== car.lightsOn) {
+        car.lightsOn = active;
+        for (const mesh of car.headlights) mesh.material = active ? lamp : unlitLamp;
+        for (const mesh of car.taillights) mesh.material = active ? tail : unlitTail;
+      }
+      car.beam.visible = active;
+    }
+  }
   let starter;
   function reset() {
     for (const car of [...cars]) removeCar(car);
@@ -158,5 +208,5 @@ export function createVehicles(city, scene) {
     });
   }
   reset();
-  return { cars, get starter() { return starter; }, spawnCar, spawnPoliceCar, removeCar, nearest, stepCar, update, reset, damage };
+  return { cars, get starter() { return starter; }, spawnCar, spawnPoliceCar, removeCar, nearest, stepCar, update, updateNight, reset, damage };
 }

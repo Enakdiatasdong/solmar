@@ -8,7 +8,18 @@ export const CAMERA = { distance: 8, carDistance: 11.5, height: 5.6, minDistance
 export const VEHICLE = { maxSpeed: 33, reverseSpeed: 11, acceleration: 15, brake: 27, drag: 0.6, steer: 1.75, radius: 2, enterRange: 4.8 };
 export const TRAFFIC = { cars: 22, pedestrians: 44, speed: 12, laneOffset: 4.2, stuckSeconds: 6 };
 export const POLICE = { steal: 2, pedHit: 1, hear: 65, gunNearCop: 1, sight: 90, arrestRange: 2.5, arrestTime: 1.15, fine: 350, shotDamage: 7, decayDelay: 9, decayRate: 0.32, maxCars: 4, maxFoot: 3 };
-export const MISSIONS = { order: ['first-fare', 'hot-wheels', 'beach-run', 'heat', 'harbor-job'], rewards: { 'first-fare': 500, 'hot-wheels': 750, 'beach-run': 1200, heat: 1500, 'harbor-job': 3000 } };
+export const MISSIONS = {
+  order: ['first-fare', 'hot-wheels', 'beach-run', 'heat', 'harbor-job', 'salt-signal', 'clear-water'],
+  rewards: { 'first-fare': 500, 'hot-wheels': 750, 'beach-run': 1200, heat: 1500, 'harbor-job': 3000, 'salt-signal': 4200, 'clear-water': 5500 },
+};
+export const RACE_IDS = ['switchback', 'night-shift'];
+export const DIFFICULTY = {
+  relaxed: { damage: 0.65, aggression: 0.75, timers: 1.3 },
+  normal: { damage: 1, aggression: 1, timers: 1 },
+  hardcore: { damage: 1.45, aggression: 1.3, timers: 0.8 },
+};
+export const CLOCK = { start: 16 * 60 + 40, minutesPerSecond: 3, day: 1440 };
+export const COLLECTIBLE_TOTAL = 20;
 export const COMBAT = { pistolRange: 55, pistolDamage: 45, punchDamage: 34, punchRange: 2.6, punchCooldown: 0.42, shotCooldown: 0.26, enemyHealth: 60, enemyRange: 30, enemyDamage: 7 };
 export const AUDIO = { master: 0.38, music: 0.13, engine: 0.13, siren: 0.085, effects: 0.22, bpm: 104 };
 export const PALETTE = { sky: 0x9dd8e6, fog: 0xc7e1dc, ocean: 0x237e91, sand: 0xedd4a0, road: 0x303c49, sidewalk: 0xd8d2bd, grass: 0x6f9b68, teal: 0x30d5c2, gold: 0xffcd75, coral: 0xe98275, navy: 0x142736, white: 0xf9edcf, buildings: [0xdba88d, 0xf1c6a0, 0x89ada7, 0xc7c4ad, 0xe8aa9e, 0x87a5b7] };

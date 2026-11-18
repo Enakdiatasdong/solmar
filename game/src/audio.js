@@ -1,5 +1,21 @@
 import { AUDIO } from './config.js';
 
+const stations = [
+  { name: 'Breakwater FM', bpm: 104, root: 45, voice: 'sine', tracks: [
+    { name: 'Glass Current', bass: [0, 3, 7, -2], lead: [24, 31, 36, 31, 27, 34, 31, 29] },
+    { name: 'Mirrors at Sea', bass: [0, 5, 3, 7], lead: [31, 36, 34, 29, 27, 31, 38, 36] },
+  ] },
+  { name: 'Relay 83', bpm: 120, root: 41, voice: 'triangle', tracks: [
+    { name: 'Service Lane', bass: [0, 0, 3, -2], lead: [24, 24, 31, 27, 24, 22, 27, 19] },
+    { name: 'Switchyard', bass: [0, 5, -2, 3], lead: [19, 24, 26, 31, 19, 22, 27, 31] },
+  ] },
+  { name: 'Low Tide', bpm: 79, root: 48, voice: 'sine', tracks: [
+    { name: 'Porch Lanterns', bass: [0, -3, 5, 2], lead: [16, 19, 23, 26, 24, 21, 19, 14] },
+    { name: 'Blue Salt', bass: [0, 4, 2, -3], lead: [23, 19, 14, 16, 21, 24, 22, 19] },
+  ] },
+];
+const hz = note => 440 * 2 ** ((note - 69) / 12);
+
 // The whole soundtrack is oscillators and envelopes, created after a gesture.
 export function createAudio() {
   let context = null;
@@ -12,7 +28,10 @@ export function createAudio() {
   let clock = 0;
   let nextNote = 0;
   let beat = 0;
+  let channel = 0;
+  let trackIndex = 0;
   const voices = new Set();
+  const radioVoices = new Set();
 
   function initialize() {
     if (context) return true;
@@ -51,7 +70,7 @@ export function createAudio() {
     if (!initialize()) return;
     if (context.state === 'suspended') context.resume().catch(() => {});
   }
-  function tone(frequency, length, type = 'sine', gain = AUDIO.effects, when = 0, endFrequency = frequency) {
+  function tone(frequency, length, type = 'sine', gain = AUDIO.effects, when = 0, endFrequency = frequency, radio = false) {
     if (!context || context.state !== 'running') return;
     const start = context.currentTime + Math.max(0, when);
     const oscillator = context.createOscillator();
@@ -64,13 +83,16 @@ export function createAudio() {
     envelope.gain.exponentialRampToValueAtTime(0.0001, start + length);
     oscillator.connect(envelope).connect(master);
     voices.add(oscillator);
-    oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); voices.delete(oscillator); };
+    if (radio) radioVoices.add(oscillator);
+    oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); voices.delete(oscillator); radioVoices.delete(oscillator); };
     oscillator.start(start);
     oscillator.stop(start + length + 0.02);
   }
-  function drum(when) {
-    tone(130, 0.13, 'sine', AUDIO.music * 1.4, when, 38);
-    if (beat % 2) tone(1600, 0.035, 'square', AUDIO.music * 0.08, when, 800);
+  function cycleStation() {
+    channel = (channel + 1) % stations.length;
+    trackIndex = beat = 0;
+    for (const voice of radioVoices) voice.stop();
+    nextNote = (context?.currentTime ?? 0) + 0.04;
   }
   function update(dt, playerState = {}, wanted = 0) {
     clock += dt;
@@ -83,16 +105,19 @@ export function createAudio() {
     sirenVoice.frequency.setTargetAtTime(640 + Math.sin(clock * 5.2) * 240, context.currentTime, 0.03);
     sirenGain.gain.setTargetAtTime(wanted > 0 ? AUDIO.siren * (0.55 + wanted * 0.09) : 0, context.currentTime, 0.12);
     if (context.state !== 'running') return;
-    const beatLength = 60 / AUDIO.bpm / 2;
+    const station = stations[channel];
+    const beatLength = 60 / station.bpm / 2;
     if (nextNote < context.currentTime - 0.3) nextNote = context.currentTime;
     while (nextNote < context.currentTime + 0.14) {
-      const bass = [55, 55, 65.406, 73.416, 49, 49, 65.406, 61.735];
-      const melody = [220, 329.628, 440, 391.995, 261.626, 329.628, 293.665, 246.942];
+      const track = station.tracks[trackIndex];
+      const bass = hz(station.root + track.bass[Math.floor(beat / 8) % track.bass.length]);
+      const lead = hz(station.root + track.lead[beat % track.lead.length]);
       const offset = nextNote - context.currentTime;
-      if (beat % 2 === 0) tone(bass[Math.floor(beat / 2) % bass.length], beatLength * 1.5, 'triangle', AUDIO.music * 0.6, offset);
-      tone(melody[beat % melody.length], beatLength * 0.65, 'sine', AUDIO.music * 0.25, offset);
-      if (beat % 2 === 0) drum(offset);
-      beat++;
+      if (beat % (channel === 2 ? 4 : 2) === 0) tone(bass, beatLength * 1.5, 'triangle', AUDIO.music * 0.6, offset, bass, true);
+      if (channel !== 2 || beat % 2 === 0) tone(lead, beatLength * (channel === 2 ? 2.2 : 0.65), station.voice, AUDIO.music * 0.27, offset, lead, true);
+      if (channel !== 2 && beat % 4 === 0) tone(130, 0.13, 'sine', AUDIO.music * 1.25, offset, 38, true);
+      if (channel === 1 && beat % 2 === 1) tone(1600, 0.035, 'square', AUDIO.music * 0.08, offset, 800, true);
+      if (++beat >= 96) { beat = 0; trackIndex = (trackIndex + 1) % station.tracks.length; }
       nextNote += beatLength;
     }
   }
@@ -124,5 +149,6 @@ export function createAudio() {
     context.close().catch(() => {});
     context = null;
   }
-  return { start: unlock, unlock, update, gunshot, chime, thud, siren, setMuted, toggleMute, get muted() { return muted; }, dispose };
+  return { start: unlock, unlock, update, gunshot, chime, thud, siren, setMuted, toggleMute, cycleStation,
+    get muted() { return muted; }, get station() { return stations[channel].name; }, get track() { return stations[channel].tracks[trackIndex].name; }, dispose };
 }

@@ -1,5 +1,5 @@
 import * as THREE from '../vendor/three.module.min.js';
-import { COMBAT, POLICE } from './config.js';
+import { COMBAT, POLICE, DIFFICULTY } from './config.js';
 import { resolveCollisions } from './world.js';
 
 const planarDistance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -46,7 +46,7 @@ function buildDockworker(options) {
   return group;
 }
 
-export function createCombat(scene, getPlayer, getCity) {
+export function createCombat(scene, getPlayer, getCity, getDifficulty = () => DIFFICULTY.normal) {
   const enemies = [];
   const effects = [];
   const state = { clock: 0, punchCooldown: 0, shotCooldown: 0, shots: 0, kills: 0 };
@@ -126,7 +126,7 @@ export function createCombat(scene, getPlayer, getCity) {
   }
   function shoot() {
     const player = playerState();
-    if (!player || player.car || player.health <= 0 || player.ammo <= 0 || state.shotCooldown > 0) return false;
+    if (!player || player.car || !player.armed || player.health <= 0 || player.ammo <= 0 || state.shotCooldown > 0) return false;
     player.ammo--;
     state.shots++;
     state.shotCooldown = COMBAT.shotCooldown;
@@ -153,7 +153,8 @@ export function createCombat(scene, getPlayer, getCity) {
   }
   function shootAtPlayer(source) {
     const player = playerState();
-    if (!source?.alive || !player || player.health <= 0 || state.clock - (source.lastShot ?? -100) < (source.isCop ? 1.65 : 1.85)) return false;
+    const difficulty = getDifficulty();
+    if (!source?.alive || !player || player.health <= 0 || state.clock - (source.lastShot ?? -100) < (source.isCop ? 1.65 / difficulty.aggression : 1.85)) return false;
     const range = planarDistance(source, player);
     if (range < 3 || range > COMBAT.enemyRange) return false;
     const direction = { x: (player.x - source.x) / range, z: (player.z - source.z) / range };
@@ -162,7 +163,7 @@ export function createCombat(scene, getPlayer, getCity) {
     source.shotCount = (source.shotCount || 0) + 1;
     const miss = source.shotCount % 4 === 0;
     addTrace(source, { x: player.x + (miss ? 1.7 : 0), z: player.z }, 0xff8f79);
-    if (!miss) player.health = Math.max(0, player.health - (source.isCop ? POLICE.shotDamage : COMBAT.enemyDamage));
+    if (!miss) player.health = Math.max(0, player.health - Math.round((source.isCop ? POLICE.shotDamage : COMBAT.enemyDamage) * difficulty.damage));
     getCity().audio?.gunshot();
     return true;
   }

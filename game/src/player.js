@@ -27,7 +27,7 @@ export function createPlayer(city) {
     box(0.25, 0.67, 0.28, denim, 0, -0.33, 0, leg);
     box(0.27, 0.15, 0.43, shoes, 0, -0.72, 0.065, leg); legs.push(leg);
   }
-  const state = { x: PLAYER.spawn.x, z: PLAYER.spawn.z, heading: 0, health: 100, ammo: 24, car: null, punchTimer: 0, y: 0, verticalSpeed: 0, moving: 0, run: false };
+  const state = { x: PLAYER.spawn.x, z: PLAYER.spawn.z, heading: 0, health: 100, armed: true, ammo: 24, car: null, punchTimer: 0, y: 0, verticalSpeed: 0, moving: 0, run: false };
   let stride = 0;
   function setPosition(x, z, heading = state.heading) {
     const point = clampToWorld(x, z, PLAYER.radius);
@@ -35,7 +35,7 @@ export function createPlayer(city) {
     group.position.set(state.x, state.y, state.z); group.rotation.y = state.heading;
   }
   function reset() {
-    Object.assign(state, { x: PLAYER.spawn.x, z: PLAYER.spawn.z, heading: 0, health: 100, ammo: 24, car: null, punchTimer: 0, y: 0, verticalSpeed: 0, moving: 0, run: false });
+    Object.assign(state, { x: PLAYER.spawn.x, z: PLAYER.spawn.z, heading: 0, health: 100, armed: true, ammo: 24, car: null, punchTimer: 0, y: 0, verticalSpeed: 0, moving: 0, run: false });
     stride = 0; setPosition(state.x, state.z, 0); group.visible = true;
   }
   function step(dt, intent = {}) {

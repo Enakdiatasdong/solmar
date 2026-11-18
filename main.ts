@@ -1,6 +1,6 @@
 // SOLMAR — a complete coastal crime story, authored for the open web.
-// Jax Moreno returns to a sunlit port city to rebuild a life behind the wheel.
-// Five connected jobs lead from a first fare to the Meridian Bank getaway.
+// Jax Moreno returns to a coastal city to rebuild a life behind the wheel.
+// Seven connected jobs lead from a first fare to the fight for the harbor's future.
 // The city, cast, vehicles, geometry, interface and synthesizer are original.
 // This deterministic packer ships the playable static game and its real renders.
 // It uses only Node's standard library and the kit's unchanged dossier writer.

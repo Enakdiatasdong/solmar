@@ -5,7 +5,7 @@ import { CITY, PALETTE } from './config.js';
 export function createCity(random) {
   const group = new THREE.Group();
   group.name = 'Solmar — city, waterfront and harbor';
-  const colliders = [], buildings = [], parks = [];
+  const colliders = [], cameraObstacles = [], buildings = [], parks = [], lamps = [];
   const buckets = new Map();
   const cube = new THREE.BoxGeometry(1, 1, 1);
   const cylinder = new THREE.CylinderGeometry(1, 1, 1, 7);
@@ -22,9 +22,16 @@ export function createCity(random) {
     buckets.get(key).transforms.push(dummy.matrix.clone());
   }
   const box = (color, x, y, z, w, h, d, rotation = 0, shadow = true) => instance(cube, color, x, y, z, w, h, d, rotation, shadow);
-  function solid(color, x, y, z, w, h, d, collision = true) {
+  function bounds(x, y, z, w, h, d) {
+    return { minX: x - w / 2, maxX: x + w / 2, minY: y - h / 2, maxY: y + h / 2, minZ: z - d / 2, maxZ: z + d / 2 };
+  }
+  function visualSolid(color, x, y, z, w, h, d) {
     box(color, x, y, z, w, h, d);
-    if (collision) colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+    cameraObstacles.push(bounds(x, y, z, w, h, d));
+  }
+  function solid(color, x, y, z, w, h, d, collision = true) {
+    visualSolid(color, x, y, z, w, h, d);
+    if (collision) colliders.push(cameraObstacles.at(-1));
   }
   function sign(text, x, y, z, width, rotation = 0, background = '#183e45', foreground = '#ffe7bb') {
     const canvas = document.createElement('canvas');
@@ -57,10 +64,14 @@ export function createCity(random) {
     instance(cylinder, 0x8e7457, x, 1.7 * size, z, 0.4 * size, 3.4 * size, 0.4 * size);
     instance(cone, 0x5d8860, x, 4.5 * size, z, 3.2 * size, 6 * size, 3.2 * size, random() * 6);
   }
-  function lamp(x, z) {
+  function lamp(x, z, roadX = 0, roadZ = 5) {
     instance(cylinder, 0x637178, x, 3.6, z, 0.1, 7.2, 0.1);
-    box(0x637178, x, 7.1, z, 0.25, 0.2, 2.3);
-    box(0xffefd0, x, 7, z + 0.9, 0.8, 0.15, 1.3, 0, false);
+    const length = Math.hypot(roadX, roadZ) || 1;
+    const xOffset = roadX * 0.9 / length, zOffset = roadZ * 0.9 / length;
+    const angle = Math.atan2(roadX, roadZ);
+    box(0x637178, x + xOffset * 0.65, 7.1, z + zOffset * 0.65, 0.25, 0.2, 2.3, angle);
+    box(0xffefd0, x + xOffset, 7, z + zOffset, 0.8, 0.15, 1.3, angle, false);
+    lamps.push({ x: x + roadX, z: z + roadZ, y: z + roadZ > 373 ? 0.315 : 0.135, angle });
   }
   // A continuous land mass, the beach, and a broad ocean establish a readable coastline.
   box(PALETTE.ocean, 0, -1.3, 0, 4200, 1, 4200, 0, false);
@@ -121,13 +132,20 @@ export function createCity(random) {
       }
     }
   }
+  // Alternate fixture sides along the streets and keep the beachfront well lit.
+  for (let road = -360; road <= 360; road += 72) for (let block = -324; block <= 324; block += 72) {
+    const parity = ((road + block - 36) / 72) % 2;
+    if (Math.abs(parity) === 0) lamp(road + 12.4, block, -8, 0);
+    else lamp(block, road + 12.4, 0, -8);
+  }
+  for (let x = -338; x <= 338; x += 26) lamp(x, 347.5, 0, 8);
   const parkCells = [[1, 7], [4, 6], [6, 3], [6, 6], [8, 8], [2, 2], [7, 5]];
   function building(x, z, width, depth, height, color, style = 0) {
     solid(color, x, height / 2 + 0.2, z, width, height, depth);
     buildings.push({ x, z, width, depth, height, color });
-    box(0xe9dfc5, x, 1.05, z, width + 0.5, 1.6, depth + 0.5);
-    box(0xf8e6c8, x, height + 0.45, z, width + 0.7, 0.8, depth + 0.7);
-    box(0x647b7c, x + width * 0.16, height + 1.45, z, width * 0.28, 1.5, depth * 0.3);
+    visualSolid(0xe9dfc5, x, 1.05, z, width + 0.5, 1.6, depth + 0.5);
+    visualSolid(0xf8e6c8, x, height + 0.45, z, width + 0.7, 0.8, depth + 0.7);
+    visualSolid(0x647b7c, x + width * 0.16, height + 1.45, z, width * 0.28, 1.5, depth * 0.3);
     const floors = Math.max(2, Math.floor((height - 4) / 3.4));
     const columnsX = Math.max(2, Math.floor((width - 3) / 3.4));
     const columnsZ = Math.max(2, Math.floor((depth - 3) / 3.4));
@@ -135,17 +153,20 @@ export function createCity(random) {
       const y = 4.2 + row * 3.4;
       for (let col = 0; col < columnsX; col++) {
         const wx = x - width * 0.5 + (col + 1) * width / (columnsX + 1);
-        for (const side of [-1, 1]) box(row % 4 === 0 && style === 2 ? 0xbac9c2 : 0x496a76, wx, y, z + side * (depth * 0.5 + 0.03), 1.45, 1.9, 0.08, 0, false);
+        for (const side of [-1, 1]) {
+          const color = (col + row * 3 + buildings.length + side) % 9 === 0 ? 0x547686 : row % 4 === 0 && style === 2 ? 0xbac9c2 : 0x496a76;
+          box(color, wx, y, z + side * (depth * 0.5 + 0.03), 1.45, 1.9, 0.08, 0, false);
+        }
       }
       for (let col = 0; col < columnsZ; col++) {
         const wz = z - depth * 0.5 + (col + 1) * depth / (columnsZ + 1);
-        for (const side of [-1, 1]) box(0x496a76, x + side * (width * 0.5 + 0.03), y, wz, 0.08, 1.9, 1.45, 0, false);
+        for (const side of [-1, 1]) box((col * 3 + row + buildings.length + side) % 11 === 0 ? 0x527080 : 0x496a76, x + side * (width * 0.5 + 0.03), y, wz, 0.08, 1.9, 1.45, 0, false);
       }
-      if (style === 1 && row % 2 === 0) box(0xf0d5b1, x, y - 1.35, z + depth / 2 + 0.35, width + 0.3, 0.28, 0.75);
+      if (style === 1 && row % 2 === 0) visualSolid(0xf0d5b1, x, y - 1.35, z + depth / 2 + 0.35, width + 0.3, 0.28, 0.75);
     }
     for (let side = -1; side <= 1; side += 2) {
       box(0x285563, x + side * width * 0.24, 1.7, z + depth * 0.5 + 0.06, width * 0.25, 2.4, 0.1, 0, false);
-      box(style === 1 ? 0xbd786b : 0x4b8e89, x + side * width * 0.24, 3.1, z + depth * 0.5 + 0.7, width * 0.34, 0.28, 1.5);
+      visualSolid(style === 1 ? 0xbd786b : 0x4b8e89, x + side * width * 0.24, 3.1, z + depth * 0.5 + 0.7, width * 0.34, 0.28, 1.5);
     }
   }
   for (let row = 0; row < 10; row++) for (let col = 0; col < 10; col++) {
@@ -208,8 +229,8 @@ export function createCity(random) {
   }
   building(276, 482, 13, 13, 5.2, 0xcfa18b, 1);
   // The small tower is decorative and never blocks the pier entrance.
-  box(0x70a6a2, 220, 2.2, 440, 7, 4, 5);
-  box(0xe5cda9, 220, 4.4, 440, 9.5, 0.35, 7);
+  visualSolid(0x70a6a2, 220, 2.2, 440, 7, 4, 5);
+  visualSolid(0xe5cda9, 220, 4.4, 440, 9.5, 0.35, 7);
   for (const x of [217, 223]) for (const z of [438, 442]) box(0x8c7b68, x, 0.8, z, 0.3, 1.6, 0.3);
   sign('PIER 9', 252, 7.2, 471, 14, Math.PI);
   sign('AZURE COAST', 95, 5.5, 376, 19, Math.PI);
@@ -243,14 +264,52 @@ export function createCity(random) {
     const sail = new THREE.Mesh(new THREE.ConeGeometry(4, 9, 3), new THREE.MeshStandardMaterial({ color: 0xf8ead0, side: THREE.DoubleSide }));
     sail.position.set(x + 1.4, 6, z); sail.scale.z = 0.05; group.add(sail);
   }
+  const nightMaterials = new Map([
+    [0xffefd0, [0xffb95f, 3.1]], [0x547686, [0xf8a967, 0.68]], [0x527080, [0x8bbcd2, 0.38]]
+  ]);
+  const emissives = [];
   for (const { geometry, color, shadow, transforms } of buckets.values()) {
     const material = new THREE.MeshStandardMaterial({ color, roughness: 0.86, metalness: 0.04 });
+    const nightMaterial = nightMaterials.get(color);
+    if (nightMaterial) {
+      material.emissive.setHex(nightMaterial[0]);
+      material.emissiveIntensity = 0;
+      emissives.push([material, nightMaterial[1]]);
+    }
     const mesh = new THREE.InstancedMesh(geometry, material, transforms.length);
     for (let i = 0; i < transforms.length; i++) mesh.setMatrixAt(i, transforms[i]);
     mesh.castShadow = shadow; mesh.receiveShadow = true;
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
     group.add(mesh);
+  }
+  const poolCanvas = document.createElement('canvas');
+  poolCanvas.width = poolCanvas.height = 64;
+  const poolInk = poolCanvas.getContext('2d');
+  const fade = poolInk.createRadialGradient(32, 32, 0, 32, 32, 32);
+  fade.addColorStop(0, 'rgba(255,255,255,0.8)');
+  fade.addColorStop(0.45, 'rgba(255,255,255,0.32)');
+  fade.addColorStop(1, 'rgba(255,255,255,0)');
+  poolInk.fillStyle = fade; poolInk.fillRect(0, 0, 64, 64);
+  const poolTexture = new THREE.CanvasTexture(poolCanvas);
+  const poolMaterial = new THREE.MeshBasicMaterial({ color: 0xffb96a, map: poolTexture, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  const poolGeometry = new THREE.PlaneGeometry(24, 27).rotateX(-Math.PI / 2);
+  const pools = new THREE.InstancedMesh(poolGeometry, poolMaterial, lamps.length);
+  for (const [i, lamp] of lamps.entries()) {
+    dummy.position.set(lamp.x, lamp.y, lamp.z);
+    dummy.rotation.set(0, lamp.angle, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    pools.setMatrixAt(i, dummy.matrix);
+  }
+  pools.computeBoundingSphere(); pools.visible = false; group.add(pools);
+  let previousNight = -1;
+  function updateNight(level) {
+    if (previousNight === level) return;
+    previousNight = level;
+    for (const [material, intensity] of emissives) material.emissiveIntensity = level * intensity;
+    poolMaterial.opacity = level * 0.31;
+    pools.visible = level > 0.01;
   }
   const trafficCars = [], sidewalkPedestrians = [];
   for (const { a, b } of edges) for (const [from, to] of [[a, b], [b, a]]) {
@@ -265,7 +324,7 @@ export function createCity(random) {
     bank: { x: 288, z: -288 }, heat: { x: 108, z: 108 }
   };
   return {
-    group, colliders, buildings, parks, graph, roadNetwork: graph, landmarks,
+    group, colliders, cameraObstacles, buildings, parks, graph, roadNetwork: graph, landmarks, updateNight,
     blockPitch: CITY.pitch, nodeMin: CITY.nodeMin, beach: { start: CITY.beachStart, end: CITY.beachEnd },
     spawnPoints: { trafficCars, roadVehicles: trafficCars, vehicles: trafficCars, sidewalkPedestrians, pedestrians: sidewalkPedestrians, player: { x: 2, z: 96 }, starter: { x: 4.6, z: 100, heading: 0 } },
     groundHeight: () => 0
