@@ -1,6 +1,6 @@
 // Five story jobs for Jax Moreno in Solmar. Missions use the city's seeded world, the shared HUD,
 // vehicle, police and combat systems, and emit completion events for main.js to award and save.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { MISSIONS, PALETTE, POLICE } from './config.js';
 
 const BEACON_COLORS = { available: 0xffc857, active: 0xffc857 };
@@ -274,8 +274,17 @@ export function createMissions(ctx) {
 
   function beginBigOne() {
     state.stage = 'bank';
+    spawnDockworkers(BANK);
     setMarker(BANK, BANK.name);
     setObjective('Reach Solmar Bank to take the score.');
+  }
+
+  function spawnDockworkers(point) {
+    for (const side of [-1, 1]) {
+      combat?.spawnEnemy?.(point.x + side * 5, point.z + side * 14, {
+        mission: 'harbor-job', name: 'dockworker',
+      });
+    }
   }
 
   function complete() {
@@ -292,6 +301,9 @@ export function createMissions(ctx) {
     police.state.forcedDecay = false;
     if (police.state.wanted > 0) police.clear();
     setObjective('');
+    state.dialogueQueue.length = 0;
+    state.dialogueCurrent = null;
+    state.dialogueTimer = 0;
     hud?.setDialogue('', '');
     const event = emit({
       type: 'complete',
@@ -323,6 +335,9 @@ export function createMissions(ctx) {
     police.state.forcedDecay = false;
     if (police.state.wanted > 0) police.clear();
     setObjective('');
+    state.dialogueQueue.length = 0;
+    state.dialogueCurrent = null;
+    state.dialogueTimer = 0;
     hud?.setDialogue('', '');
     resetMissionActors();
     state.stage = '';
@@ -384,7 +399,7 @@ export function createMissions(ctx) {
       if (!state.car || state.car.state.wrecked) return fail('The teal coupe was wrecked before you could take it.');
       if (state.car === inCar()) {
         state.stage = 'deliver-car';
-        police.addWanted(POLICE.steal, 'Grand theft auto');
+        police.addWanted(POLICE.steal, 'Car theft');
         say('Mara', 'You have the coupe. Bring it to the garage in one piece.');
         setMarker(GARAGE, GARAGE.name);
         setObjective('Drive the stolen teal coupe to Moreno Garage.');
@@ -415,6 +430,7 @@ export function createMissions(ctx) {
     if (state.stage === 'bank' && distanceTo(BANK.x, BANK.z) < 10) {
       state.stage = 'bank-getaway';
       state.timer = PURSUIT_SECONDS;
+      spawnDockworkers(GARAGE);
       police.setWanted(3);
       police.state.forcedDecay = true;
       say('Mara', 'The score is ours. Get it to the garage, then lose the tail.');
@@ -444,7 +460,7 @@ export function createMissions(ctx) {
           setObjective(`Lose the three-star tail — ${Math.ceil(state.timer)}s.`);
         }
       }
-      if (police.state.wanted === 0) {
+      if (state.stage === 'bank-evade' && police.state.wanted === 0) {
         police.state.forcedDecay = false;
         complete();
       }

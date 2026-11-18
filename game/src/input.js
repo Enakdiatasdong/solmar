@@ -23,6 +23,10 @@ const KEYMAP = {
 };
 
 export function createInput(target) {
+  if ('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches) {
+    document.body?.classList.add('touch');
+    document.getElementById('touch')?.setAttribute('aria-hidden', 'false');
+  }
   const held = { up: false, down: false, left: false, right: false, jump: false };
   const touchHeld = { up: false, down: false, left: false, right: false, run: false };
   const directionKeys = new Set();

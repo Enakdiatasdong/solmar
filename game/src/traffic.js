@@ -2,7 +2,7 @@
 // spawned within a radius around Jax and recycled when they fall behind. Steering is deliberately
 // loose: cars follow lane-offset waypoints, brake for the player and each other, and despawn out of
 // sight. Pedestrians keep to block edges and scatter when a car or gunshot is near.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, TRAFFIC, VEHICLE } from './config.js';
 import { resolveCollisions } from './world.js';
 
@@ -162,6 +162,7 @@ export function createTraffic(city, scene, random) {
     if (!point) return false;
     routeCarAt(car, point);
     car.speed = TRAFFIC.carSpeedMin;
+    car.stuck = 0;
     car.targetSpeed = random.range(TRAFFIC.carSpeedMin, TRAFFIC.carSpeedMax);
     car.group.position.set(car.x, 0, car.z);
     car.group.rotation.y = car.heading;
@@ -279,8 +280,6 @@ export function createTraffic(city, scene, random) {
     car.x = resolved.x;
     car.z = resolved.z;
     if (resolved.hit) car.speed = Math.min(car.speed, TRAFFIC.carSpeedMin * 0.65);
-    car.stuck += car.speed < 0.5 ? dt : -dt;
-    car.stuck = Math.max(0, car.stuck);
 
     car.group.position.set(car.x, 0, car.z);
     car.group.rotation.y = car.heading;
@@ -371,7 +370,19 @@ export function createTraffic(city, scene, random) {
   }
 
   function update(dt, player, vehicles) {
-    for (let index = 0; index < trafficCars.length; index += 1) stepCar(trafficCars[index], dt, player);
+    for (let index = 0; index < trafficCars.length; index += 1) {
+      const car = trafficCars[index];
+      const previousX = car.x;
+      const previousZ = car.z;
+      stepCar(car, dt, player);
+      vehicles?.resolveCarCollisions?.(car);
+      car.stuck += Math.hypot(car.x - previousX, car.z - previousZ) < dt * 0.5 ? dt : -dt;
+      car.stuck = Math.max(0, car.stuck);
+      if (car.stuck > 6) {
+        const target = playerPosition(player);
+        respawnCar(car, target.x, target.z);
+      }
+    }
     for (let index = peds.length - 1; index >= 0; index -= 1) {
       if (!stepPed(peds[index], dt, player, vehicles)) peds.splice(index, 1);
     }

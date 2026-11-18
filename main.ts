@@ -1,12 +1,16 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
+// A working SOLMAR entry (Node 22, standard library only): the game is this directory's
 // game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// modules, three.js r160 vendored under game/vendor/, no network request), and the program hands
+// it in. It copies game/ and screenshots/ from beside this file to /output and writes
+// /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
+//
+// SOLMAR is the game: an original 3D open-world driving and crime story set in the fictional
+// coastal city of Solmar, played as Jax Moreno, an ex-getaway driver working five story jobs.
+// It is a seeded procedural city (a 10x10 street grid with a beach and ocean to the south),
+// on-foot and arcade car controls, ambient traffic and pedestrians, a five-star wanted system
+// with police pursuit, pistol and fist combat, WebAudio-only sound, a DOM HUD with minimap, and
+// localStorage saves. Put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name
+// is the cover) and run it.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

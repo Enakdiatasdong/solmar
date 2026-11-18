@@ -1,6 +1,6 @@
 // SOLMAR boot, system adapters and fixed-step simulation. All assets and imports are local.
 // ?seed=N selects the city; ?shot=start|play|end stages a frozen, reproducible scene.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import {
   CAMERA, MAX_FRAME, MISSIONS, PLAYER, POLICE, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
 } from './config.js';
@@ -64,9 +64,11 @@ function makeGame(seedValue, shotName = null) {
   const parked = vehicles.cars.map((car) => ({ car, ...car.state }));
   const traffic = createTraffic(city, renderer.scene, createRandom(seedValue ^ 0x51a7));
   const police = createPolice(city, renderer.scene, vehicles);
+  vehicles.collisionGroups.push(traffic.cars, police.state.copCars);
   const combatCity = {
     ...city,
     peds: traffic.peds,
+    cops: police.state.cops,
     knockPed: traffic.knockPed,
     resolvePlayerCollision: (x, z, radius) => resolveCollisions(city.colliders, x, z, radius),
   };
@@ -371,7 +373,7 @@ function makeGame(seedValue, shotName = null) {
 
   const missionList = hud.hud?.missionList || nodes['mission-list'];
   function showJobs(toggle = false) {
-    if (state.screen !== 'playing') return;
+    if (state.screen !== 'playing' && state.screen !== 'paused') return;
     if (toggle && missionList?.classList.contains('open')) {
       hud.hideMissionList();
       return;
@@ -384,8 +386,8 @@ function makeGame(seedValue, shotName = null) {
       if (!mission) return;
       row.setAttribute('data-mission', mission.id);
       row.setAttribute('role', 'button');
-      row.setAttribute('tabindex', '0');
-      row.setAttribute('aria-disabled', String(mission.locked || mission.completed));
+      row.setAttribute('tabindex', state.screen === 'paused' ? '-1' : '0');
+      row.setAttribute('aria-disabled', String(state.screen === 'paused' || mission.locked || mission.completed));
       row.classList.toggle('locked', mission.locked);
     });
     if (!missionList) hud.toast('Find the gold job beacon and press E.', 'info', 3);
@@ -445,6 +447,7 @@ function makeGame(seedValue, shotName = null) {
     if (actions & ACTION_RESTART) { restart(); return; }
     if (state.screen === 'paused') {
       if (actions & (ACTION_CONFIRM | ACTION_PAUSE)) resume();
+      else if (actions & ACTION_MENU) showJobs(true);
       return;
     }
     if (state.screen === 'busted') {
@@ -509,14 +512,15 @@ function makeGame(seedValue, shotName = null) {
       const forward = Number(controls.up) - Number(controls.down);
       const right = Number(controls.right) - Number(controls.left);
       player.step(dt, {
-        x: Math.sin(orbit.yaw) * forward + Math.cos(orbit.yaw) * right,
-        z: Math.cos(orbit.yaw) * forward - Math.sin(orbit.yaw) * right,
+        x: Math.sin(orbit.yaw) * forward - Math.cos(orbit.yaw) * right,
+        z: Math.cos(orbit.yaw) * forward + Math.sin(orbit.yaw) * right,
         run: controls.run, jump: controls.jump && player.state.grounded,
       }, city.colliders);
     }
     traffic.update(dt, player, vehicles);
     combat.update(dt, player);
     police.update(dt, player, combat);
+    syncRider();
     // Handle arrest before missions.fail() can clear the police's busted flag.
     if (!player.state.alive || player.state.health <= 0) { gameOver(); return; }
     if (police.state.busted) { busted(); return; }
@@ -529,12 +533,6 @@ function makeGame(seedValue, shotName = null) {
         hud.toast(`Mission failed: ${event.reason}`, 'danger', 4.5);
         announce(`Mission failed: ${event.reason}`);
       }
-    }
-    // Also support mission updates that consume their event queue internally.
-    const completed = missions.list.find((mission) => mission.completed && !state.completed.includes(mission.id));
-    if (completed) {
-      completeMission({ type: 'complete', mission: completed, elapsed: completed.best ?? missions.state.elapsed });
-      return;
     }
     // If a removed mission car was being driven when a mission failed, disembark it safely.
     if (active && !missions.active && player.state.inCar && !vehicles.cars.includes(player.state.inCar)) leaveCar();

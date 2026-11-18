@@ -1,5 +1,5 @@
 // Arcade melee and pistol combat for Jax, with simple mission enemies and brief shot effects.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { COMBAT, PLAYER } from './config.js';
 import { resolveCollisions } from './world.js';
 
@@ -128,6 +128,9 @@ export function createCombat(scene, getPlayer, getCity) {
     for (const enemy of state.enemies) {
       if (enemy.alive) visit(enemy, false);
     }
+    for (const cop of city?.cops ?? []) {
+      if (cop.alive) visit(cop, false);
+    }
     if (city?.knockPed) {
       for (const ped of city.peds ?? []) {
         if (!ped.down) visit(ped, true);
@@ -214,6 +217,7 @@ export function createCombat(scene, getPlayer, getCity) {
   function killEnemy(enemy) {
     enemy.health = 0;
     enemy.alive = false;
+    if (enemy.isCop) enemy.down = 8;
     enemy.group.rotation.z = Math.PI / 2;
     enemy.group.position.y = 0.4;
   }

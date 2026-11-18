@@ -2,7 +2,7 @@
 // a handful of other cars are parked and stealable, and damaged cars smoke when wrecked. The
 // driving model is deliberately simple: accelerate, brake/reverse, steer with speed-scaled grip,
 // handbrake for a loose tail. Collision with buildings uses the city AABBs and the car's radius.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { PALETTE, STARTER_CAR, VEHICLE } from './config.js';
 import { clampToWorld, resolveCollisions } from './world.js';
 
@@ -110,6 +110,7 @@ function addSmoke(car) {
 export function createVehicles(city, scene) {
   const cityColliders = city?.colliders ?? [];
   const cars = [];
+  const collisionGroups = [cars];
   const smokeMaterial = new THREE.MeshLambertMaterial({ color: 0x55524e, transparent: true, opacity: 0.5 });
 
   function addCar(spec, position, heading, options = {}) {
@@ -234,6 +235,43 @@ export function createVehicles(city, scene) {
     return best;
   }
 
+  function resolveCarCollisions(car) {
+    const state = car.state ?? car;
+    for (const group of collisionGroups) {
+      for (const other of group) {
+        if (other === car) continue;
+        const otherState = other.state ?? other;
+        const dx = state.x - otherState.x;
+        const dz = state.z - otherState.z;
+        const distance = Math.hypot(dx, dz);
+        const separation = VEHICLE.radius * 2;
+        if (distance >= separation) continue;
+        const nx = distance > 0.001 ? dx / distance : Math.sin(state.heading);
+        const nz = distance > 0.001 ? dz / distance : Math.cos(state.heading);
+        const push = (separation - distance + 0.01) * 0.5;
+        const position = clampToWorld(resolveCollisions(cityColliders, state.x + nx * push, state.z + nz * push, VEHICLE.radius));
+        const otherPosition = clampToWorld(resolveCollisions(cityColliders, otherState.x - nx * push, otherState.z - nz * push, VEHICLE.radius));
+        state.x = position.x;
+        state.z = position.z;
+        otherState.x = otherPosition.x;
+        otherState.z = otherPosition.z;
+        const closingSpeed = (Math.sin(otherState.heading) * otherState.speed - Math.sin(state.heading) * state.speed) * nx
+          + (Math.cos(otherState.heading) * otherState.speed - Math.cos(state.heading) * state.speed) * nz;
+        if (closingSpeed > 0) {
+          state.speed *= 0.55;
+          otherState.speed *= 0.55;
+          if (closingSpeed > 4) {
+            const impactDamage = Math.min(4, closingSpeed * 0.15);
+            if (car.state) damage(car, impactDamage);
+            if (other.state) damage(other, impactDamage);
+          }
+        }
+        car.group.position.set(state.x, 0, state.z);
+        other.group.position.set(otherState.x, 0, otherState.z);
+      }
+    }
+  }
+
   function stepCar(car, dt, controls, colliders = cityColliders) {
     const state = car.state;
     if (state.wrecked) {
@@ -280,6 +318,7 @@ export function createVehicles(city, scene) {
     const bounded = clampToWorld({ x: nextX, z: nextZ });
     state.x = bounded.x;
     state.z = bounded.z;
+    resolveCarCollisions(car);
 
     car.group.position.set(state.x, 0, state.z);
     car.group.rotation.y = state.heading;
@@ -318,6 +357,7 @@ export function createVehicles(city, scene) {
 
   return {
     cars,
+    collisionGroups,
     scene,
     addCar,
     spawnStarter,
@@ -326,6 +366,7 @@ export function createVehicles(city, scene) {
     damage,
     repair,
     nearest,
+    resolveCarCollisions,
     stepCar,
     setCarPosition,
     smokeMaterial,

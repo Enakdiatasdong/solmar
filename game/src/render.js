@@ -1,7 +1,7 @@
 // three.js rendering: the scene, warm coastal light, sky and fog, a follow camera for foot and
 // car, plus resize handling. Shadows are one directional light with a tight box that moves with
 // the player instead of covering the whole city, which keeps the polygon and draw cost modest.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { CAMERA, PALETTE, TITLE_CAMERA } from './config.js';
 
 export function createRenderer(canvas) {
@@ -67,8 +67,6 @@ export function createRenderer(canvas) {
       uniform vec3 bottom;
       uniform vec3 sunColor;
       varying vec3 vWorld;
-      #include <tonemapping_pars_fragment>
-      #include <colorspace_pars_fragment>
       void main() {
         float h = clamp(vWorld.y * 1.15 + 0.18, 0.0, 1.0);
         vec3 color = mix(bottom, top, pow(h, 0.8));

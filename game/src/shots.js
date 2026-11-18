@@ -109,13 +109,13 @@ export function stageShot(name, game) {
   }
 
   if (shot === 'play') {
-    player.state.x = 20;
+    player.state.x = 0;
     player.state.z = 236;
     player.syncMesh();
     missions.start('first-fare');
     const starter = vehicles.cars.find((car) => car.id === 'starter');
     if (starter) {
-      vehicles.setCarPosition(starter, 28, 250, 0.35);
+      vehicles.setCarPosition(starter, 0, 250, 0);
       player.enterCar(starter);
     }
     orbit.yaw = 0.35;
@@ -143,7 +143,7 @@ export function stageShot(name, game) {
   const starter = vehicles.cars.find((car) => car.id === 'starter');
   missions.start('first-fare');
   if (starter) {
-    vehicles.setCarPosition(starter, 300, 268, Math.PI / 2);
+    vehicles.setCarPosition(starter, 288, 268, Math.PI / 2);
     player.enterCar(starter);
     player.state.x = starter.state.x;
     player.state.z = starter.state.z;

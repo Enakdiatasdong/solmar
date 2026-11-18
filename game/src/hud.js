@@ -220,8 +220,9 @@ export function createHud() {
     mapContext.fillStyle = 'rgba(22, 30, 39, 0.92)';
     mapContext.fillRect(0, 0, width, height);
     mapContext.translate(centerX, centerY);
-    mapContext.rotate(-heading);
-    mapContext.scale(scale, scale);
+    // Camera-forward is up; at yaw zero, world -X is screen-right.
+    mapContext.rotate(heading);
+    mapContext.scale(-scale, -scale);
     mapContext.translate(-actor.x, -actor.z);
 
     mapContext.fillStyle = 'rgba(132, 140, 145, 0.5)';
@@ -234,7 +235,7 @@ export function createHud() {
     }
     mapContext.fillStyle = 'rgba(83, 103, 80, 0.5)';
     for (const block of CITY.parkBlocks) {
-      mapContext.fillRect(CITY.nodeMin + block[0] * pitch - 20, CITY.nodeMin + block[1] * pitch - 20, 40, 40);
+      mapContext.fillRect(CITY.nodeMin + (block[0] + 0.5) * pitch - 20, CITY.nodeMin + (block[1] + 0.5) * pitch - 20, 40, 40);
     }
     mapContext.fillStyle = 'rgba(44, 120, 138, 0.55)';
     mapContext.fillRect(-CITY.oceanWidth / 2, CITY.oceanStart, CITY.oceanWidth, 1600);
@@ -263,6 +264,7 @@ export function createHud() {
 
     mapContext.save();
     mapContext.translate(centerX, centerY);
+    mapContext.rotate(heading - (actor.heading || 0));
     mapContext.fillStyle = PALETTE.css.gold;
     mapContext.beginPath();
     mapContext.moveTo(0, -7);
@@ -281,7 +283,10 @@ export function createHud() {
   }
 
   function setVisible(visible) {
-    if (hud.root) hud.root.style.display = visible ? '' : 'none';
+    if (hud.root) {
+      hud.root.style.display = visible ? '' : 'none';
+      hud.root.setAttribute('aria-hidden', String(!visible));
+    }
   }
 
   return {

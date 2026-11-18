@@ -1,5 +1,5 @@
 // Wanted levels 0-5 drive a pursuit with SMPD cruisers and officers on foot.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { CITY, POLICE, VEHICLE } from './config.js';
 import { resolveCollisions } from './world.js';
 
@@ -52,6 +52,37 @@ export function createPolice(city, scene, vehicles) {
 
   function targetFor(player) {
     return player.state.inCar?.state ?? player.state;
+  }
+
+  function hasLineOfSight(observer, target) {
+    const dx = target.x - observer.x;
+    const dz = target.z - observer.z;
+    if (Math.hypot(dx, dz) > POLICE.sight * 0.9) return false;
+    for (const box of colliders) {
+      if ((box.height ?? Infinity) < 1.3) continue;
+      if (Math.max(observer.x, target.x) < box.minX || Math.min(observer.x, target.x) > box.maxX
+        || Math.max(observer.z, target.z) < box.minZ || Math.min(observer.z, target.z) > box.maxZ) continue;
+      let near = 0;
+      let far = 1;
+      if (Math.abs(dx) < 0.000001) {
+        if (observer.x < box.minX || observer.x > box.maxX) continue;
+      } else {
+        const a = (box.minX - observer.x) / dx;
+        const b = (box.maxX - observer.x) / dx;
+        near = Math.max(near, Math.min(a, b));
+        far = Math.min(far, Math.max(a, b));
+      }
+      if (Math.abs(dz) < 0.000001) {
+        if (observer.z < box.minZ || observer.z > box.maxZ) continue;
+      } else {
+        const a = (box.minZ - observer.z) / dz;
+        const b = (box.maxZ - observer.z) / dz;
+        near = Math.max(near, Math.min(a, b));
+        far = Math.min(far, Math.max(a, b));
+      }
+      if (near <= far && far > 0 && near < 1) return false;
+    }
+    return true;
   }
 
   function setWanted(level) {
@@ -150,6 +181,10 @@ export function createPolice(city, scene, vehicles) {
       heading: Math.atan2(target.x - position.x, target.z - position.z),
       shootTimer: 0,
       walk: 0,
+      isCop: true,
+      health: 60,
+      alive: true,
+      down: 0,
     });
     return true;
   }
@@ -247,6 +282,16 @@ export function createPolice(city, scene, vehicles) {
   }
 
   function updateCop(cop, dt, player, combat) {
+    if (!cop.alive) {
+      cop.down = Math.max(0, cop.down - dt);
+      if (cop.down === 0) {
+        cop.alive = true;
+        cop.health = 60;
+        cop.group.rotation.z = 0;
+        cop.group.position.y = 0.28;
+      }
+      return false;
+    }
     const dx = player.state.x - cop.x;
     const dz = player.state.z - cop.z;
     const distance = Math.hypot(dx, dz);
@@ -269,11 +314,12 @@ export function createPolice(city, scene, vehicles) {
     cop.group.position.set(cop.x, 0.28, cop.z);
     cop.group.rotation.y = cop.heading;
     cop.shootTimer -= dt;
-    if (cop.shootTimer <= 0 && distance < 30 && distance > 5 && state.wanted >= 3) {
+    const visible = hasLineOfSight(cop, targetFor(player));
+    if (cop.shootTimer <= 0 && distance < 30 && distance > 5 && state.wanted >= 3 && visible) {
       cop.shootTimer = 2.2;
       combat?.shootAtPlayer?.(cop, player);
     }
-    return !player.state.inCar && distance <= POLICE.arrestRange;
+    return !player.state.inCar && distance <= POLICE.arrestRange && visible;
   }
 
   function update(dt, player, combat) {
@@ -287,15 +333,14 @@ export function createPolice(city, scene, vehicles) {
     }
 
     const target = targetFor(player);
-    const outOfSight = state.copCars.every((car) => (
-      Math.hypot(car.state.x - target.x, car.state.z - target.z) > POLICE.sight * 0.9
-    ));
+    const outOfSight = state.copCars.every((car) => car.state.wrecked || !hasLineOfSight(car.state, target))
+      && state.cops.every((cop) => !cop.alive || !hasLineOfSight(cop, target));
     state.lineOfSight = !outOfSight;
-    const canDecay = state.wanted <= 2 || state.forcedDecay;
-    if (outOfSight && canDecay) {
+    const decayScale = !state.forcedDecay && state.wanted >= 3 ? 1.8 : 1;
+    if (outOfSight) {
       state.decayTimer += dt;
-      if (state.decayTimer > POLICE.decayDelay) {
-        state.heat = Math.max(0, state.heat - dt / POLICE.decayEvery);
+      if (state.decayTimer > POLICE.decayDelay * decayScale) {
+        state.heat = Math.max(0, state.heat - dt / (POLICE.decayEvery * decayScale));
         state.wanted = Math.ceil(state.heat);
         state.stars = state.wanted;
         if (state.wanted === 0) {
@@ -342,7 +387,9 @@ export function createPolice(city, scene, vehicles) {
   function distanceToNearest(x, z) {
     let best = Infinity;
     for (const car of state.copCars) best = Math.min(best, Math.hypot(car.state.x - x, car.state.z - z));
-    for (const cop of state.cops) best = Math.min(best, Math.hypot(cop.x - x, cop.z - z));
+    for (const cop of state.cops) {
+      if (cop.alive) best = Math.min(best, Math.hypot(cop.x - x, cop.z - z));
+    }
     return best;
   }
 

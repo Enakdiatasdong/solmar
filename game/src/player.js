@@ -2,7 +2,7 @@
 // sprinting with Shift and jumping with Space. It owns its mesh, the walk cycle and health, and
 // exposes enterCar/exitCar so the vehicle system can take over. Physics uses the shared city
 // collider list; the camera orbit lives here because it follows the player's aim.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { CAMERA, PALETTE, PLAYER, SPAWN } from './config.js';
 import { clampToWorld, resolveCollisions } from './world.js';
 

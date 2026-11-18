@@ -2,7 +2,7 @@
 // textures are drawn on canvases (no image files), a beach and ocean along the south edge, palms,
 // streetlights and props. Exports building/container collision AABBs and the road graph the AI and
 // missions navigate by. Everything is generated from the seeded RNG, so a seed rebuilds the city.
-import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, SPAWN, STARTER_CAR } from './config.js';
 
 const FACADE_UNIT = 5;
