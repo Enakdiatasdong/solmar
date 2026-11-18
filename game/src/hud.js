@@ -274,6 +274,7 @@ export function createHud() {
     const losePercent = Math.max(0, Math.min(100, Math.round(chase?.losePercent ?? 0)));
     const visibleWanted = Number.isFinite(wanted) ? wanted : 0;
     hud.policeList.hidden = list.length === 0;
+    if (hud.root) hud.root.classList.toggle('chase-active', list.length > 0);
     const key = `${visibleWanted}:${status}:${losePercent}:${list.map((unit) => `${unit.callsign}:${unit.tactic}:${unit.distance}`).join('|')}`;
     if (cache.policeUnits === key) return;
     cache.policeUnits = key;
@@ -332,6 +333,9 @@ export function createHud() {
     if (!hud.missionCard) return;
     const active = Boolean(card);
     hud.missionCard.hidden = !active;
+    if (hud.root) hud.root.classList.toggle('mission-active', active);
+    // The dedicated mission card already carries its briefing, stage and timer.
+    if (hud.objectiveBox) hud.objectiveBox.hidden = active;
     if (!active) {
       if (hud.searchZoneChip) hud.searchZoneChip.hidden = true;
       cache.missionCard = null;
