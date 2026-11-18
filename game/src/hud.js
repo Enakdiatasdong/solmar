@@ -20,6 +20,7 @@ export function createHud() {
     healthFill: element('health-fill'),
     healthText: element('health-text'),
     cash: element('cash-value'),
+    income: element('income-value'),
     stars: element('wanted-stars'),
     speed: element('speed-value'),
     speedBox: element('speed-box'),
@@ -28,6 +29,11 @@ export function createHud() {
     toasts: element('toasts'),
     minimap: element('minimap'),
     missionList: element('mission-list'),
+    placeMenu: element('place-menu'),
+    placeMenuTitle: element('place-menu-title'),
+    placeMenuSubtitle: element('place-menu-subtitle'),
+    placeMenuRows: element('place-menu-rows'),
+    placeMenuClose: element('place-menu-close'),
     dialogue: element('dialogue'),
     dialogueText: element('dialogue-text'),
     subtitle: element('subtitle'),
@@ -37,6 +43,8 @@ export function createHud() {
     health: null,
     healthPercent: null,
     cash: null,
+    income: null,
+    ownedCount: null,
     stars: null,
     speed: null,
     inCar: null,
@@ -44,6 +52,7 @@ export function createHud() {
     dialogue: null,
   };
   const mapContext = context2d(hud.minimap);
+  let placeMenuReturnFocus = null;
 
   function setText(node, value) {
     if (node && node.textContent !== value) node.textContent = value;
@@ -74,6 +83,17 @@ export function createHud() {
     if (amount === cache.cash) return;
     cache.cash = amount;
     setText(hud.cash, '$' + amount.toLocaleString('en-US'));
+  }
+
+  function setIncome(perMin, ownedCount) {
+    const income = Number.isFinite(perMin) ? Math.max(0, Math.round(perMin)) : 0;
+    const count = Number.isFinite(ownedCount) ? Math.max(0, Math.floor(ownedCount)) : 0;
+    if (income === cache.income && count === cache.ownedCount) return;
+    cache.income = income;
+    cache.ownedCount = count;
+    if (!hud.income) return;
+    hud.income.hidden = income === 0 || count === 0;
+    setText(hud.income, hud.income.hidden ? '' : `$${income.toLocaleString('en-US')}/min · ${count} assets`);
   }
 
   function setWanted(stars) {
@@ -201,6 +221,57 @@ export function createHud() {
     else showMissionList(missions, activeIndex);
   }
 
+  function isPlaceMenuOpen() {
+    return Boolean(hud.placeMenu && !hud.placeMenu.hidden);
+  }
+
+  function showPlaceMenu({ title, subtitle, rows, onClose }) {
+    if (!hud.placeMenu || !hud.placeMenuRows) return;
+    if (!isPlaceMenuOpen()) placeMenuReturnFocus = document.activeElement;
+    setText(hud.placeMenuTitle, String(title ?? ''));
+    setText(hud.placeMenuSubtitle, String(subtitle ?? ''));
+    hud.placeMenuRows.replaceChildren();
+    for (const [index, row] of (rows ?? []).entries()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mission-row place-menu-row';
+      button.disabled = typeof row.onClick !== 'function';
+      const number = document.createElement('span');
+      number.className = 'mission-index';
+      number.textContent = index < 3 && !button.disabled ? String(index + 1) : '·';
+      number.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.className = 'mission-name';
+      label.textContent = String(row.label ?? '');
+      const sub = document.createElement('span');
+      sub.className = 'mission-reward';
+      sub.textContent = String(row.sub ?? '');
+      button.append(number, label, sub);
+      if (!button.disabled) button.addEventListener('click', row.onClick);
+      hud.placeMenuRows.append(button);
+    }
+    if (hud.placeMenuClose) {
+      hud.placeMenuClose.onclick = () => {
+        hidePlaceMenu();
+        onClose?.();
+      };
+    }
+    hud.placeMenu.hidden = false;
+    hud.placeMenu.focus({ preventScroll: true });
+  }
+
+  function hidePlaceMenu() {
+    if (!isPlaceMenuOpen()) return;
+    if (hud.placeMenu.contains(document.activeElement)) placeMenuReturnFocus?.focus({ preventScroll: true });
+    hud.placeMenu.hidden = true;
+    hud.placeMenuRows?.replaceChildren();
+    placeMenuReturnFocus = null;
+  }
+
+  function selectPlaceMenuRow(index) {
+    if (isPlaceMenuOpen()) hud.placeMenuRows?.children[index]?.click();
+  }
+
   function drawMinimap(player, wanted, missions, blips, cameraYaw) {
     if (!mapContext || !hud.minimap || !player?.state) return;
     const width = hud.minimap.width;
@@ -294,6 +365,7 @@ export function createHud() {
     setHealth,
     setMoney,
     setCash: setMoney,
+    setIncome,
     setWanted,
     setSpeed,
     setMission,
@@ -304,6 +376,10 @@ export function createHud() {
     showMissionList,
     hideMissionList,
     toggleMissionList,
+    showPlaceMenu,
+    hidePlaceMenu,
+    isPlaceMenuOpen,
+    selectPlaceMenuRow,
     drawMinimap,
     setVisible,
     show() { setVisible(true); },

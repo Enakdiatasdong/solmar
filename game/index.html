@@ -49,9 +49,10 @@
   @keyframes pulse { 50% { transform: scale(1.05); } }
 
   .hud-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-  .cash-panel { display: flex; align-items: baseline; gap: 8px; }
+  .cash-panel { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 4px 8px; }
   .cash-label { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
   #cash-value { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: var(--gold); font-variant-numeric: tabular-nums; }
+  #income-value { flex-basis: 100%; text-align: right; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   #speed-box { display: none; align-items: center; gap: 8px; }
   #speed-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
@@ -88,6 +89,18 @@
   .mission-row.done .mission-index { background: rgba(255, 200, 87, 0.18); color: var(--gold); }
   .mission-name { font-size: 14px; font-weight: 650; }
   .mission-reward { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  #place-menu { position: fixed; top: 50%; left: 50%; width: min(520px, 90vw); max-height: 84vh; overflow-y: auto; transform: translate(-50%, -50%); background: rgba(13, 18, 25, 0.96); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 26px 70px rgba(0, 0, 0, 0.55); pointer-events: auto; z-index: 41; }
+  #place-menu[hidden] { display: none; }
+  #place-menu:focus { outline: none; }
+  #place-menu-title { margin: 0 0 6px; font-size: 23px; font-weight: 800; color: var(--gold); }
+  #place-menu-subtitle { margin: 0 0 14px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+  .place-menu-row { width: 100%; color: var(--ink); background: transparent; text-align: left; }
+  .place-menu-row .mission-reward { max-width: 150px; text-align: right; }
+  .place-menu-row:disabled { opacity: 0.55; cursor: default; }
+  .place-menu-row:disabled:hover { background: transparent; border-color: transparent; }
+  #place-menu-close { display: block; margin: 16px auto 0; border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+  #place-menu-close:hover, #place-menu-close:focus-visible { color: var(--ink); }
 
   /* ---------- Screens ---------- */
   .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 30; padding: 24px; }
@@ -175,6 +188,7 @@
       <div class="hud-panel cash-panel">
         <span class="cash-label">Cash</span>
         <span id="cash-value">$250</span>
+        <span id="income-value" hidden></span>
       </div>
       <div class="hud-panel" id="speed-box">
         <span id="speed-value">0 KM/H</span>
@@ -190,6 +204,12 @@
 </div>
 
 <div id="mission-list" role="dialog" aria-label="Available jobs"></div>
+<div id="place-menu" role="dialog" aria-labelledby="place-menu-title" aria-describedby="place-menu-subtitle" tabindex="-1" hidden>
+  <h2 id="place-menu-title"></h2>
+  <p id="place-menu-subtitle"></p>
+  <div id="place-menu-rows"></div>
+  <button id="place-menu-close" type="button">1 / 2 / 3 — choose · E / Esc — close</button>
+</div>
 
 <div id="title-screen" class="screen">
   <div class="title-vignette"></div>
