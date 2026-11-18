@@ -78,8 +78,8 @@ export const VEHICLE = {
 };
 
 export const TRAFFIC = {
-  cars: 12,
-  pedestrians: 18,
+  cars: 24,
+  pedestrians: 36,
   spawnRadius: 190,
   despawnRadius: 260,
   carSpeedMin: 9,

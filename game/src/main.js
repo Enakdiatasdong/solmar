@@ -18,7 +18,7 @@ import { createVehicleJobs } from './vehicle-jobs.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
-  ACTION_BUY_AMMO, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_MENU, ACTION_MUTE,
+  ACTION_BUY_AMMO, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_HORN, ACTION_MENU, ACTION_MUTE,
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RESTART, createInput,
 } from './input.js';
 import { stageShot } from './shots.js';
@@ -552,6 +552,10 @@ function makeGame(seedValue, shotName = null) {
     if (actions & ACTION_MENU) showJobs(true);
     if (actions & ACTION_ENTER) enterOrExit();
     if (actions & ACTION_BUY_AMMO) buyAmmo();
+    if (actions & ACTION_HORN) {
+      const position = player.state.inCar?.state ?? player.state;
+      traffic.horn(position.x, position.z);
+    }
     if (actions & ACTION_PUNCH) {
       const hit = combat.punch();
       if (hit) audio.thud();
@@ -559,6 +563,7 @@ function makeGame(seedValue, shotName = null) {
     }
     if (actions & ACTION_FIRE && combat.shoot()) {
       state.shotsFired += 1;
+      traffic.onGunshot(player.state.x, player.state.z);
       audio.gunshot();
       if (police.distanceToNearest(player.state.x, player.state.z) < POLICE.hear) police.addWanted(POLICE.gunNearCop, 'Shots fired');
       hud.setWeapon(combat.state.weapon);

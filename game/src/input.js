@@ -12,6 +12,7 @@ export const ACTION_MENU = 32;
 export const ACTION_MUTE = 64;
 export const ACTION_RESTART = 128;
 export const ACTION_BUY_AMMO = 256;
+export const ACTION_HORN = 512;
 
 const KEYMAP = {
   KeyW: 'up',
@@ -88,6 +89,9 @@ export function createInput(target, canCycleWeapon = () => false) {
         break;
       case 'KeyB':
         queue(ACTION_BUY_AMMO);
+        break;
+      case 'KeyH':
+        queue(ACTION_HORN);
         break;
       case 'KeyM':
         if (event.shiftKey) queue(ACTION_MUTE);
