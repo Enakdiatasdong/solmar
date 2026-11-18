@@ -51,15 +51,17 @@ export function createTraffic(city, scene, random) {
     return { x: x + Math.cos(angle) * radius, z: z + Math.sin(angle) * radius };
   }
 
-  function pickDirection(node) {
-    const options = node?.neighbors?.filter((neighbor) => (
-      neighbor.other.x >= CITY.nodeMin
-      && neighbor.other.x <= CITY.nodeMax
-      && neighbor.other.z >= CITY.nodeMin
-      && neighbor.other.z <= CITY.nodeMax
-    )) ?? [];
-    if (options.length === 0) return null;
-    return random.pick(options);
+  // Pick the next road direction. Never U-turn back to the node the car just
+  // came from when another option exists, so traffic keeps flowing forward
+  // instead of oscillating between two intersections. (BUG-17: the old
+  // bounds filter here was a no-op — every grid node is in-bounds.)
+  function pickDirection(node, fromNode) {
+    const neighbors = node?.neighbors ?? [];
+    if (neighbors.length === 0) return null;
+    const forward = fromNode
+      ? neighbors.filter((neighbor) => neighbor.other !== fromNode)
+      : neighbors;
+    return random.pick(forward.length > 0 ? forward : neighbors);
   }
 
   function lanePoint(from, to) {
@@ -241,8 +243,9 @@ export function createTraffic(city, scene, random) {
       const dz = waypoint.z - car.z;
       const distance = Math.hypot(dx, dz);
       if (distance < 4 || Math.abs(dx) < 2.2 && Math.abs(dz) < 2.2) {
+        const previousNode = car.node;
         car.node = car.next.other;
-        car.next = pickDirection(car.node);
+        car.next = pickDirection(car.node, previousNode);
       } else {
         turnTarget = Math.atan2(dx, dz);
       }
