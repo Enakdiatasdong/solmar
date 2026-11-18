@@ -1,6 +1,7 @@
 // Arcade melee and pistol combat for Jax, with simple mission enemies and brief shot effects.
 import * as THREE from '../vendor/three.module.min.js';
 import { COMBAT, PLAYER } from './config.js';
+import { createRandom } from './random.js';
 import { resolveCollisions } from './world.js';
 
 const TRACER_LIFE = 0.08;
@@ -31,7 +32,8 @@ function enemyMesh() {
   return { group, legs };
 }
 
-export function createCombat(scene, getPlayer, getCity) {
+export function createCombat(scene, getPlayer, getCity, seed = 1) {
+  let random = createRandom(seed);
   const state = {
     ammo: COMBAT.pistolAmmo,
     maxAmmo: COMBAT.maxAmmo,
@@ -66,7 +68,7 @@ export function createCombat(scene, getPlayer, getCity) {
       heading: 0,
       health: options.health ?? COMBAT.enemyHealth,
       alive: true,
-      shootTimer: 1.2 + Math.random(),
+      shootTimer: 1.2 + random(),
       walk: 0,
       mission: options.mission ?? null,
       name: options.name ?? 'thug',
@@ -75,16 +77,23 @@ export function createCombat(scene, getPlayer, getCity) {
     return enemy;
   }
 
-  function clearEnemies() {
-    for (const enemy of state.enemies) {
-      scene.remove(enemy.group);
-      enemy.group.traverse((part) => {
-        if (!part.isMesh) return;
-        part.geometry.dispose();
-        part.material.dispose();
-      });
+  function removeEnemy(enemy) {
+    const index = state.enemies.indexOf(enemy);
+    if (index === -1) return false;
+    state.enemies.splice(index, 1);
+    scene.remove(enemy.group);
+    enemy.group.traverse((part) => {
+      if (!part.isMesh) return;
+      part.geometry.dispose();
+      part.material.dispose();
+    });
+    return true;
+  }
+
+  function clearEnemies(keep) {
+    for (const enemy of [...state.enemies]) {
+      if (!keep?.(enemy)) removeEnemy(enemy);
     }
-    state.enemies.length = 0;
   }
 
   function muzzleAt(position) {
@@ -235,11 +244,11 @@ export function createCombat(scene, getPlayer, getCity) {
     if (coverDistance(ray, range, city) <= range) return;
     muzzleAt(origin);
     tracer(origin, to);
-    if (Math.random() < chance) player.hurt?.(damage, source);
+    if (random() < chance) player.hurt?.(damage, source);
   }
 
   function shootAtPlayer(cop, player) {
-    if (Math.random() < 0.55) fireAtPlayer(cop, 1.5, player, 7, 'cop', 1, getCity());
+    if (random() < 0.55) fireAtPlayer(cop, 1.5, player, 7, 'cop', 1, getCity());
   }
 
   function update(dt, player) {
@@ -283,7 +292,7 @@ export function createCombat(scene, getPlayer, getCity) {
       enemy.legs[1].rotation.x = -enemy.legs[0].rotation.x;
       enemy.shootTimer = Math.max(0, enemy.shootTimer - dt);
       if (enemy.shootTimer <= 0 && distance < 30 && distance > 3) {
-        enemy.shootTimer = COMBAT.enemyFireRate + Math.random() * 0.6;
+        enemy.shootTimer = COMBAT.enemyFireRate + random() * 0.6;
         fireAtPlayer(enemy, 1.45, player, COMBAT.enemyDamage, enemy.mission, 0.4, city);
       }
       enemy.group.position.set(enemy.x, NPC_GROUND, enemy.z);
@@ -292,6 +301,7 @@ export function createCombat(scene, getPlayer, getCity) {
   }
 
   function reset() {
+    random = createRandom(seed);
     state.ammo = COMBAT.pistolAmmo;
     state.fireTimer = 0;
     state.punchTimer = 0;
@@ -314,6 +324,7 @@ export function createCombat(scene, getPlayer, getCity) {
     shoot,
     update,
     spawnEnemy,
+    removeEnemy,
     clearEnemies,
     killEnemy,
     shootAtPlayer,
