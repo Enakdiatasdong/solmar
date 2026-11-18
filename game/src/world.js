@@ -232,7 +232,7 @@ function buildRoadGraph() {
   return graph;
 }
 
-export function createCity(random) {
+export function createCity(random, reservedPlaces = []) {
   validateCityConfig();
   random = normalizeRandom(random);
   const group = new THREE.Group();
@@ -241,6 +241,11 @@ export function createCity(random) {
   const containers = [];
   const colliders = [];
   const labels = [];
+  const reserved = Array.isArray(reservedPlaces)
+    ? reservedPlaces.filter((place) => Number.isFinite(place?.x) && Number.isFinite(place?.z))
+    : [];
+  const isReserved = (x, z) => reserved.some((place) =>
+    Math.abs(x - place.x) <= CITY.block / 2 && Math.abs(z - place.z) <= CITY.block / 2);
 
   const facadeVariants = [
     { office: true },
@@ -349,6 +354,8 @@ export function createCity(random) {
   function addBuilding(cx, cz, width, depth, height, options = {}) {
     const variant = options.variant ?? random.int(0, facadeVariants.length - 1);
     const color = options.color ?? random.pick(PALETTE.buildings);
+    // Consume the usual random choices before leaving room for a place marker.
+    if (isReserved(cx, cz)) return null;
     const geometry = new THREE.BoxGeometry(width, height, depth);
     scaleBoxUVs(geometry, width, height, depth);
     const solid = facadeMaterial(variant, color);
@@ -505,20 +512,23 @@ export function createCity(random) {
   let frondIndex = 0;
   for (let palm = 0; palm < palmSpots.length; palm += 1) {
     const spot = palmSpots[palm];
+    const hidden = isReserved(spot.x, spot.z);
     const height = 7.2 * spot.scale;
     palmPosition.set(spot.x, 0.2, spot.z);
     palmScale.set(spot.scale, height, spot.scale);
     palmQuat.setFromEuler(new THREE.Euler(spot.x * 0.0006, random.range(0, Math.PI * 2), spot.z * 0.0005));
+    if (hidden) palmScale.set(0, 0, 0);
     palmMatrix.compose(palmPosition, palmQuat, palmScale);
     trunkMesh.setMatrixAt(palm, palmMatrix);
     const trunkRadius = 0.36 * spot.scale;
-    colliders.push({ minX: spot.x - trunkRadius, maxX: spot.x + trunkRadius, minZ: spot.z - trunkRadius, maxZ: spot.z + trunkRadius, height: 0.2 + height });
+    if (!hidden) colliders.push({ minX: spot.x - trunkRadius, maxX: spot.x + trunkRadius, minZ: spot.z - trunkRadius, maxZ: spot.z + trunkRadius, height: 0.2 + height });
     for (let frond = 0; frond < frondsPerPalm; frond += 1) {
       const angle = (frond / frondsPerPalm) * Math.PI * 2 + random.range(-0.2, 0.2);
       const tilt = random.range(0.9, 1.35);
       palmQuat.setFromEuler(new THREE.Euler(tilt, angle, 0, 'YXZ'));
       palmPosition.set(spot.x, 0.2 + height, spot.z);
       palmScale.set(1.15 * spot.scale, 1.15 * spot.scale, 0.32 * spot.scale);
+      if (hidden) palmScale.set(0, 0, 0);
       palmMatrix.compose(palmPosition, palmQuat, palmScale);
       if (frondIndex < frondMesh.count) frondMesh.setMatrixAt(frondIndex, palmMatrix);
       leafTint.setHex(random.chance(0.5) ? PALETTE.leaf : PALETTE.leafLight).offsetHSL(0, 0, random.range(-0.04, 0.04));
@@ -678,6 +688,7 @@ export function createCity(random) {
     );
     crate.position.set(x, 0.3 + size / 2, z);
     crate.rotation.y = random.range(0, Math.PI);
+    if (isReserved(x, z)) continue;
     group.add(crate);
     const extent = (size * (Math.abs(Math.cos(crate.rotation.y)) + Math.abs(Math.sin(crate.rotation.y)))) / 2;
     colliders.push({ minX: x - extent, maxX: x + extent, minZ: z - extent, maxZ: z + extent, height: size + 0.3 });

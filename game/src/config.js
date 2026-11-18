@@ -4,6 +4,14 @@
 export const STEP = 1 / 60;
 export const MAX_FRAME = 0.25;
 
+export const OUTFITS = [
+  { id: 'crimson', name: 'Crimson', color: 0xb84c3d },
+  { id: 'teal', name: 'Teal', color: 0x2f7f75 },
+  { id: 'gold', name: 'Gold', color: 0xd2b24c },
+  { id: 'violet', name: 'Violet', color: 0x7a4f8e },
+];
+export const DEFAULT_OUTFIT = 'crimson';
+
 /** Procedural city: a square grid of blocks separated by roads, with a beach on the south edge. */
 export const CITY = {
   grid: 10,
@@ -197,8 +205,8 @@ export const PALETTE = {
   npc: { shirt: [0x4f7fa8, 0x9e5a52, 0x5f8a63, 0xb59a55, 0x7a6a9e], skin: [0xc58d68, 0x9a6242, 0xe0b08a, 0x74503a] },
 };
 
-export const SAVE_KEY = 'solmar.save.v2';
-export const SAVE_VERSION = 2;
+export const SAVE_KEY = 'solmar.save.v3';
+export const SAVE_VERSION = 3;
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
 /** The title vista and the spawn point. */

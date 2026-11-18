@@ -3,7 +3,7 @@
 // exposes enterCar/exitCar so the vehicle system can take over. Physics uses the shared city
 // collider list; the camera orbit lives here because it follows the player's aim.
 import * as THREE from '../vendor/three.module.min.js';
-import { CAMERA, PALETTE, PLAYER, SPAWN } from './config.js';
+import { CAMERA, DEFAULT_OUTFIT, OUTFITS, PALETTE, PLAYER, SPAWN } from './config.js';
 import { clampToWorld, resolveCollisions } from './world.js';
 
 const SKIN = PALETTE.player;
@@ -29,8 +29,10 @@ export function createPlayer(city) {
   body.add(hips);
 
   const torso = limb(0.56, 0.66, 0.34, SKIN.jacket);
+  torso.name = 'jacket-torso';
   torso.position.y = 0.3;
   hips.add(torso);
+  const jacketMaterials = [torso.material];
 
   const stripe = limb(0.1, 0.3, 0.36, SKIN.accent);
   stripe.position.set(0.16, 0.4, 0.005);
@@ -63,8 +65,10 @@ export function createPlayer(city) {
     pivot.position.set(side * 0.35, 0.58, 0);
     hips.add(pivot);
     const upper = limb(0.15, 0.42, 0.17, SKIN.jacket);
+    upper.name = 'jacket-sleeve';
     upper.position.y = -0.19;
     pivot.add(upper);
+    jacketMaterials.push(upper.material);
     const forearm = limb(0.13, 0.36, 0.15, SKIN.skin);
     forearm.position.y = -0.56;
     pivot.add(forearm);
@@ -100,6 +104,7 @@ export function createPlayer(city) {
     grounded: true,
     health: PLAYER.health,
     maxHealth: PLAYER.health,
+    outfit: DEFAULT_OUTFIT,
     speed: 0,
     moving: false,
     running: false,
@@ -243,6 +248,14 @@ export function createPlayer(city) {
     state.health = Math.min(state.maxHealth, state.health + amount);
   }
 
+  function setOutfit(id) {
+    const outfit = OUTFITS.find((choice) => choice.id === id);
+    if (!outfit) return false;
+    for (const material of jacketMaterials) material.color.setHex(outfit.color);
+    state.outfit = outfit.id;
+    return true;
+  }
+
   function enterCar(car) {
     state.inCar = car;
     state.x = car.state.x;
@@ -282,6 +295,7 @@ export function createPlayer(city) {
     step,
     hurt,
     heal,
+    setOutfit,
     enterCar,
     exitCar,
     syncMesh,
