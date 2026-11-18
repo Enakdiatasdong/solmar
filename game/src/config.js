@@ -1,61 +1,207 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Every tuning number and colour for SOLMAR, the original open-world game set in a fictional
+// coastal city. Nothing here touches the DOM; the renderer, simulation and HUD all read from it.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
 export const STEP = 1 / 60;
+export const MAX_FRAME = 0.25;
 
+/** Procedural city: a square grid of blocks separated by roads, with a beach on the south edge. */
+export const CITY = {
+  grid: 10,
+  block: 54,
+  road: 18,
+  pitch: 72,
+  nodeMin: -360,
+  nodeMax: 360,
+  half: 360,
+  edge: 369,
+  beachStart: 372,
+  beachEnd: 540,
+  oceanStart: 540,
+  oceanWidth: 4000,
+  parkBlocks: [
+    [3, 3],
+    [7, 4],
+    [2, 7],
+    [6, 6],
+    [2, 8],
+  ],
+};
+
+/** Jax Moreno on foot. Distances are metres, speeds metres per second. */
 export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+  walkSpeed: 4.9,
+  runSpeed: 8.7,
+  jumpSpeed: 6.2,
+  gravity: 20,
+  radius: 0.45,
+  height: 1.8,
+  health: 100,
+  respawnInvuln: 1.4,
+  punchRange: 2.6,
+  punchDamage: 34,
+  punchCooldown: 0.42,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const CAMERA = {
+  distance: 7,
+  carDistance: 10,
+  height: 2.9,
+  carHeight: 4.2,
+  pitch: 0.3,
+  minPitch: -0.08,
+  maxPitch: 1.0,
+  sensitivity: 0.0045,
+  minDistance: 4.5,
+  maxDistance: 15,
+  follow: 12,
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+/** Arcade driving. The handbrake cuts grip and lets the tail slide. */
+export const VEHICLE = {
+  accel: 15,
+  brake: 26,
+  reverseAccel: 9,
+  maxSpeed: 33,
+  maxReverse: 9,
+  drag: 0.75,
+  roll: 2.2,
+  steer: 2.1,
+  handbrakeSteer: 3.6,
+  handbrakeDrag: 3.4,
+  radius: 1.15,
+  health: 100,
+  ramDamage: 16,
+  crashDamage: 22,
+  crashSpeed: 9,
+  smokeBelow: 34,
+  step: 1 / 60,
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+export const TRAFFIC = {
+  cars: 12,
+  pedestrians: 18,
+  spawnRadius: 190,
+  despawnRadius: 260,
+  carSpeedMin: 9,
+  carSpeedMax: 14,
+  pedSpeedMin: 1.15,
+  pedSpeedMax: 1.65,
+  laneOffset: 4.4,
+};
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+export const POLICE = {
+  maxWanted: 5,
+  steal: 2,
+  pedHit: 1,
+  gunNearCop: 1,
+  copHit: 2,
+  sight: 95,
+  hear: 40,
+  decayDelay: 9,
+  decayEvery: 3.1,
+  arrestRange: 2.5,
+  arrestTime: 1.15,
+  footCopSpeed: 6.2,
+  copCarSpeed: 27,
+  copCarAccel: 17,
+  shots: 0,
+  fine: 350,
+};
 
+/** Cash and mission rewards. Jax starts almost broke, which is the point of the story. */
+export const MISSIONS = {
+  startCash: 250,
+  rewards: {
+    'first-fare': 500,
+    'hot-wheels': 750,
+    'beach-run': 1200,
+    heat: 1500,
+    'harbor-job': 3000,
+  },
+  order: ['first-fare', 'hot-wheels', 'beach-run', 'heat', 'harbor-job'],
+  failTime: 180,
+  beachRunTime: 75,
+  pickupRadius: 7.5,
+  checkpointRadius: 9,
+  markerRadius: 3.4,
+};
+
+export const COMBAT = {
+  pistolAmmo: 24,
+  maxAmmo: 60,
+  pistolDamage: 45,
+  pistolRange: 70,
+  fireCooldown: 0.24,
+  enemyHealth: 60,
+  enemySpeed: 3.4,
+  enemyFireRate: 1.5,
+  enemyDamage: 7,
+  muzzleTime: 0.07,
+  enemyRadius: 0.55,
+};
+
+export const AUDIO = {
+  master: 0.5,
+  music: 0.13,
+  engine: 0.1,
+  siren: 0.08,
+};
+
+/** CSS colours for the DOM HUD and minimap, and three.js colours for the world. */
 export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
+  css: {
+    ink: '#f7efe3',
+    muted: '#b6aa9a',
+    gold: '#ffc857',
+    coral: '#ff6b57',
+    teal: '#49c6b8',
+    deep: '#131a24',
+    panel: 'rgba(16, 22, 30, 0.86)',
+    sand: '#e9d3a7',
+  },
+  sky: 0xf0bd8c,
+  skyTop: 0x8fa9bd,
+  fog: 0xe3bea0,
+  sun: 0xffe6bd,
+  hemiSky: 0xbfd4e6,
+  hemiGround: 0x8a6f56,
+  ocean: 0x2d7f95,
+  oceanDeep: 0x1e5d76,
+  foam: 0xf7f1e2,
+  sand: 0xe4cf9f,
+  boardwalk: 0xa9865e,
+  asphalt: 0x373b42,
+  sidewalk: 0x9c978d,
+  curb: 0xbab5aa,
+  grass: 0x6d8a57,
+  trunk: 0x7a5a3b,
+  leaf: 0x3f7a4e,
+  leafLight: 0x5b9663,
+  lamp: 0xffe3a8,
+  metal: 0x8e949b,
+  roof: 0x6f6a63,
+  buildings: [0xc9634a, 0x5eaaa5, 0xe3b759, 0x557aaf, 0xd87972, 0xe7d49e, 0x76a879, 0xe28a53, 0x9c83ae, 0x73a4c7],
+  accents: [0x24696d, 0x8c3f39, 0x354d78, 0x80602d],
+  player: { jacket: 0xb84c3d, jeans: 0x34425a, skin: 0xc58d68, hair: 0x2a211c, accent: 0xffc857 },
+  cars: [
+    { body: 0xb73f3c, cabin: 0x2b2f36, name: 'Solara GT' },
+    { body: 0x2f7f75, cabin: 0x223037, name: 'Tide coupe' },
+    { body: 0xd2b24c, cabin: 0x2c2a24, name: 'Sun taxi' },
+    { body: 0x4c6f9e, cabin: 0x222833, name: 'Marina sedan' },
+    { body: 0xe0e0d8, cabin: 0x30343a, name: 'Pier van' },
+    { body: 0x7a4f8e, cabin: 0x27222c, name: 'Neon hatch' },
+    { body: 0x3c6b44, cabin: 0x232a23, name: 'Reef pickup' },
+    { body: 0xc46a35, cabin: 0x2c2520, name: 'Dune muscle' },
+  ],
+  police: { body: 0x1d2a43, cabin: 0x161d2a, stripe: 0xf2f1e8, light: 0x3fa7ff, lightAlt: 0xff5a4d },
+  npc: { shirt: [0x4f7fa8, 0x9e5a52, 0x5f8a63, 0xb59a55, 0x7a6a9e], skin: [0xc58d68, 0x9a6242, 0xe0b08a, 0x74503a] },
 };
 
+export const SAVE_KEY = 'solmar.save.v2';
+export const SAVE_VERSION = 2;
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+/** The title vista and the spawn point. */
+export const TITLE_CAMERA = { x: -310, y: 210, z: 720, lookX: 0, lookY: 26, lookZ: 0 };
+export const SPAWN = { x: -1.2, z: 96, heading: 0 };
+export const STARTER_CAR = { x: 4.6, z: 100, heading: 0 };
