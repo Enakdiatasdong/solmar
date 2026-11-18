@@ -27,6 +27,8 @@ export const CITY = {
   ],
 };
 
+export const RURAL = { minX: -700, maxX: 700, minZ: -950, maxZ: -380 };
+
 /** Jax Moreno on foot. Distances are metres, speeds metres per second. */
 export const PLAYER = {
   walkSpeed: 4.9,
@@ -68,6 +70,7 @@ export const VEHICLE = {
   steer: 2.1,
   handbrakeSteer: 3.6,
   handbrakeDrag: 3.4,
+  dirt: { accel: 0.62, maxSpeed: 0.62, grip: 0.7 },
   radius: 1.15,
   health: 100,
   ramDamage: 16,

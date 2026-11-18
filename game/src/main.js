@@ -6,6 +6,8 @@ import {
 } from './config.js';
 import { createRandom, parseSeed } from './random.js';
 import { clampToWorld, createCity, resolveCollisions } from './world.js';
+import { createDistricts } from './districts.js';
+import { createLandmarks } from './landmarks.js';
 import { createPlayer } from './player.js';
 import { createJetpack, JETPACK_PRICE } from './jetpack.js';
 import { createVehicles, exitSpot } from './vehicles.js';
@@ -62,6 +64,7 @@ function makeGame(seedValue, shotName = null) {
   const renderer = createRenderer(canvas);
   const city = createCity(random);
   renderer.scene.add(city.group);
+  const districts = createDistricts({ scene: renderer.scene, city, random: createRandom(seedValue ^ 0xd157) });
   const player = createPlayer(city);
   renderer.scene.add(player.group);
   const jetpack = createJetpack(renderer.scene, player);
@@ -83,6 +86,7 @@ function makeGame(seedValue, shotName = null) {
   const combat = createCombat(renderer.scene, () => player, () => combatCity);
   const audio = createAudio();
   const hud = createHud();
+  const landmarks = createLandmarks({ scene: renderer.scene, city, districts, hud });
   const missions = createMissions({
     scene: renderer.scene, city, player, vehicles, police, combat, hud,
     // missions.js asks for a one-shot siren cue; audio.js exposes a wanted-level updater.
@@ -194,17 +198,32 @@ function makeGame(seedValue, shotName = null) {
     hud.setCash(state.cash);
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
+
     hud.setVehicleName(player.state.inCar?.spec?.name);
     const { fuel, maxFuel, owned, active } = jetpack.state;
     hud.setJetpack(fuel, maxFuel, owned, active);
     const regionSnapshot = regions.snapshot(player.state.x, player.state.z);
     hud.setRegions(regionSnapshot);
     hud.setRep(rep.rankInfo());
+
+    const { x, z } = player.state;
+    const district = districts.districtAt(x, z);
+    const surface = districts.surfaceAt(x, z);
+    const zone = district === 'rural' ? `Desa Utara — ${surface === 'dirt' ? 'Jalan Tanah' : 'Padang Rumput'}`
+      : district === 'beach' ? 'Pantai Solmar'
+        : district === 'downtown' ? 'Downtown — Kota' : 'Kota Solmar';
+    hud.setZone(`${zone} · Tempat ${landmarks.state.count}/${landmarks.state.total}`);
+
     const blips = missions.getBlips();
+    const landmarkBlips = landmarks.getBlips();
+    blips.push(...landmarkBlips);
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
     // Mission markers are already included by getBlips(), so do not draw a second copy.
-    hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw, regionSnapshot);
+    hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw, regionSnapshot, {
+      rural: districts.bounds, dirtRoads: districts.state.dirtRoads, landmarks: landmarkBlips,
+    });
+
   }
 
   function leaveCar() {
@@ -562,6 +581,7 @@ function makeGame(seedValue, shotName = null) {
     dt = Math.min(dt, MAX_FRAME);
     const controls = input.state();
     state.elapsed += dt;
+    districts.update(dt);
     state.pedHitCooldown = Math.max(0, state.pedHitCooldown - dt);
     if (player.state.inCar) {
       const car = player.state.inCar;
@@ -573,6 +593,7 @@ function makeGame(seedValue, shotName = null) {
         vehicles.stepCar(car, dt, {
           accelerate: controls.up, brake: controls.down, left: controls.left,
           right: controls.right, handbrake: controls.jump,
+          surface: districts.surfaceAt(car.state.x, car.state.z),
         }, city.colliders);
         const angle = Math.atan2(Math.sin(car.state.heading - orbit.yaw), Math.cos(car.state.heading - orbit.yaw));
         if (!input.isDragging()) orbit.yaw += angle * Math.min(1, dt * 2.4);
@@ -605,6 +626,7 @@ function makeGame(seedValue, shotName = null) {
     regions.update(dt, player, vehicles, police, hud);
     rep.noteWanted(police.state.wanted, { awardEscape: false });
     syncRider();
+    landmarks.update(dt, player);
     // Handle arrest before missions.fail() can clear the police's busted flag.
     if (!player.state.alive || player.state.health <= 0) { gameOver(); return; }
     if (police.state.busted) { busted(); return; }
@@ -744,8 +766,9 @@ function makeGame(seedValue, shotName = null) {
   }
 
   const game = {
-    seed: seedValue, city, renderer, player, jetpack, vehicles, traffic, police, combat, audio,
+    seed: seedValue, city, districts, landmarks, renderer, player, jetpack, vehicles, traffic, police, combat, audio,
     hud, missions, regions, rep, input, state, orbit, setScreen, startRun, restart, pause, resume,
+
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
     leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,
     missingElements: DOM_IDS.filter((id) => !nodes[id]),

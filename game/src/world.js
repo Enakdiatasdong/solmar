@@ -3,7 +3,7 @@
 // streetlights and props. Exports building/container collision AABBs and the road graph the AI and
 // missions navigate by. Everything is generated from the seeded RNG, so a seed rebuilds the city.
 import * as THREE from '../vendor/three.module.min.js';
-import { CITY, PALETTE, SPAWN, STARTER_CAR } from './config.js';
+import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR } from './config.js';
 
 const FACADE_UNIT = 5;
 
@@ -815,8 +815,10 @@ export function clampToWorld(position) {
   if (!position || typeof position !== 'object') throw new TypeError('World position must be an object.');
   if (!Number.isFinite(position.x)) position.x = 0;
   if (!Number.isFinite(position.z)) position.z = 0;
-  position.z = Math.max(-CITY.edge, Math.min(CITY.beachEnd - 6, position.z));
-  const xLimit = isOnSand(position.x, position.z) ? CITY.half + 20 : CITY.edge;
+  position.z = Math.max(RURAL.minZ, Math.min(CITY.beachEnd - 6, position.z));
+  const xLimit = position.z <= RURAL.maxZ
+    ? RURAL.maxX
+    : isOnSand(position.x, position.z) ? CITY.half + 20 : CITY.edge;
   position.x = Math.max(-xLimit, Math.min(xLimit, position.x));
   return position;
 }

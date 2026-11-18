@@ -475,6 +475,10 @@ export function createVehicles(city, scene) {
     const state = car.state;
     // Expansion rides carry their own tuning; older cars and police fall back to VEHICLE.
     const T = car.tuning ?? VEHICLE;
+    const dirt = controls.surface === 'dirt' ? VEHICLE.dirt : null;
+    const maxSpeed = T.maxSpeed * (dirt?.maxSpeed ?? 1);
+    const accel = T.accel * (dirt?.accel ?? 1);
+
     if (state.wrecked) {
       state.speed *= Math.max(0, 1 - dt * 2.2);
     } else {
@@ -482,7 +486,8 @@ export function createVehicles(city, scene) {
       const braking = Boolean(controls.brake);
       if (accelerating && !braking) {
         if (state.speed < 0) state.speed = Math.min(0, state.speed + T.brake * dt);
-        else state.speed += T.accel * dt;
+        else state.speed += accel * dt;
+
       } else if (braking && !accelerating) {
         if (state.speed > 0) state.speed = Math.max(0, state.speed - T.brake * dt);
         else state.speed -= T.reverseAccel * dt;
@@ -491,13 +496,15 @@ export function createVehicles(city, scene) {
         state.speed -= Math.sign(state.speed) * Math.min(Math.abs(state.speed), drag * dt);
       }
       if (controls.handbrake) state.speed *= Math.max(0, 1 - T.handbrakeDrag * dt);
-      state.speed = Math.max(-T.maxReverse, Math.min(T.maxSpeed, state.speed));
+      state.speed = Math.max(-T.maxReverse, Math.min(maxSpeed, state.speed));
     }
 
-    const speedRatio = Math.min(1, Math.abs(state.speed) / T.maxSpeed);
+    const speedRatio = Math.min(1, Math.abs(state.speed) / maxSpeed);
     const steerInput = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
-    const grip = controls.handbrake ? 0.55 : 1;
-    const turnRate = (controls.handbrake ? T.handbrakeSteer : T.steer) * (0.35 + speedRatio * 0.85);
+    const grip = (controls.handbrake ? 0.55 : 1) * (dirt?.grip ?? 1);
+    const steeringBoost = dirt ? 1 + (1 - dirt.grip) * 2 : 1;
+    const turnRate = (controls.handbrake ? T.handbrakeSteer : T.steer) * (0.35 + speedRatio * 0.85) * steeringBoost;
+
     if (state.speed !== 0 || controls.handbrake) {
       const direction = state.speed < 0 ? -1 : 1;
       state.heading += steerInput * turnRate * dt * direction * grip;
