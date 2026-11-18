@@ -1,79 +1,57 @@
-// Reproducible editorial views use the same game objects as normal play.
-import * as THREE from '../vendor/three.module.min.js';
-import { syncCar } from './vehicles.js';
+import { MathUtils } from '../vendor/three.module.min.js';
 
+// Stages only real game objects; every capture uses the same renderer as play.
 export function stageShot(name, game) {
-  if (!['start', 'play', 'end'].includes(name)) return false;
-  const { player, vehicles, traffic, missions, police, hud, render } = game;
-  if (name === 'start') {
+  const { state, player, vehicles, police, missions, traffic, hud }=game;
+  if(!['start','play','end'].includes(name))return false;
+  if(name==='start') {
+    state.shotMode='start';
     game.setScreen('title');
-    document.getElementById('btn-continue').hidden = true;
-    render.frameTitle(0);
-    game.shotFrozen = true;
-    return true;
-  }
-  game.startRun(false);
-  const car = vehicles.cars.find(item => item.starter);
-  Object.assign(car, { x: 0, z: 252, heading: 0, speed: 29, vx: 0, vz: 29, stolen: true, driver: 'player' });
-  syncCar(car);
-  player.state.inCar = car;
-  player.step(0, {}, 0);
-  missions.start('first-fare');
-  if (name === 'play') {
-    missions.state.stage = 'dropoff';
-    missions.state.elapsed = 24.6;
-    // Advance the actual pickup transition to put the active marker at Pier 9.
-    car.x = 80; car.z = 152; car.speed = 0;
-    player.step(0, {}, 0);
-    missions.state.stage = 'pickup';
-    missions.update(.01);
-    Object.assign(car, { x: 0, z: 252, speed: 29, vx: 0, vz: 29 });
-    syncCar(car); player.step(0, {}, 0);
-    hud.setDialogue('MARA', 'Pier 9, Jax. A smooth ride, a quiet handoff. Then we talk about your future.');
-    hud.setObjective('FIRST FARE · Client aboard. Deliver to Pier 9. Keep it smooth.');
-    police.setWanted(2);
-    police.update(.01, player.state, {});
-    police.state.copCars.forEach((cop, index) => {
-      cop.x = index ? 4 : -4;
-      cop.z = 264 + index * 13;
-      cop.heading = 0;
-      syncCar(cop);
-    });
-    // Keep a clean lane for the staged drive while retaining ambient street life.
-    traffic.cars.forEach((ambient, index) => {
-      if (Math.hypot(ambient.x, ambient.z - 252) < 18) {
-        ambient.x = index % 2 ? 72 : -72;
-        ambient.z = 215 + index * 3;
-        syncCar(ambient);
-      }
-    });
-    traffic.cars.slice(0, 2).forEach((ambient, index) => {
-      Object.assign(ambient, { x: index ? -4 : 4, z: 307 + index * 24, heading: index ? 0 : Math.PI });
-      syncCar(ambient);
-    });
-    traffic.pedestrians.slice(0, 2).forEach((person, index) => {
-      person.x = index ? -12 : 12;
-      person.z = 280 + index * 12;
-      person.group.position.set(person.x, 0, person.z);
-    });
-    render.state.yaw = -.10;
-    render.state.pitch = .39;
-    render.state.zoom = 12;
-    render.follow(player.state, 1, {});
-    render.camera.lookAt(new THREE.Vector3(player.state.x, 1.3, player.state.z + 7));
   } else {
-    Object.assign(car, { x: 80, z: 152, speed: 0, vx: 0, vz: 0 });
-    player.step(0, {}, 0);
-    missions.update(.1);
-    Object.assign(car, { x: 288, z: 268, speed: 0 });
-    syncCar(car); player.step(0, {}, 0);
-    missions.state.elapsed = 46.7;
-    missions.update(.1);
-    for (const event of missions.takeEvents()) if (event.type === 'complete') game.completeMission(event);
-    render.state.yaw = -.45;
-    render.state.zoom = 13;
-    render.follow(player.state, 1, {});
+    game.startRun(false);
+    const car=vehicles.starter;
+    car.x=name==='play'?0:288;
+    car.z=name==='play'?250:268;
+    car.heading=0;
+    car.speed=name==='play'?28.8:0;
+    game.enterCar(car);
+    // Keep the camera car and its immediate road clear of initial traffic.
+    for(const other of vehicles.cars) if(other!==car&&Math.hypot(other.x-car.x,other.z-car.z)<22) {
+      other.x=-144;other.z=-100-vehicles.cars.indexOf(other)*7;
+    }
+    player.state.x=car.x;player.state.z=car.z;
+    missions.start('first-fare');
+    missions.state.stage='dropoff';
+    missions.state.elapsed=name==='end'?46.8:29.4;
+    if(name==='play') {
+      police.setWanted(2);
+      police.update(1/60,player.state,game.combat);
+      police.copCars.forEach((cop,i)=>{cop.x=i?5:-6;cop.z=car.z+(i?22:6);cop.heading=i?Math.PI:0;cop.speed=23;});
+      hud.setObjective('FIRST FARE • Passenger aboard. Reach Pier 9. Keep your cool.');
+      hud.setDialogue('MARA','A simple fare, Jax. The patrol didn’t get the message.');
+      state.cameraYaw=MathUtils.degToRad(-9);
+    } else {
+      // Complete through the same event path that awards gameplay rewards.
+      missions.complete();
+      for(const event of missions.takeEvents())if(event.type==='complete')game.completeMission(event);
+      game.exitCar();
+      player.setPosition(291,268,0);
+      state.cameraYaw=MathUtils.degToRad(17);
+    }
+    state.shotMode=name;
+    state.time=18;
+    state.distance=15;
+    state.pitch=0.42;
+    vehicles.update(0,state.time);
+    player.animate(0,state.time);
+    traffic.update(0,player.state);
+    document.getElementById('toasts').replaceChildren();
   }
-  game.shotFrozen = true;
+  let painted=0;
+  function ready() {
+    if(++painted<4)requestAnimationFrame(ready);
+    else window.__shotReady=true;
+  }
+  requestAnimationFrame(ready);
   return true;
 }

@@ -1,206 +1,130 @@
-const money = value => `$${Math.max(0, Math.floor(value || 0)).toLocaleString('en-US')}`;
-const byId = id => document.getElementById(id);
+import { MathUtils } from '../vendor/three.module.min.js';
+import { CITY } from './config.js';
 
 export function createHud() {
+  const byId = id => document.getElementById(id);
   const root = byId('hud');
-  const missionList = byId('mission-list');
   const map = byId('minimap');
   const context = map.getContext('2d');
-  const toasts = [];
-  let jobsOpen = false;
+  const money = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  let toastCount = 0;
+  function setMoney(value) { byId('cash-value').textContent = `$${money.format(value)}`; }
   function setHealth(value) {
-    const health = Math.max(0, Math.min(100, Math.ceil(value || 0)));
+    const health = MathUtils.clamp(value, 0, 100);
     byId('health-fill').style.width = `${health}%`;
-    byId('health-fill').style.background = health < 30 ? '#ff7168' : '#b7f09b';
-    byId('health-text').textContent = String(health);
+    byId('health-text').textContent = String(Math.ceil(health));
+    root.classList.toggle('critical', health < 30);
   }
-  function setMoney(value) { byId('cash-value').textContent = money(value); }
-  function setWanted(value) {
-    const level = Math.max(0, Math.min(5, Math.ceil(value || 0)));
-    const stars = byId('wanted-stars');
-    stars.textContent = Array.from({ length: 5 }, (_, i) => i < level ? '★' : '☆').join(' ');
-    stars.setAttribute('aria-label', `${level} of 5 wanted stars`);
-    stars.classList.toggle('hot', level > 0);
+  function setWanted(value, hidden = false) {
+    byId('wanted-stars').textContent = '★'.repeat(value) + '☆'.repeat(5 - value);
+    byId('wanted-stars').classList.toggle('searching', hidden && value > 0);
+    byId('wanted-label').textContent = value ? (hidden ? 'SEARCHING • STAY HIDDEN' : 'SOLMAR PATROL • PURSUIT') : 'KEEP A LOW PROFILE';
   }
-  function setSpeed(value) {
-    const show = value !== null && value !== undefined;
-    byId('speed-box').hidden = !show;
-    if (show) byId('speed-value').textContent = String(Math.round(Math.abs(value) * 3.6)).padStart(3, '0');
+  function setSpeed(speed, visible = true) {
+    byId('speed-box').hidden = !visible;
+    byId('speed-value').textContent = String(Math.round(Math.abs(speed) * 3.6)).padStart(3, '0');
   }
-  function setObjective(text) {
-    byId('objective-text').textContent = text || 'Explore Solmar. Find a gold beacon to take a job.';
-  }
-  function setDialogue(speaker, text) {
-    if (text === undefined) { text = speaker; speaker = 'SOLMAR'; }
-    byId('dialogue').hidden = !text;
-    byId('subtitle').textContent = speaker || 'SOLMAR';
-    byId('dialogue-text').textContent = text || '';
-  }
-  function setHint(text) {
-    byId('hint').textContent = text || '';
-    byId('hint').hidden = !text;
-  }
-  function toast(text, kind = 'info') {
-    if (!text) return;
+  function setObjective(text = '') { byId('objective-text').textContent = text; }
+  function toast(text, kind = '') {
     const item = document.createElement('div');
-    item.className = `toast toast-${kind}`;
+    item.className = `toast ${kind}`;
     item.textContent = text;
     byId('toasts').append(item);
-    toasts.push({ element: item, remaining: 4.5 });
-    while (toasts.length > 5) toasts.shift().element.remove();
+    toastCount++;
+    while (byId('toasts').children.length > 5) byId('toasts').firstElementChild.remove();
+    setTimeout(() => item.remove(), 6000);
   }
-  function update(dt) {
-    for (let i = toasts.length - 1; i >= 0; i--) {
-      toasts[i].remaining -= dt;
-      if (toasts[i].remaining <= 0) {
-        toasts[i].element.remove();
-        toasts.splice(i, 1);
-      }
-    }
+  function setDialogue(speaker, text) {
+    byId('dialogue').hidden = !text;
+    byId('subtitle').textContent = speaker;
+    byId('dialogue-text').textContent = text;
   }
+  function setHint(text) { byId('hint').textContent = text; }
   function setVisible(visible) {
     root.hidden = !visible;
     root.setAttribute('aria-hidden', String(!visible));
   }
-  function hideMissionList() {
-    missionList.hidden = true;
-    missionList.setAttribute('aria-hidden', 'true');
-    jobsOpen = false;
-  }
-  function showMissionList(list, onSelect) {
-    const rows = byId('mission-rows');
-    rows.replaceChildren();
-    list.forEach((mission, index) => {
+  function showMissionList(missions) {
+    const list = byId('mission-list');
+    list.replaceChildren();
+    const title = document.createElement('div');
+    title.className = 'jobs-heading';
+    title.textContent = 'THE CONTACT BOOK';
+    list.append(title);
+    for (const mission of missions) {
       const row = document.createElement('button');
-      row.type = 'button';
-      row.className = `mission-row${mission.completed ? ' done' : ''}`;
+      row.className = 'mission-row';
       row.dataset.mission = mission.id;
-      row.disabled = Boolean(mission.locked);
-      const number = document.createElement('span');
-      number.className = 'mission-number';
-      number.textContent = String(index + 1).padStart(2, '0');
+      row.disabled = mission.locked;
+      const title = document.createElement('strong');
+      title.textContent = `${mission.completed ? '✓ ' : ''}${mission.title}`;
       const detail = document.createElement('span');
-      detail.className = 'mission-detail';
-      const name = document.createElement('strong');
-      name.textContent = mission.title;
-      const status = document.createElement('small');
-      status.textContent = mission.locked ? 'Complete the previous job to unlock' : mission.completed ? `Complete${mission.best ? ` · best ${mission.best.toFixed(1)}s` : ''}` : 'Ready to play';
-      detail.append(name, status);
-      const reward = document.createElement('span');
-      reward.className = 'mission-reward';
-      reward.textContent = mission.locked ? 'LOCKED' : mission.completed ? '✓' : money(mission.reward);
-      row.append(number, detail, reward);
-      row.addEventListener('click', () => { if (typeof onSelect === 'function') onSelect(mission.id); });
-      rows.append(row);
-    });
-    missionList.hidden = false;
-    missionList.setAttribute('aria-hidden', 'false');
-    jobsOpen = true;
+      detail.textContent = mission.locked ? 'LOCKED • COMPLETE THE PREVIOUS JOB' : `$${money.format(mission.reward)}${mission.best != null ? ` • BEST ${mission.best.toFixed(1)}s` : ' • AVAILABLE'}`;
+      const story = document.createElement('small');
+      story.textContent = mission.description;
+      row.append(title, detail, story);
+      list.append(row);
+    }
+    const close = document.createElement('button');
+    close.className = 'close-jobs';
+    close.dataset.closeJobs = 'true';
+    close.textContent = 'CLOSE [M]';
+    list.append(close);
+    list.hidden = false;
+    return true;
   }
-  byId('btn-close-jobs').addEventListener('click', hideMissionList);
-  function drawMinimap(city, subject, cameraYaw, missions, police) {
-    if (!context) return;
-    const player = subject.state || subject;
-    const pos = player.inCar || player;
-    const yaw = cameraYaw || 0;
-    const size = map.width;
-    const centre = size / 2;
-    const scale = size / 490;
-    const radius = centre - 8;
-    context.clearRect(0, 0, size, size);
-    context.save();
-    context.beginPath();
-    context.arc(centre, centre, radius, 0, Math.PI * 2);
-    context.clip();
-    context.fillStyle = '#183b3d';
-    context.fillRect(0, 0, size, size);
-    context.translate(centre, centre);
-    context.transform(-Math.cos(yaw) * scale, -Math.sin(yaw) * scale, Math.sin(yaw) * scale, -Math.cos(yaw) * scale, 0, 0);
-    context.translate(-pos.x, -pos.z);
-    context.fillStyle = '#2b777a';
-    context.fillRect(-1000, 540, 2000, 1200);
-    context.fillStyle = '#b9ad79';
-    context.fillRect(-385, 372, 770, 168);
-    context.fillStyle = '#345850';
-    for (const park of city.parks || []) {
-      const x = park.x ?? -360 + ((park.col ?? park[0]) + .5) * 72;
-      const z = park.z ?? -360 + ((park.row ?? park[1]) + .5) * 72;
-      const width = park.width || 48;
-      const depth = park.depth || 48;
-      context.fillRect(x - width / 2, z - depth / 2, width, depth);
-    }
-    context.lineWidth = 11;
-    context.strokeStyle = '#72847a';
-    context.beginPath();
-    for (const edge of city.graph.edges) {
-      context.moveTo(edge.a.x, edge.a.z);
-      context.lineTo(edge.b.x, edge.b.z);
-    }
-    context.stroke();
-    context.strokeStyle = '#7d9587';
-    context.lineWidth = 5;
-    context.beginPath();
-    context.moveTo(-360, 410);
-    context.lineTo(360, 410);
-    context.moveTo(-288, 360);
-    context.lineTo(-288, 464);
-    context.stroke();
-    context.restore();
-    const point = (x, z, color, markerRadius = 4) => {
-      const dx = x - pos.x;
-      const dz = z - pos.z;
-      let mx = (-Math.cos(yaw) * dx + Math.sin(yaw) * dz) * scale;
-      let my = (-Math.sin(yaw) * dx - Math.cos(yaw) * dz) * scale;
-      const distance = Math.hypot(mx, my);
-      if (distance > radius - 9) { mx *= (radius - 9) / distance; my *= (radius - 9) / distance; }
-      context.beginPath();
-      context.arc(centre + mx, centre + my, markerRadius, 0, Math.PI * 2);
-      context.fillStyle = color;
-      context.fill();
-      context.strokeStyle = '#173334';
-      context.lineWidth = 1.5;
-      context.stroke();
+  function hideMissionList() { byId('mission-list').hidden = true; }
+  function toggleMissionList(missions) {
+    if (byId('mission-list').hidden) return showMissionList(missions);
+    hideMissionList();
+    return false;
+  }
+  function drawMinimap(city, player, yaw, missions, police) {
+    const ctx = context;
+    const width = map.width, height = map.height;
+    const scale = 0.59;
+    const center = { x: width * 0.5, y: height * 0.56 };
+    const co = Math.cos(yaw), si = Math.sin(yaw);
+    const project = (x, z) => {
+      const dx = x - player.x, dz = z - player.z;
+      return { x: center.x + (-co * dx + si * dz) * scale, y: center.y - (si * dx + co * dz) * scale };
     };
-    if (!missions.active) {
-      for (const job of missions.list || []) {
-        if (job.locked) continue;
-        const location = job.location || job.start || job;
-        if (Number.isFinite(location.x) && Number.isFinite(location.z)) point(location.x, location.z, job.completed ? '#68dbca' : '#ffd76e', 4);
-      }
+    function rectangle(x, z, w, d, color) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      [[x-w/2,z-d/2],[x+w/2,z-d/2],[x+w/2,z+d/2],[x-w/2,z+d/2]].forEach(([a,b],i) => { const p=project(a,b); if (!i) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y); });
+      ctx.closePath();ctx.fill();
     }
-    for (const beacon of missions.beacons || []) point(beacon.x, beacon.z, beacon.color || '#ffd76e', 5);
-    const policeState = police?.state || police || {};
-    for (const cop of [...policeState.copCars || [], ...policeState.footCops || []]) {
-      if (cop.alive !== false) point(cop.x, cop.z, '#ff746a', 3.5);
+    ctx.clearRect(0,0,width,height);
+    ctx.fillStyle = '#192e39'; ctx.fillRect(0,0,width,height);
+    rectangle(0,0,744,744,'#344a50');
+    rectangle(0,450,744,156,'#a89a74');
+    rectangle(0,820,2500,570,'#286676');
+    for (const park of city.parks || []) rectangle(park.x,park.z,park.width || 40,park.depth || 40,'#61846a');
+    ctx.strokeStyle='#6a7f82';ctx.lineWidth=CITY.roadWidth*scale;
+    ctx.beginPath();
+    for (let n=-360;n<=360;n+=72) {
+      let a=project(n,-360),b=project(n,360);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+      a=project(-360,n);b=project(360,n);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
     }
-    context.save();
-    context.translate(centre, centre);
-    context.rotate(yaw - (pos.heading || 0));
-    context.beginPath();
-    context.moveTo(0, -9);
-    context.lineTo(6, 7);
-    context.lineTo(0, 4);
-    context.lineTo(-6, 7);
-    context.closePath();
-    context.fillStyle = '#fff9df';
-    context.fill();
-    context.strokeStyle = '#153d3e';
-    context.lineWidth = 2;
-    context.stroke();
-    context.restore();
-    context.beginPath();
-    context.arc(centre, centre, radius, 0, Math.PI * 2);
-    context.strokeStyle = '#eddfb2';
-    context.lineWidth = 2;
-    context.stroke();
+    ctx.stroke();
+    rectangle(252,566,17,166,'#d4b88e');
+    if (missions.target) {
+      const a=project(player.x,player.z),b=project(missions.target.x,missions.target.z);
+      ctx.setLineDash([4,5]);ctx.strokeStyle='#ffe1a0';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.setLineDash([]);
+    }
+    function blip(point,color,radius=3) {
+      let p=project(point.x,point.z);
+      p={x:MathUtils.clamp(p.x,8,width-8),y:MathUtils.clamp(p.y,8,height-8)};
+      ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,radius,0,Math.PI*2);ctx.fill();
+    }
+    if (missions.target) blip(missions.target,'#41efd0',5);
+    else for(const job of missions.list) if(!job.locked&&!job.completed)blip(job.start,'#ffd281',4);
+    for(const cop of [...police.copCars,...police.footCops]) if(cop.alive!==false)blip(cop,'#ff716f',3);
+    ctx.save();ctx.translate(center.x,center.y);ctx.rotate(yaw-player.heading);
+    ctx.fillStyle='#ffffff';ctx.strokeStyle='#0b1e2a';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-8);ctx.lineTo(-5,6);ctx.lineTo(0,3);ctx.lineTo(5,6);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
+    ctx.fillStyle='#eff6e9';ctx.font='10px monospace';ctx.fillText('N',width-18,16);
+    ctx.strokeStyle='#ffffff77';ctx.beginPath();ctx.moveTo(width-14,21);ctx.lineTo(width-14-Math.sin(yaw)*11,21+Math.cos(yaw)*11);ctx.stroke();
   }
-  return {
-    setHealth, setMoney, setCash: setMoney, setWanted, setSpeed, setObjective,
-    setMission: setObjective, setDialogue, setHint, toast, update, setVisible,
-    show: () => setVisible(true), hide: () => setVisible(false),
-    showMissionList, hideMissionList,
-    toggleMissionList(list, onSelect) { if (jobsOpen) hideMissionList(); else showMissionList(list, onSelect); },
-    drawMinimap,
-    get jobsOpen() { return jobsOpen; },
-  };
+  return { setMoney, setCash:setMoney, setHealth, setWanted, setSpeed, setMission:setObjective, setObjective, toast, setDialogue, setHint, setVisible, show:()=>setVisible(true), hide:()=>setVisible(false), showMissionList, hideMissionList, toggleMissionList, drawMinimap, get missionListOpen(){return !byId('mission-list').hidden;}, get toastCount(){return toastCount;} };
 }

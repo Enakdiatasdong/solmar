@@ -1,233 +1,40 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="theme-color" content="#143e42">
-  <meta name="description" content="One driver. Five jobs. A whole coast to lose yourself in. Explore Solmar, an original open-world crime game.">
-  <title>SOLMAR — The coast is yours</title>
-  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-  <style>
-    :root{color-scheme:dark;--ink:#11373b;--paper:#fff0ce;--gold:#ffd36c;--coral:#ff795f;--teal:#67e0cd;--muted:#b6c7b8}
-    *{box-sizing:border-box}
-    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#234f58;font-family:Arial,Helvetica,sans-serif;color:var(--paper)}
-    button{font:inherit;cursor:pointer}
-    button:focus-visible{outline:3px solid var(--gold);outline-offset:5px}
-    button:disabled{cursor:default}
-    [hidden]{display:none!important}
-    #game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
-    #status{position:fixed;left:18px;bottom:10px;z-index:30;font-size:11px;letter-spacing:.06em;color:#fff2cb}
-    #status:empty{display:none}
-    .screen{position:fixed;inset:0;display:none;z-index:10}
-    body[data-screen="title"] #title-screen{display:flex}
-    body[data-screen="paused"] #pause-screen,body[data-screen="busted"] #busted-screen,body[data-screen="gameover"] #game-over-screen,body[data-screen="mission-complete"] #complete-screen{display:flex}
-    .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;font-weight:800;color:var(--gold)}
-    #title-screen{align-items:center;padding:48px 6.1%;background:linear-gradient(90deg,rgba(12,41,43,.94) 0%,rgba(12,41,43,.88) 28%,rgba(12,41,43,.35) 56%,rgba(12,41,43,0) 83%)}
-    .title-content{width:520px;max-width:52vw;position:relative}
-    .edition{display:flex;align-items:center;gap:10px;margin:0 0 20px;font-size:10px;font-weight:800;letter-spacing:.21em;text-transform:uppercase}
-    .sun-mark{width:26px;height:26px;border:2px solid var(--coral);border-radius:50%;display:inline-block;position:relative;overflow:hidden}
-    .sun-mark:after{content:"";position:absolute;top:15px;left:-3px;width:32px;height:12px;background:var(--coral)}
-    h1{font-family:Impact,'Arial Black',Arial,sans-serif;font-size:clamp(76px,10.8vw,150px);font-weight:900;letter-spacing:-.035em;line-height:.83;margin:0 0 23px;color:var(--paper);text-shadow:5px 5px 0 rgba(255,121,95,.8)}
-    .tagline{font-size:14px;letter-spacing:.065em;color:var(--teal);font-weight:bold;margin:0 0 18px}
-    .story{max-width:400px;font-size:14px;line-height:1.65;color:#e2e3c8;margin:0 0 23px}
-    .story strong{color:var(--paper)}
-    .title-buttons{display:flex;gap:10px;flex-wrap:wrap;max-width:450px;margin-bottom:13px}
-    .button{display:inline-flex;justify-content:center;align-items:center;min-height:46px;padding:13px 23px;letter-spacing:.11em;font-size:11px;font-weight:900;text-transform:uppercase;border:1px solid rgba(255,240,206,.32);background:rgba(17,55,59,.85);color:var(--paper);transition:background .15s,transform .15s}
-    .button:hover{background:#28565a;transform:translateY(-1px)}
-    .button.primary{background:var(--coral);border-color:var(--coral);color:#17393b}
-    .button.primary:hover{background:#ff9b77}
-    .button.gold{background:var(--gold);border-color:var(--gold);color:var(--ink)}
-    .button.quiet{border:0;background:transparent;padding:5px 0;min-height:28px;color:#bfdbcf}
-    .title-secondary{display:flex;gap:22px;margin:3px 0 22px}
-    .controls{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;max-width:420px;padding-top:16px;border-top:1px solid #a2b8a34d;color:#c6d3c1;font-size:10px;letter-spacing:.035em}
-    .controls span{white-space:nowrap}
-    .controls b{display:inline-block;color:var(--paper);min-width:52px;font-size:10px;letter-spacing:.03em}
-    .vista-caption{position:absolute;right:5%;bottom:48px;text-align:right;text-shadow:0 2px 8px #183e42}
-    .vista-caption strong{display:block;font-size:11px;letter-spacing:.32em;text-transform:uppercase;margin-bottom:7px}
-    .vista-caption span{font-size:11px;color:#fff4d5;letter-spacing:.08em}
-    .modal-screen{align-items:center;justify-content:center;background:rgba(8,31,35,.52);backdrop-filter:blur(4px);padding:30px}
-    .card{width:450px;max-width:100%;background:rgba(15,48,52,.97);padding:38px 42px;border-top:5px solid var(--coral);box-shadow:0 20px 80px #09272d66}
-    .card h2{font-family:Impact,'Arial Black',Arial,sans-serif;font-weight:900;font-size:57px;letter-spacing:.01em;line-height:1;margin:15px 0 19px}
-    .card p{font-size:14px;line-height:1.6;color:#c5d6c6}
-    .card .button{width:100%;margin-top:10px}
-    .card small{display:block;color:#9ab7ad;font-size:10px;letter-spacing:.08em;margin-top:23px}
-    #complete-screen{justify-content:flex-end;padding-right:9%;background:linear-gradient(90deg,transparent,rgba(9,32,37,.4))}
-    #complete-screen .card{border-color:var(--gold);width:430px}
-    #complete-title{font-size:60px;color:var(--paper)}
-    .complete-award{font-family:Impact,'Arial Black',Arial,sans-serif;font-size:66px;color:var(--gold);letter-spacing:.015em;margin:25px 0 6px}
-    .complete-stats{display:flex;justify-content:space-between;gap:12px;padding:18px 0;border-top:1px solid #f5e9bc26;border-bottom:1px solid #f5e9bc26;margin:20px 0}
-    #complete-extra{font-size:12px;color:#d2dfc7}
-    #complete-time{font-size:12px;color:var(--teal);white-space:nowrap}
-    #busted-fine{font-family:Impact,Arial,sans-serif;color:var(--coral);font-size:38px;letter-spacing:.03em}
-    #hud{position:fixed;inset:0;z-index:3;pointer-events:none}
-    .vitals{position:absolute;left:30px;top:27px;width:224px;filter:drop-shadow(0 2px 5px #113b4566)}
-    .health-row{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;letter-spacing:.15em;font-weight:bold}
-    #health-text{font-size:19px;font-weight:900;letter-spacing:0}
-    .health-track{width:100%;height:5px;background:#183d41a6;margin:7px 0 12px}
-    #health-fill{width:100%;height:100%;background:#b7f09b}
-    .money-row{display:flex;justify-content:space-between;align-items:baseline}
-    .wallet-label{font-size:9px;font-weight:bold;letter-spacing:.17em;color:#ccdfd1}
-    #cash-value{font-size:28px;font-weight:900;letter-spacing:-.04em;color:#fff5d8;font-variant-numeric:tabular-nums}
-    .heat-panel{position:absolute;right:31px;top:28px;text-align:right;text-shadow:0 2px 5px #143e49}
-    .heat-panel .eyebrow{font-size:9px;color:#e6e2c6;letter-spacing:.2em}
-    #wanted-stars{font-size:26px;letter-spacing:.09em;line-height:1.5;color:#b6c5af}
-    #wanted-stars.hot{color:var(--coral)}
-    #objective-box{position:absolute;left:30px;top:151px;width:300px;max-width:calc(100% - 60px);padding:12px 15px 14px;background:rgba(14,47,51,.88);border-left:3px solid var(--gold)}
-    #objective-box .eyebrow{font-size:8px;letter-spacing:.19em;margin-bottom:6px}
-    #objective-text{font-size:13px;line-height:1.5;color:#fff3d0}
-    .map-wrap{position:absolute;left:25px;bottom:27px;width:190px;height:213px;filter:drop-shadow(0 3px 10px #0b343b66)}
-    #minimap{display:block;width:190px;height:190px}
-    .map-caption{margin-top:4px;display:flex;justify-content:space-between;font-size:8px;letter-spacing:.15em;font-weight:800;color:#f1e9cc;padding:0 12px}
-    .map-caption span:last-child{color:var(--teal);letter-spacing:.06em}
-    #speed-box{position:absolute;right:32px;bottom:32px;text-align:right;line-height:1;text-shadow:0 3px 5px #183e47}
-    #speed-value{font-family:Impact,'Arial Black',Arial,sans-serif;font-size:73px;letter-spacing:.015em;font-variant-numeric:tabular-nums}
-    #speed-box small{display:block;font-size:10px;letter-spacing:.28em;color:var(--teal);margin-top:6px}
-    #dialogue{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);width:480px;max-width:calc(100% - 470px);padding:15px 19px;background:rgba(15,46,50,.92);border-top:2px solid var(--teal)}
-    #subtitle{font-size:9px;font-weight:900;letter-spacing:.18em;color:var(--teal);margin-bottom:6px;text-transform:uppercase}
-    #dialogue-text{font-size:13px;line-height:1.5;color:#fff2d7}
-    #hint{position:absolute;left:50%;bottom:146px;transform:translateX(-50%);padding:10px 16px;max-width:75%;background:#173e41dc;color:var(--gold);font-size:11px;letter-spacing:.04em;text-align:center;white-space:pre-line}
-    #toasts{position:absolute;right:30px;top:112px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:320px}
-    .toast{padding:11px 15px;border-left:3px solid var(--teal);background:#143c40eb;font-size:12px;line-height:1.4;color:#fff1d1;box-shadow:0 3px 12px #14383a22}
-    .toast-error,.toast-danger{border-color:var(--coral)}
-    .toast-success{border-color:var(--gold)}
-    .hud-bottom-label{position:absolute;right:32px;bottom:132px;color:#f7efce;font-size:9px;letter-spacing:.14em;text-shadow:0 2px 3px #1c4345}
-    #mission-list{position:fixed;right:28px;top:100px;width:460px;max-width:calc(100vw - 56px);z-index:25;background:#123a3ef7;border-top:4px solid var(--gold);box-shadow:0 20px 90px #0a242c88;padding:22px;pointer-events:auto}
-    .jobs-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-    .jobs-heading h2{font-family:Impact,Arial,sans-serif;font-size:31px;letter-spacing:.03em;margin:5px 0 0}
-    #btn-close-jobs{width:32px;height:32px;background:transparent;border:1px solid #d8e4bd55;font-size:20px;color:var(--paper)}
-    .mission-row{display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:#20494a;border:0;border-bottom:1px solid #d6ddbf1c;color:var(--paper);padding:17px 13px}
-    .mission-row:hover:enabled{background:#32605a}
-    .mission-row:disabled{opacity:.45}
-    .mission-row.done .mission-number,.mission-row.done .mission-reward{color:var(--teal)}
-    .mission-number{font-family:Impact,Arial,sans-serif;font-size:26px;color:var(--gold)}
-    .mission-detail{flex:1}
-    .mission-detail strong{display:block;font-size:13px;letter-spacing:.025em;margin-bottom:5px}
-    .mission-detail small{display:block;font-size:10px;color:#bbcec0}
-    .mission-reward{font-size:11px;font-weight:bold;color:var(--gold)}
-    .jobs-note{font-size:10px;color:#afc8bc;line-height:1.5;margin:16px 0 0}
-    #touch-controls{display:none;position:fixed;inset:0;z-index:6;pointer-events:none}
-    body.touch[data-screen="playing"] #touch-controls{display:block}
-    .touch-pad{position:absolute;left:22px;bottom:26px;display:grid;grid-template-columns:repeat(3,46px);gap:5px}
-    .touch-actions{position:absolute;right:20px;bottom:25px;display:flex;gap:6px;flex-wrap:wrap;width:165px;justify-content:flex-end}
-    #touch-controls button{width:46px;height:46px;color:#fff2d1;font-weight:bold;background:#143e42b8;border:1px solid #d5e3c370;pointer-events:auto;touch-action:none;border-radius:6px}
-    .touch-pad button:first-child{grid-column:2}
-    .touch-pad button:nth-child(2){grid-column:1}
-    .touch-actions button{font-size:11px}
-    @media(max-width:850px){
-      #title-screen{padding:30px 5%;background:linear-gradient(90deg,#0d3032ed,#0d3032bb 47%,#0d30322b)}
-      .title-content{max-width:68vw;width:460px}
-      h1{font-size:100px}
-      .story{font-size:12px;max-width:340px;line-height:1.6;margin-bottom:15px}
-      .tagline{font-size:11px}
-      .edition{margin-bottom:15px}
-      .title-secondary{margin-bottom:10px}
-      .controls{font-size:9px;gap:7px;max-width:355px}
-      .controls b{font-size:9px;min-width:45px}
-      .vista-caption{right:4%;bottom:25px}
-      .vitals{left:21px;top:22px;width:194px}
-      #objective-box{left:21px;top:141px;width:270px;padding:10px 12px}
-      .heat-panel{right:21px;top:24px}
-      #wanted-stars{font-size:22px}
-      #dialogue{width:380px;max-width:calc(100% - 345px);left:53%;padding:12px;bottom:28px}
-      #dialogue-text{font-size:11px}
-      .map-wrap{width:158px;left:17px;bottom:25px;height:179px}
-      #minimap{width:158px;height:158px}
-      #speed-value{font-size:58px}
-      #speed-box{right:20px;bottom:27px}
-      #hint{bottom:146px;max-width:65%;font-size:10px}
-      .hud-bottom-label{right:20px;bottom:111px;font-size:8px}
-      #toasts{right:21px;top:104px;max-width:250px}
-      .toast{font-size:11px}
-      #complete-screen{padding-right:5%}
-      #complete-screen .card{width:380px;padding:30px}
-    }
-    @media(max-width:560px){
-      .title-content{max-width:100%;width:100%}h1{font-size:90px}.story{max-width:350px}.edition{font-size:8px}
-      #title-screen{padding:25px;background:#123739bb}.tagline{font-size:10px}.controls{max-width:100%}.vista-caption{display:none}
-      .button{min-height:40px;padding:11px 15px;font-size:10px}.title-buttons{margin-bottom:8px}.title-secondary{margin-bottom:12px}
-      .vitals{width:145px;left:15px;top:15px}#cash-value{font-size:24px}.wallet-label{font-size:8px}.health-row{font-size:8px}
-      .heat-panel{right:14px;top:16px}#wanted-stars{font-size:19px}#objective-box{left:15px;top:132px;width:225px}
-      #objective-text{font-size:11px}.map-wrap{left:10px;bottom:23px;width:128px;height:150px}#minimap{width:128px;height:128px}.map-caption{font-size:6px;padding:0 7px}
-      #dialogue{left:50%;bottom:186px;max-width:calc(100% - 30px);width:calc(100% - 30px)}#hint{bottom:286px;max-width:90%;width:max-content}
-      #speed-box{right:15px;bottom:25px}#speed-value{font-size:53px}.hud-bottom-label{right:15px;bottom:102px;font-size:7px}
-      #toasts{top:220px;right:15px;max-width:230px}.toast{font-size:10px;padding:8px 10px}
-      .card{padding:28px}.card h2{font-size:44px}#complete-title{font-size:47px}.complete-award{font-size:55px}
-      #complete-screen{justify-content:center;padding:20px}.complete-stats{gap:8px}#complete-extra,#complete-time{font-size:10px}
-      #mission-list{top:70px;left:15px;right:15px;max-width:none;width:auto;padding:18px}.mission-row{padding:13px 10px}
-      body.touch .map-wrap{bottom:145px}body.touch #dialogue{bottom:310px}body.touch #hint{bottom:405px}
-    }
-    @media(max-height:650px) and (min-width:561px){
-      #title-screen{padding-top:25px;padding-bottom:25px}h1{font-size:100px;margin-bottom:18px}.edition{margin-bottom:13px}.story{font-size:12px;margin-bottom:16px}.title-secondary{margin-bottom:12px}.controls{padding-top:11px;gap:6px}.tagline{margin-bottom:12px}
-    }
-  </style>
-  <script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#142736">
+<title>SOLMAR — The coast is yours</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<style>
+:root{color-scheme:dark;--ink:#122934;--paper:#fff2d6;--gold:#ffd18a;--teal:#4ce2c3;--glass:rgba(13,34,45,.88);font-family:Arial,Helvetica,sans-serif}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--ink);color:var(--paper)}button{font:inherit;cursor:pointer;border:0;color:inherit}button:focus-visible{outline:3px solid white;outline-offset:4px}[hidden]{display:none!important}#game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}#status{position:fixed;bottom:9px;right:22px;font:10px monospace;color:#e7f9e7b3;letter-spacing:2px;pointer-events:none;z-index:3}body[data-screen="playing"] #status{opacity:.6}.screen{position:fixed;inset:0;z-index:10;pointer-events:none}.screen button,.screen a{pointer-events:auto}.eyebrow{font:700 11px monospace;letter-spacing:4px;color:var(--gold);text-transform:uppercase}.rule{display:inline-block;width:46px;height:3px;background:var(--teal);margin-right:12px;vertical-align:middle}#title-screen{background:linear-gradient(90deg,rgba(10,30,42,.93) 0%,rgba(10,30,42,.76) 28%,rgba(10,30,42,.15) 62%,transparent 100%)}.title-copy{position:absolute;left:6%;top:10%;width:540px;max-width:72vw}.title-copy h1{font-size:clamp(68px,12vw,160px);letter-spacing:-10px;font-style:italic;line-height:.92;margin:34px 0 8px;color:var(--paper);text-shadow:0 4px 18px #0e26356b}.title-copy h1:after{content:'';display:block;background:var(--teal);width:89%;height:6px;margin-top:13px}.title-tagline{font:700 13px monospace;letter-spacing:6px;margin:24px 0 28px}.story{font-size:15px;line-height:1.7;max-width:380px;color:#e0e6dc}.story strong{color:var(--paper)}.menu-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;max-width:460px;margin-top:29px}.primary{background:var(--gold);color:var(--ink);padding:17px 24px;font-size:12px;font-weight:900;letter-spacing:2px;box-shadow:4px 4px 0 #102b37}.secondary{background:#183746df;border:1px solid #8ca7a96b;padding:16px 19px;letter-spacing:2px;font-size:11px;font-weight:bold}.primary:hover{background:#ffe3b3;transform:translateY(-2px)}.secondary:hover{background:#2d5260}.title-footer{position:absolute;left:6%;bottom:7%;font:10px monospace;line-height:1.9;letter-spacing:1px;color:#bdd3ce}.vista-label{position:absolute;right:5%;bottom:9%;text-align:right;text-shadow:0 2px 8px #102536}.vista-label strong{font-size:27px;letter-spacing:5px}.vista-label p{font:10px monospace;letter-spacing:4px;color:var(--gold)}#hud{position:fixed;inset:0;z-index:4;pointer-events:none}#hud button{pointer-events:auto}.health-panel{position:absolute;top:27px;left:30px;width:240px;padding:15px 17px 12px;background:var(--glass);border-left:3px solid var(--teal);box-shadow:0 4px 20px #11253026}.health-heading{font:700 10px monospace;letter-spacing:2px;display:flex;justify-content:space-between}.health-heading span:last-child{color:var(--teal)}.health-track{height:5px;background:#65746d5c;margin-top:12px}.health-track i{height:100%;display:block;background:var(--teal);width:100%;transition:width .15s}.critical .health-track i{background:#ff7c72}.district{position:absolute;top:32px;left:50%;transform:translateX(-50%);font:700 10px monospace;letter-spacing:5px;text-shadow:0 2px 8px #152f3c}.district b{display:block;text-align:center;font-size:19px;letter-spacing:6px;margin-top:6px}.wallet{position:absolute;right:30px;top:25px;text-align:right;padding:13px 18px;background:var(--glass);border-right:3px solid var(--gold);min-width:225px}#cash-value{font-size:27px;letter-spacing:1px;font-weight:800}#wanted-stars{font-size:20px;letter-spacing:5px;color:var(--gold);margin:3px -5px 3px 0}#wanted-label{font:8px monospace;letter-spacing:1px;color:#bdd3ce}#wanted-stars.searching{animation:search 1.2s infinite alternate}@keyframes search{to{opacity:.3}}#objective-box{position:absolute;top:119px;left:30px;width:330px;max-width:calc(100vw - 60px);background:var(--glass);padding:14px 17px;border-left:3px solid var(--gold)}.objective-label{font:700 9px monospace;letter-spacing:3px;color:var(--gold);margin-bottom:7px}#objective-text{font-size:12px;line-height:1.5;color:#f6f0df}.map-frame{position:absolute;bottom:33px;left:30px;width:234px;background:var(--glass);border:1px solid #cde2d842;box-shadow:0 4px 25px #001c3044;padding:7px}#minimap{width:218px;height:172px;display:block}.map-footer{display:flex;justify-content:space-between;padding:9px 3px 4px;font:8px monospace;letter-spacing:2px;color:#cfdfd7}.map-footer span{color:var(--gold)}#speed-box{position:absolute;right:34px;bottom:45px;display:flex;align-items:flex-end;gap:12px;text-shadow:0 3px 14px #132d39}#speed-value{font-size:68px;font-weight:800;line-height:.8;letter-spacing:-3px}#speed-box small{font:10px monospace;letter-spacing:2px;line-height:1.8}#speed-box small b{color:var(--teal);display:block}#dialogue{position:absolute;bottom:52px;left:50%;transform:translateX(-50%);width:550px;max-width:calc(100vw - 610px);background:var(--glass);padding:15px 20px;border-top:2px solid var(--teal)}#subtitle{font:700 9px monospace;letter-spacing:3px;color:var(--teal);margin-bottom:7px}#dialogue-text{font-size:13px;line-height:1.6}#hint{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);font:10px monospace;letter-spacing:.4px;white-space:nowrap;padding:9px 15px;background:#102a35bd;color:#f3e8cf}#toasts{position:absolute;right:30px;top:160px;width:290px;display:flex;flex-direction:column;gap:8px}.toast{font-size:12px;line-height:1.5;background:var(--glass);padding:13px 17px;border-right:3px solid var(--gold);animation:slide .2s ease-out}.toast.success{border-color:var(--teal)}@keyframes slide{from{transform:translateX(20px);opacity:0}}#mission-list{position:fixed;z-index:30;left:50%;top:50%;transform:translate(-50%,-50%);width:530px;max-width:90vw;max-height:90vh;overflow:auto;background:#112b38f5;padding:22px;box-shadow:0 20px 90px #041e30bd;border-top:3px solid var(--gold)}.jobs-heading{font:700 11px monospace;letter-spacing:4px;color:var(--gold);padding:4px 0 15px}.mission-row{background:#20424d;border-left:3px solid var(--teal);display:block;text-align:left;width:100%;padding:13px 15px;margin-bottom:7px}.mission-row strong{font-size:17px}.mission-row span{float:right;font:9px monospace;color:var(--gold);margin-top:5px}.mission-row small{display:block;font-size:11px;margin-top:6px;color:#bfcec8;line-height:1.4}.mission-row:disabled{opacity:.43;cursor:default;border-color:#8c9c9c}.mission-row:hover:enabled{background:#31606a}.close-jobs{background:none;margin-top:12px;font:10px monospace;letter-spacing:3px;color:var(--gold)}.center-panel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:460px;max-width:90vw;background:#122d3aee;border-top:4px solid var(--gold);padding:35px;box-shadow:0 24px 100px #0b263d7d}.center-panel h2{font-size:44px;letter-spacing:-2px;margin:18px 0 12px;font-style:italic}.center-panel p{font-size:14px;line-height:1.7;color:#d7e0d5}.center-panel .menu-actions{margin-top:23px}.veil{background:#0e2c394f;backdrop-filter:blur(3px)}.complete-panel{left:7%;transform:translateY(-50%);width:440px;max-width:86vw;background:#0f2e3bed;border-color:var(--teal)}.complete-panel h2{font-size:46px}.complete-stats{display:flex;gap:35px;padding:20px 0;border-top:1px solid #d7e0d533;border-bottom:1px solid #d7e0d533;margin-top:25px}.complete-stats b{display:block;font-size:31px;color:var(--teal)}.complete-stats small{display:block;font:9px monospace;letter-spacing:2px;color:#c6d8d0;margin-top:8px}#complete-extra{font:11px monospace;letter-spacing:1px;margin-top:20px;color:var(--gold)}#touch{display:none;position:fixed;inset:0;z-index:8;pointer-events:none}body.touch #touch{display:block}#touch button{position:absolute;pointer-events:auto;width:48px;height:48px;background:#123949bb;border:1px solid #cadfda80;border-radius:50%;touch-action:none;font:700 12px monospace}#touch [data-touch="forward"]{left:72px;bottom:139px}#touch [data-touch="back"]{left:72px;bottom:35px}#touch [data-touch="left"]{left:20px;bottom:87px}#touch [data-touch="right"]{left:124px;bottom:87px}#touch [data-touch="enter"]{right:24px;bottom:90px}#touch [data-touch="fire"]{right:86px;bottom:40px}#touch [data-touch="punch"]{right:24px;bottom:153px}#touch [data-touch="jump"]{right:145px;bottom:90px}#touch [data-touch="pause"]{right:12px;top:155px}body.touch .map-frame{bottom:230px;width:174px}body.touch #minimap{width:158px;height:125px}@media(max-width:900px){.title-copy{top:10%;left:5%}.title-copy h1{letter-spacing:-6px}.story{font-size:13px;max-width:310px}.district{display:none}.health-panel{left:18px;top:18px;width:210px}.wallet{right:18px;top:18px;min-width:190px}#objective-box{top:112px;left:18px;width:300px}#toasts{right:18px;top:150px;width:230px}.map-frame{left:18px;bottom:36px;width:194px}#minimap{width:178px;height:142px}#dialogue{bottom:83px;max-width:calc(100vw - 450px);padding:10px 13px}#dialogue-text{font-size:11px}#speed-value{font-size:52px}.title-footer{bottom:5%;font-size:9px}.vista-label{display:none}}@media(max-width:600px){.title-copy{max-width:90vw}.title-copy h1{font-size:84px}.story{max-width:300px}.title-tagline{font-size:10px;letter-spacing:4px}.wallet{min-width:150px;padding:10px}.health-panel{width:160px}#objective-box{width:265px;top:105px}#wanted-stars{font-size:15px}#cash-value{font-size:22px}#dialogue{left:230px;right:12px;transform:none;width:auto;max-width:none}#toasts{top:210px;width:200px}#hint{font-size:8px;max-width:95vw;white-space:normal;text-align:center}.mission-row span{float:none;display:block}.center-panel{padding:25px}#speed-box{bottom:65px;right:18px}}
+</style>
 </head>
 <body data-screen="title">
-  <canvas id="game" tabindex="0" aria-label="Solmar city. Use WASD to move, E to enter a car, M for jobs."></canvas>
-  <div id="status" role="status" aria-live="polite"></div>
-
-  <section id="title-screen" class="screen" aria-label="Solmar main menu">
-    <div class="title-content">
-      <div class="edition"><span class="sun-mark" aria-hidden="true"></span> A city of sun. A life of trouble.</div>
-      <h1>SOLMAR</h1>
-      <p class="tagline">A coastal city · an ex-getaway driver</p>
-      <p class="story"><strong>Jax Moreno</strong> came home for a clean start. Mara has other plans. Five last jobs between him and a place in the sun. Keep your wheels close, your friends closer, and the coast in sight.</p>
-      <div class="title-buttons">
-        <button id="btn-start" class="button primary">Start a new story ↗</button>
-        <button id="btn-continue" class="button gold" hidden>Continue</button>
-      </div>
-      <div class="title-secondary">
-        <button id="btn-walk" class="button quiet">Just take a walk</button>
-        <button id="btn-title-jobs" class="button quiet">The five jobs</button>
-      </div>
-      <div class="controls" aria-label="Controls">
-        <span><b>WASD</b> Move / drive</span><span><b>SHIFT</b> Sprint</span>
-        <span><b>SPACE</b> Jump / handbrake</span><span><b>E</b> Enter / exit car</span>
-        <span><b>F</b> Punch</span><span><b>CLICK</b> Pistol</span>
-        <span><b>M</b> Jobs menu</span><span><b>P / ESC</b> Pause</span>
-        <span><b>DRAG</b> Look · wheel zoom</span><span><b>N</b> Mute audio</span>
-      </div>
-    </div>
-    <div class="vista-caption"><strong>Welcome to Solmar</strong><span>Blue water. Dirty money. One last run.</span></div>
-  </section>
-
-  <div id="hud" hidden aria-hidden="true">
-    <div class="vitals">
-      <div class="health-row"><span>JAX MORENO</span><span><span id="health-text">100</span> HP</span></div>
-      <div class="health-track"><div id="health-fill"></div></div>
-      <div class="money-row"><span class="wallet-label">CASH ON HAND</span><span id="cash-value">$250</span></div>
-    </div>
-    <div class="heat-panel"><div class="eyebrow">Keep a low profile</div><div id="wanted-stars" aria-label="0 of 5 wanted stars">☆ ☆ ☆ ☆ ☆</div></div>
-    <div id="objective-box"><div class="eyebrow">The next move</div><div id="objective-text">Explore Solmar. Find a gold beacon to take a job.</div></div>
-    <div class="map-wrap"><canvas id="minimap" width="256" height="256" aria-label="Rotating city minimap"></canvas><div class="map-caption"><span>SOLMAR</span><span>COASTAL DISTRICT</span></div></div>
-    <div id="speed-box" hidden><span id="speed-value">000</span><small>KM / H</small></div>
-    <div class="hud-bottom-label">M &nbsp; JOBS &nbsp; / &nbsp; P &nbsp; PAUSE</div>
-    <div id="dialogue" hidden><div id="subtitle">MARA</div><div id="dialogue-text"></div></div>
-    <div id="hint" hidden></div>
-    <div id="toasts" role="status" aria-live="polite"></div>
-  </div>
-
-  <section id="pause-screen" class="screen modal-screen" aria-label="Paused">
-    <div class="card"><div class="eyebrow">Take a breath</div><h2>COAST IS CLEAR.</h2><p>The city can wait. Your run is paused.</p><button id="btn-resume" class="button primary">Back to Solmar</button><button id="btn-jobs" class="button">The five jobs</button><button id="btn-restart-pause" class="button quiet">Start a new run</button><small>P / ESC / Q TO RESUME · N TO MUTE</small></div>
-  </section>
-  <section id="busted-screen" class="screen modal-screen" aria-label="Busted">
-    <div class="card"><div class="eyebrow">Solmar Police Department</div><h2>BUSTED.</h2><p>A few questions. A lighter wallet. Another chance.</p><div id="busted-fine">−$250</div><button class="button primary" data-action="resume">Back on the street</button><small>PRESS ENTER TO CONTINUE</small></div>
-  </section>
-  <section id="game-over-screen" class="screen modal-screen" aria-label="Game over">
-    <div class="card"><div class="eyebrow">The coast slips away</div><h2>END OF THE ROAD.</h2><p>Solmar keeps its secrets. Try a different route.</p><button id="btn-restart" class="button primary">One more run</button><small>PRESS ENTER OR R TO RESTART</small></div>
-  </section>
-  <section id="complete-screen" class="screen modal-screen" aria-label="Mission complete">
-    <div class="card"><div class="eyebrow">Job complete / Solmar stories</div><h2 id="complete-title">First Fare</h2><p>You delivered. The coast is a little closer.</p><div id="complete-cash" class="complete-award">+$500</div><div class="complete-stats"><span id="complete-extra">1 of 5 jobs complete</span><span id="complete-time">46.8 s</span></div><button id="btn-continue-story" class="button gold">Keep the story going ↗</button><small>PRESS ENTER TO RETURN TO THE CITY</small></div>
-  </section>
-
-  <section id="mission-list" hidden aria-hidden="true" aria-label="The five jobs">
-    <div class="jobs-heading"><div><div class="eyebrow">One last run</div><h2>THE FIVE JOBS</h2></div><button id="btn-close-jobs" aria-label="Close jobs">×</button></div>
-    <div id="mission-rows"></div><p class="jobs-note">Select an unlocked job, or find its gold beacon in the city. Complete jobs in order to follow Jax’s story.</p>
-  </section>
-  <div id="touch-controls" aria-label="Touch game controls">
-    <div class="touch-pad"><button data-touch="KeyW" aria-label="Forward">↑</button><button data-touch="KeyA" aria-label="Left">←</button><button data-touch="KeyS" aria-label="Back">↓</button><button data-touch="KeyD" aria-label="Right">→</button></div>
-    <div class="touch-actions"><button data-touch="KeyE">E</button><button data-touch="KeyF">F</button><button data-touch="Fire">FIRE</button><button data-touch="ShiftLeft">RUN</button><button data-touch="Space">JUMP</button><button data-touch="KeyP">Ⅱ</button></div>
-  </div>
-  <script type="module" src="./src/main.js"></script>
+<canvas id="game" aria-label="SOLMAR coastal city game"></canvas>
+<div id="status" role="status">BUILDING THE COAST…</div>
+<section id="title-screen" class="screen" aria-label="Main menu">
+  <div class="title-copy"><div class="eyebrow"><span class="rule"></span>A COASTAL CRIME STORY</div><h1>SOLMAR</h1><div class="title-tagline">THE COAST IS YOURS.</div><p class="story">Sun on the water. Trouble on the streets.<br><strong>Jax Moreno</strong> used to drive getaways.<br>Five jobs stand between him and a clean start.</p><div class="menu-actions"><button id="btn-start" class="primary">NEW STORY →</button><button id="btn-continue" class="secondary" hidden>CONTINUE</button><button id="btn-jobs-title" class="secondary">JOBS [M]</button></div></div>
+  <div class="title-footer">WASD / ARROWS — MOVE & DRIVE &nbsp; E — ENTER / USE<br>CLICK — FIRE &nbsp; F — PUNCH &nbsp; SPACE — JUMP / HANDBRAKE<br>MOUSE DRAG — CAMERA &nbsp; M — JOBS &nbsp; P — PAUSE &nbsp; N — AUDIO<br><span style="color:var(--gold)">PRESS ENTER OR SPACE TO BEGIN</span></div>
+  <div class="vista-label"><strong>BAHÍA SOLMAR</strong><p>36° NORTH • A NEW LIFE AWAITS</p></div>
+</section>
+<div id="hud" hidden aria-hidden="true">
+  <div class="health-panel"><div class="health-heading"><span>JAX MORENO</span><span>HP <b id="health-text">100</b></span></div><div class="health-track"><i id="health-fill"></i></div></div>
+  <div class="district">SOUTH COAST<b id="district-name">SOLMAR</b></div>
+  <div class="wallet"><div id="cash-value">$250</div><div id="wanted-stars">☆☆☆☆☆</div><div id="wanted-label">KEEP A LOW PROFILE</div></div>
+  <div id="objective-box"><div class="objective-label">YOUR NEXT MOVE</div><div id="objective-text">Find a gold beacon or open Jobs [M].</div></div>
+  <div class="map-frame"><canvas id="minimap" width="218" height="172" aria-label="Local street map"></canvas><div class="map-footer">SOLMAR <span>LIVE NAVIGATION</span></div></div>
+  <div id="speed-box" hidden><span id="speed-value">000</span><small>KM/H<b id="ride-label">COASTLINE COUPE</b></small></div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="dialogue" hidden><div id="subtitle"></div><div id="dialogue-text"></div></div>
+  <div id="hint">E — ENTER / USE &nbsp; M — JOBS</div>
+</div>
+<div id="mission-list" hidden aria-label="Mission contact book"></div>
+<section id="pause-screen" class="screen veil" hidden aria-label="Paused"><div class="center-panel"><div class="eyebrow">TAKE A BREATHER</div><h2>COAST IS CLEAR.</h2><p>The city can wait. Your story is saved after every completed job.</p><div class="menu-actions"><button id="btn-resume" class="primary">RESUME →</button><button id="btn-jobs" class="secondary">JOBS [M]</button><button id="btn-restart-pause" class="secondary">NEW STORY</button></div></div></section>
+<section id="busted-screen" class="screen veil" hidden aria-label="Busted"><div class="center-panel"><div class="eyebrow">SOLMAR PATROL</div><h2>BUSTED.</h2><p>They took the keys. They took <strong id="busted-fine">$0</strong>.<br>They didn’t take your second chance.</p><button id="btn-walk" class="primary">WALK IT OFF →</button></div></section>
+<section id="game-over-screen" class="screen veil" hidden aria-label="Game over"><div class="center-panel"><div class="eyebrow">END OF THE ROAD</div><h2>WASHED ASHORE.</h2><p>Solmar always offers another way in.</p><button id="btn-restart" class="primary">TRY AGAIN →</button></div></section>
+<section id="complete-screen" class="screen" hidden aria-label="Mission complete"><div class="center-panel complete-panel"><div class="eyebrow">JOB COMPLETE / CLEAN GETAWAY</div><h2 id="complete-title">First Fare</h2><p>Word travels fast on this coast.<br>Your next contact is waiting.</p><div class="complete-stats"><div><b id="complete-cash">+$500</b><small>CASH EARNED</small></div><div><b id="complete-time">46.8s</b><small>JOB TIME</small></div></div><div id="complete-extra">1 OF 5 JOBS COMPLETE</div><div class="menu-actions"><button id="btn-continue-story" class="primary">BACK TO THE COAST →</button></div></div></section>
+<div id="touch" aria-label="Touch controls"><button data-touch="forward" aria-label="Forward">W</button><button data-touch="back" aria-label="Reverse">S</button><button data-touch="left" aria-label="Left">A</button><button data-touch="right" aria-label="Right">D</button><button data-touch="enter" aria-label="Enter or use">E</button><button data-touch="fire" aria-label="Fire">FIRE</button><button data-touch="punch" aria-label="Punch">HIT</button><button data-touch="jump" aria-label="Jump or handbrake">JUMP</button><button data-touch="pause" aria-label="Pause">Ⅱ</button></div>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>

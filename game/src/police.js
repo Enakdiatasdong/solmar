@@ -1,246 +1,245 @@
 import * as THREE from '../vendor/three.module.min.js';
-import { createPerson } from './player.js';
+import { POLICE, CITY } from './config.js';
 import { resolveCollisions, clampToWorld } from './world.js';
 
-const angularDifference = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
-// Segment/AABB intersection also works when either coordinate has zero delta.
-function segmentBlocked(a, b, box) {
-  let low = .025, high = .975;
-  for (const axis of ['X', 'Z']) {
-    const key = axis.toLowerCase();
-    const start = a[key], delta = b[key] - start;
-    const minimum = box[`min${axis}`], maximum = box[`max${axis}`];
-    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) continue;
-    if (Math.abs(delta) < 1e-8) {
-      if (start < minimum || start > maximum) return false;
+// Segment versus a solid footprint. A building really breaks visual contact.
+function crossesFootprint(a, b, box) {
+  let enter = 0;
+  let leave = 1;
+  for (const [axis, low, high] of [['x', 'minX', 'maxX'], ['z', 'minZ', 'maxZ']]) {
+    const delta = b[axis] - a[axis];
+    if (Math.abs(delta) < 0.00001) {
+      if (a[axis] < box[low] || a[axis] > box[high]) return false;
     } else {
-      let first = (minimum - start) / delta, last = (maximum - start) / delta;
-      if (first > last) [first, last] = [last, first];
-      low = Math.max(low, first);
-      high = Math.min(high, last);
-      if (low > high) return false;
+      let p = (box[low] - a[axis]) / delta;
+      let q = (box[high] - a[axis]) / delta;
+      if (p > q) [p, q] = [q, p];
+      enter = Math.max(enter, p);
+      leave = Math.min(leave, q);
+      if (leave < enter) return false;
     }
   }
-  return low <= high;
+  return leave > 0.02 && enter < 0.98;
+}
+
+function createOfficer() {
+  const group = new THREE.Group();
+  const uniform = new THREE.MeshStandardMaterial({ color: 0x203c57, roughness: 0.92 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xb78060, roughness: 0.95 });
+  const black = new THREE.MeshStandardMaterial({ color: 0x14202b, roughness: 0.75 });
+  function part(w, h, d, x, y, z, material) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    group.add(mesh);
+    return mesh;
+  }
+  part(0.62, 0.78, 0.34, 0, 1.12, 0, uniform);
+  part(0.39, 0.4, 0.36, 0, 1.72, 0, skin);
+  part(0.48, 0.12, 0.43, 0, 1.96, 0.03, uniform);
+  part(0.52, 0.1, 0.42, 0, 0.84, 0, black);
+  const legs = [part(0.23, 0.75, 0.25, -0.18, 0.41, 0, uniform), part(0.23, 0.75, 0.25, 0.18, 0.41, 0, uniform)];
+  part(0.2, 0.63, 0.22, -0.43, 1.07, 0.05, uniform);
+  part(0.2, 0.52, 0.23, 0.4, 1.2, 0.17, uniform).rotation.x = -0.8;
+  part(0.12, 0.14, 0.43, 0.4, 1.3, 0.47, black);
+  part(0.12, 0.15, 0.02, 0.16, 1.3, 0.18, new THREE.MeshStandardMaterial({ color: 0xffd079, metalness: 0.6, roughness: 0.3 }));
+  group.userData.legs = legs;
+  return group;
 }
 
 export function createPolice(city, scene, vehicles) {
-  const state = { wanted: 0, copCars: [], footCops: [], forcedDecay: false, decayTimer: 0, dropTimer: 0, arrestTimer: 0, outOfSight: true, events: [], spawnClock: 0, time: 0 };
-  const graph = city.roadNetwork ?? city.graph;
-  const nodes = new Map(graph.nodes.map(node => [node.id, node]));
-  const nodeFor = node => typeof node === 'object' ? node : nodes.get(node);
+  const state = {
+    wanted: 0, heat: 0, decayTimer: 0, outOfSight: true,
+    arrestTimer: 0, busted: false, forcedDecay: false,
+    lastSeen: { x: 0, z: 0 }, reason: '', clock: 0, spawnClock: 0, deployment: 0,
+  };
+  const copCars = [];
+  const footCops = [];
+  let serial = 0;
+
   function hasLineOfSight(a, b) {
-    return !city.colliders.some(box => segmentBlocked(a, b, box));
+    return !(city.colliders || []).some(box => crossesFootprint(a, b, box));
   }
   function clearActors() {
-    for (const car of [...state.copCars]) vehicles.remove(car);
-    for (const cop of state.footCops) scene.remove(cop.group);
-    state.copCars.length = 0;
-    state.footCops.length = 0;
+    for (const car of copCars.splice(0)) vehicles.removeCar(car);
+    for (const cop of footCops.splice(0)) scene.remove(cop.group);
     state.arrestTimer = 0;
   }
   function clear() {
     clearActors();
     state.wanted = 0;
-    state.decayTimer = state.dropTimer = 0;
-    state.forcedDecay = false;
-    state.events.length = 0;
+    state.heat = 0;
+    state.decayTimer = 0;
     state.outOfSight = true;
-    state.spawnClock = 0;
+    state.forcedDecay = false;
+    state.busted = false;
+    state.deployment = 0;
   }
-  function setWanted(level) {
-    const next = Math.max(0, Math.min(5, Math.ceil(Number(level) || 0)));
-    if (next > state.wanted) {
-      state.decayTimer = state.dropTimer = 0;
-      state.arrestTimer = 0;
+  function setWanted(value) {
+    const level = THREE.MathUtils.clamp(Math.ceil(Number(value) || 0), 0, 5);
+    const raised = level > state.wanted;
+    state.heat = level;
+    state.wanted = level;
+    if (raised) {
+      state.decayTimer = 0;
+      state.spawnClock = 0;
+      state.deployment = Math.max(0, Math.min(POLICE.maxCars, level + 1) - copCars.length);
     }
-    state.wanted = next;
-    if (next === 0) {
-      clearActors();
-      state.decayTimer = state.dropTimer = 0;
-    }
+    if (!level) { clearActors(); state.deployment = 0; }
   }
-  function addWanted(amount, reason = '') {
+  function addWanted(amount = 1, reason = 'Crime reported') {
+    state.reason = reason;
     setWanted(state.wanted + amount);
-    state.lastCrime = reason;
   }
-  function nearestNode(x, z) {
-    return graph.nearestNode(x, z);
+  function nearestNode(point) {
+    return city.roadNetwork?.nearestNode?.(point.x, point.z) || null;
   }
-  function routeBetween(from, goal) {
-    if (!from || !goal) return [];
-    const queue = [from], previous = new Map([[from.id, null]]);
+  function roadPath(from, to) {
+    if (!from || !to) return [];
+    const queue = [from];
+    const came = new Map([[from, null]]);
     for (let i = 0; i < queue.length; i++) {
-      const at = queue[i];
-      if (at.id === goal.id) break;
-      for (const neighborId of at.neighbors) {
-        const neighbor = nodeFor(neighborId);
-        if (!neighbor || previous.has(neighbor.id)) continue;
-        previous.set(neighbor.id, at.id);
-        queue.push(neighbor);
-      }
-    }
-    if (!previous.has(goal.id)) return [goal];
-    const route = [];
-    let id = goal.id;
-    while (id !== null) { route.push(nodes.get(id)); id = previous.get(id); }
-    return route.reverse();
-  }
-  function spawnCar(player, index) {
-    const desiredAngle = index * 2.399 + .8;
-    const target = { x: player.x + Math.sin(desiredAngle) * 115, z: player.z + Math.cos(desiredAngle) * 115 };
-    const node = nearestNode(target.x, target.z);
-    const car = vehicles.spawnPoliceCar(node.x - 3.6, node.z);
-    car.heading = Math.atan2(player.x - car.x, player.z - car.z);
-    car.speed = 0;
-    car.route = [];
-    car.repath = 0;
-    car.ramTimer = 0;
-    car.shootTimer = 1.2 + index * .35;
-    car.stuck = 0;
-    state.copCars.push(car);
-  }
-  function spawnFootCop(player, index) {
-    const angle = index * 2.4 + 1.3;
-    const raw = { x: player.x + Math.sin(angle) * 36, z: player.z + Math.cos(angle) * 36 };
-    const safe = resolveCollisions(city.colliders, raw.x, raw.z, .5);
-    const bounded = clampToWorld(safe.x, safe.z, .5);
-    const group = createPerson({ shirt: 0x243b58, trousers: 0x1a2639, skin: 0xb67a53 });
-    const badge = new THREE.Mesh(new THREE.BoxGeometry(.09, .12, .035), new THREE.MeshBasicMaterial({ color: 0xfbd35c }));
-    badge.position.set(.19, 1.37, .195);
-    group.add(badge);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(.48, .14, .48), new THREE.MeshLambertMaterial({ color: 0x1c2b44 }));
-    cap.position.y = 2.09;
-    group.add(cap);
-    group.position.set(bounded.x, 0, bounded.z);
-    scene.add(group);
-    state.footCops.push({ ...bounded, group, health: 60, alive: true, down: false, isCop: true, heading: 0, shootTimer: 1.2 + index * .3, phase: 0, deadTime: 0 });
-  }
-  function updateCars(dt, player, callbacks) {
-    for (const car of state.copCars) {
-      car.ramTimer = Math.max(0, car.ramTimer - dt);
-      car.shootTimer -= dt;
-      if (car.wrecked) continue;
-      const distance = Math.hypot(car.x - player.x, car.z - player.z);
-      car.repath -= dt;
-      if (car.repath <= 0) {
-        car.route = routeBetween(nearestNode(car.x, car.z), nearestNode(player.x, player.z));
-        if (car.route.length > 1) car.route.shift();
-        car.repath = 2.2;
-      }
-      let target = player;
-      if (distance > 28 && car.route.length) {
-        target = car.route[0];
-        if (Math.hypot(car.x - target.x, car.z - target.z) < 8) car.route.shift();
-      }
-      const desiredHeading = Math.atan2(target.x - car.x, target.z - car.z);
-      const difference = angularDifference(desiredHeading, car.heading);
-      const steering = Math.max(-1, Math.min(1, -difference * 1.7));
-      const targetSpeed = Math.abs(difference) > .8 ? 10 : Math.min(27, 16 + state.wanted * 2);
-      const throttle = car.speed > targetSpeed + 1 ? -.3 : 1;
-      const beforeX = car.x, beforeZ = car.z;
-      vehicles.stepCar(car, dt, { throttle, steer: steering, handbrake: Math.abs(difference) > 1.5 && car.speed > 11 });
-      car.stuck = Math.hypot(car.x - beforeX, car.z - beforeZ) < dt * .3 ? car.stuck + dt : 0;
-      if (car.stuck > 3.5 && distance < 85) {
-        // A short reverse frees a cruiser that caught a corner, without teleporting it.
-        car.speed = -5;
-        car.heading += .7;
-        car.stuck = 0;
-      }
-      if (state.wanted >= 3 && distance >= 5 && distance <= 30 && car.shootTimer <= 0 && hasLineOfSight(car, player)) {
-        car.shootTimer = 2.1;
-        if (callbacks.shootAtPlayer) callbacks.shootAtPlayer(car);
-        else callbacks.damage?.(7);
-      }
-      if (player.inCar && distance < 4.4 && car.ramTimer <= 0) {
-        vehicles.damage(player.inCar, 4 + state.wanted * .8);
-        player.inCar.speed *= .88;
-        car.ramTimer = .75;
-      }
-    }
-  }
-  function updateFoot(dt, player, callbacks) {
-    let arresting = false;
-    for (const cop of state.footCops) {
-      if (!cop.alive || cop.health <= 0 || cop.down) {
-        cop.alive = false;
-        cop.down = true;
-        cop.group.rotation.z += (Math.PI / 2 - cop.group.rotation.z) * Math.min(1, dt * 9);
-        cop.group.position.y = .25;
-        cop.deadTime += dt;
-        continue;
-      }
-      const dx = player.x - cop.x, dz = player.z - cop.z;
-      const distance = Math.hypot(dx, dz);
-      cop.heading = Math.atan2(dx, dz);
-      if (!player.inCar && distance > 2.1) {
-        const speed = distance < 8 ? 3.7 : 4.3;
-        const next = resolveCollisions(city.colliders, cop.x + dx / (distance || 1) * speed * dt, cop.z + dz / (distance || 1) * speed * dt, .46);
-        const bounded = clampToWorld(next.x, next.z, .46);
-        cop.x = bounded.x;
-        cop.z = bounded.z;
-      }
-      cop.group.position.set(cop.x, 0, cop.z);
-      cop.group.rotation.y = cop.heading;
-      cop.phase += dt * 9;
-      const limbs = cop.group.userData.limbs;
-      if (limbs && distance > 2.1) {
-        limbs.legs[0].rotation.x = Math.sin(cop.phase) * .65;
-        limbs.legs[1].rotation.x = -Math.sin(cop.phase) * .65;
-      }
-      const visible = distance < 85 && hasLineOfSight(cop, player);
-      if (!player.inCar && distance < 2.5 && visible) arresting = true;
-      cop.shootTimer -= dt;
-      if (state.wanted >= 3 && distance >= 5 && distance <= 30 && visible && cop.shootTimer <= 0) {
-        cop.shootTimer = 1.6;
-        if (callbacks.shootAtPlayer) callbacks.shootAtPlayer(cop);
-        else callbacks.damage?.(7);
-      }
-    }
-    // A stationary suspect beside a cruiser can also be detained at lower heat.
-    if (!player.inCar && state.copCars.some(car => !car.wrecked && Math.hypot(car.x - player.x, car.z - player.z) < 2.5 && hasLineOfSight(car, player))) arresting = true;
-    state.arrestTimer = arresting ? state.arrestTimer + dt : Math.max(0, state.arrestTimer - dt * 2);
-    if (state.arrestTimer > 1.15) {
-      state.events.push({ type: 'busted', wanted: state.wanted });
-      state.arrestTimer = 0;
-      setWanted(0);
-    }
-  }
-  function update(dt, player, callbacks = {}) {
-    state.time += dt;
-    if (!state.wanted) { if (state.copCars.length || state.footCops.length) clearActors(); return; }
-    state.spawnClock -= dt;
-    const desiredCars = Math.min(4, 2 + Math.floor(state.wanted / 2));
-    if (state.spawnClock <= 0) {
-      while (state.copCars.length < desiredCars) spawnCar(player, state.copCars.length);
-      const desiredFoot = player.inCar ? 0 : Math.min(3, Math.max(0, state.wanted - 1));
-      while (state.footCops.length < desiredFoot) spawnFootCop(player, state.footCops.length);
-      state.spawnClock = 4;
-    }
-    while (state.copCars.length > desiredCars) vehicles.remove(state.copCars.pop());
-    updateCars(dt, player, callbacks);
-    updateFoot(dt, player, callbacks);
-    if (!state.wanted) return;
-    const actors = [...state.copCars.filter(car => !car.wrecked), ...state.footCops.filter(cop => cop.alive && cop.health > 0)];
-    const farFromEveryCop = actors.every(cop => Math.hypot(cop.x - player.x, cop.z - player.z) > 85);
-    state.outOfSight = actors.every(cop => Math.hypot(cop.x - player.x, cop.z - player.z) > 85 || !hasLineOfSight(cop, player));
-    if (farFromEveryCop) {
-      state.decayTimer += dt;
-      const grace = state.forcedDecay ? 6 : 9;
-      if (state.decayTimer > grace) {
-        state.dropTimer += dt;
-        const interval = state.forcedDecay ? 2.3 : 3.1 * (state.wanted >= 3 ? 1.8 : 1);
-        if (state.dropTimer >= interval) {
-          state.dropTimer -= interval;
-          setWanted(state.wanted - 1);
+      const node = queue[i];
+      if (node === to) break;
+      for (const next of node.neighbours || node.neighbors || []) {
+        const other = next.other || next.node || next;
+        if (!came.has(other)) {
+          came.set(other, node);
+          queue.push(other);
         }
       }
-    } else {
-      state.decayTimer = 0;
-      state.dropTimer = 0;
+    }
+    if (!came.has(to)) return [];
+    const path = [];
+    for (let node = to; node && node !== from; node = came.get(node)) path.unshift(node);
+    return path;
+  }
+  function spawnCar(player) {
+    const angle = (serial++ * 2.39996) + Math.PI;
+    const desired = clampToWorld(player.x + Math.sin(angle) * 88, player.z + Math.cos(angle) * 88, 5);
+    const node = nearestNode(desired) || desired;
+    const heading = Math.atan2(player.x - node.x, player.z - node.z);
+    const car = vehicles.spawnPoliceCar(node.x + 4.2, node.z, heading);
+    car.driver = 'police';
+    car.policeRoute = [];
+    car.routeClock = 0;
+    car.stuck = 0;
+    copCars.push(car);
+    return car;
+  }
+  function spawnFoot(player) {
+    const car = copCars[footCops.length % Math.max(1, copCars.length)];
+    const angle = serial++ * 2.4;
+    const desired = car ? { x: car.x + 3.2, z: car.z } : { x: player.x + Math.sin(angle) * 36, z: player.z + Math.cos(angle) * 36 };
+    const spot = resolveCollisions(city.colliders, desired.x, desired.z, 0.6);
+    const group = createOfficer();
+    group.position.set(spot.x, 0.1, spot.z);
+    scene.add(group);
+    const cop = { x: spot.x, z: spot.z, heading: 0, health: 80, alive: true, isCop: true, group, phase: serial, lastShot: -100 };
+    footCops.push(cop);
+    return cop;
+  }
+  function updateCar(car, dt, target) {
+    if (car.wrecked) return;
+    car.routeClock -= dt;
+    if (car.routeClock <= 0) {
+      car.routeClock = 1.6;
+      car.policeRoute = roadPath(nearestNode(car), nearestNode(target));
+    }
+    let aim = target;
+    if (!hasLineOfSight(car, target) || distance(car, target) > 45) {
+      while (car.policeRoute.length && distance(car, car.policeRoute[0]) < 10) car.policeRoute.shift();
+      aim = car.policeRoute[0] || nearestNode(target) || target;
+    }
+    const desired = Math.atan2(aim.x - car.x, aim.z - car.z);
+    const turn = angleDelta(desired, car.heading);
+    const oldX = car.x;
+    const oldZ = car.z;
+    const cruise = 15 + state.wanted * 2.4;
+    vehicles.stepCar(car, dt, {
+      forward: Math.abs(turn) > 1.1 && car.speed > 9 ? -0.3 : car.speed < cruise ? 1 : 0,
+      right: THREE.MathUtils.clamp(-turn * 1.5, -1, 1),
+      handbrake: Math.abs(turn) > 1.3 && car.speed > 10,
+    });
+    car.stuck = Math.hypot(car.x - oldX, car.z - oldZ) < dt * 0.35 ? car.stuck + dt : 0;
+    if (car.stuck > 6) {
+      const node = nearestNode(car);
+      if (node && distance(node, target) > 30) {
+        car.x = node.x + 4.2;
+        car.z = node.z;
+        car.heading = desired;
+        car.speed = 4;
+      } else car.heading += 0.7;
+      car.stuck = 0;
     }
   }
-  function takeEvents() { return state.events.splice(0); }
-  return { state, setWanted, addWanted, clear, update, hasLineOfSight, takeEvents };
+  function update(dt, playerState, combat) {
+    const player = playerState?.state || playerState;
+    if (!player) return;
+    state.clock += dt;
+    if (!state.wanted) {
+      if (copCars.length || footCops.length) clearActors();
+      state.outOfSight = true;
+      return;
+    }
+    const seenByCars = copCars.some(car => !car.wrecked && distance(car, player) < POLICE.sight && hasLineOfSight(car, player));
+    const seenByFoot = footCops.some(cop => cop.alive && distance(cop, player) < POLICE.sight * 0.8 && hasLineOfSight(cop, player));
+    const seen = seenByCars || seenByFoot;
+    state.outOfSight = !seen;
+    if (seen || !copCars.length && state.decayTimer === 0) {
+      state.lastSeen.x = player.x;
+      state.lastSeen.z = player.z;
+    }
+    state.spawnClock -= dt;
+    const desiredCars = Math.min(POLICE.maxCars, state.wanted + 1);
+    if (copCars.length < desiredCars && state.spawnClock <= 0 && (state.deployment > 0 || seen)) {
+      spawnCar(player);
+      state.deployment = Math.max(0, state.deployment - 1);
+      state.spawnClock = 2;
+    }
+    for (const car of copCars) updateCar(car, dt, state.lastSeen);
+    if (!player.car && footCops.length < Math.min(POLICE.maxFoot, state.wanted) && state.clock > 1 && (seen || state.decayTimer < 3)) spawnFoot(player);
+    let arresting = false;
+    for (const cop of footCops) {
+      if (!cop.alive || cop.health <= 0) {
+        cop.alive = false;
+        cop.group.rotation.z = Math.min(Math.PI / 2, cop.group.rotation.z + dt * 4);
+        continue;
+      }
+      const target = seen ? player : state.lastSeen;
+      const range = distance(cop, target);
+      const heading = Math.atan2(target.x - cop.x, target.z - cop.z);
+      cop.heading = heading;
+      if (range > 2.1) {
+        const moved = resolveCollisions(city.colliders, cop.x + Math.sin(heading) * dt * 4.3, cop.z + Math.cos(heading) * dt * 4.3, 0.55);
+        cop.x = moved.x;
+        cop.z = moved.z;
+        cop.group.userData.legs?.forEach((leg, i) => { leg.rotation.x = Math.sin(state.clock * 11 + i * Math.PI) * 0.6; });
+      }
+      cop.group.position.set(cop.x, 0.05, cop.z);
+      cop.group.rotation.y = heading;
+      const close = distance(cop, player);
+      const visible = hasLineOfSight(cop, player);
+      if (!player.car && close < POLICE.arrestRange && visible) arresting = true;
+      if (state.wanted >= 3 && close > 5 && close < 30 && visible) combat?.shootAtPlayer(cop);
+    }
+    state.arrestTimer = arresting ? state.arrestTimer + dt : Math.max(0, state.arrestTimer - dt * 2);
+    if (state.arrestTimer >= POLICE.arrestTime) state.busted = true;
+    if (seen) state.decayTimer = 0;
+    else state.decayTimer += dt;
+    if (state.decayTimer > POLICE.decayDelay) {
+      state.heat = Math.max(0, state.heat - dt * POLICE.decayRate / (state.wanted >= 3 && !state.forcedDecay ? 1.5 : 1));
+      state.wanted = Math.ceil(state.heat);
+      if (!state.wanted) clear();
+    }
+    for (let i = copCars.length - 1; i >= desiredCars; i--) vehicles.removeCar(copCars.splice(i, 1)[0]);
+    for (const car of copCars) {
+      const bulbs = car.group.userData.policeLights;
+      if (bulbs) bulbs.forEach((bulb, i) => { if (bulb.material) bulb.material.emissiveIntensity = Math.sin(state.clock * 12 + i * Math.PI) > 0 ? 2 : 0.1; });
+    }
+  }
+  return { state, copCars, footCops, update, setWanted, addWanted, clear, reset: clear, hasLineOfSight };
 }

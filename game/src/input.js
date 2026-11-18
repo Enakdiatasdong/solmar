@@ -1,104 +1,66 @@
-// Input is a queue of deliberate actions plus a continuous keyboard state.
-export const ACTION_CONFIRM = 'confirm';
-export const ACTION_PAUSE = 'pause';
-export const ACTION_RESTART = 'restart';
-export const ACTION_MUTE = 'mute';
-export const ACTION_MENU = 'menu';
+import { MathUtils } from '../vendor/three.module.min.js';
 export const ACTION_ENTER = 'enter';
 export const ACTION_PUNCH = 'punch';
 export const ACTION_FIRE = 'fire';
+export const ACTION_CONFIRM = 'confirm';
+export const ACTION_PAUSE = 'pause';
+export const ACTION_RESTART = 'restart';
+export const ACTION_MENU = 'menu';
+export const ACTION_MUTE = 'mute';
 export const ACTION_JUMP = 'jump';
 
 export function createInput(target) {
-  const held = new Set();
-  const actions = [];
-  const pointer = { dx: 0, dy: 0, wheel: 0 };
-  const listeners = [];
-  let drag = null;
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches;
-  document.body.classList.toggle('touch', Boolean(coarse || 'ontouchstart' in window));
-  const listen = (element, type, callback, options) => {
-    element.addEventListener(type, callback, options);
-    listeners.push(() => element.removeEventListener(type, callback, options));
-  };
-  const actionFor = (code, shift) => {
-    if (code === 'Enter') return ACTION_CONFIRM;
-    if (['Escape', 'KeyP', 'KeyQ'].includes(code)) return ACTION_PAUSE;
-    if (code === 'KeyR') return ACTION_RESTART;
-    if (code === 'KeyN' || code === 'KeyM' && shift) return ACTION_MUTE;
-    if (code === 'KeyM') return ACTION_MENU;
-    if (code === 'KeyE') return ACTION_ENTER;
-    if (code === 'KeyF') return ACTION_PUNCH;
-    return null;
-  };
-  listen(window, 'keydown', event => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+  const held = new Set(), touchHeld = new Map(), actions = [], disposers = [];
+  const look = { dx: 0, dy: 0, zoom: 0 };
+  const actionKeys = { KeyE: ACTION_ENTER, KeyF: ACTION_PUNCH, Enter: ACTION_CONFIRM, Escape: ACTION_PAUSE, KeyP: ACTION_PAUSE, KeyQ: ACTION_PAUSE, KeyR: ACTION_RESTART, KeyN: ACTION_MUTE, KeyM: ACTION_MENU };
+  const movement = { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', sprint: 'ShiftLeft', brake: 'Space', jump: 'Space' };
+  const touchActions = { enter: ACTION_ENTER, punch: ACTION_PUNCH, fire: ACTION_FIRE, pause: ACTION_PAUSE, jump: ACTION_JUMP, confirm: ACTION_CONFIRM };
+  let dragging = false, pointerX = 0, pointerY = 0, moved = 0;
+  function on(element, name, handler, options) { element.addEventListener(name, handler, options); disposers.push(() => element.removeEventListener(name, handler, options)); }
+  function reset() { held.clear(); touchHeld.clear(); dragging = false; actions.length = 0; look.dx = look.dy = look.zoom = 0; }
+  on(window, 'keydown', event => {
+    if (['INPUT', 'TEXTAREA'].includes(event.target.tagName)) return;
+    if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code === 'Tab') event.preventDefault();
     held.add(event.code);
     if (event.repeat) return;
     if (event.code === 'Space') actions.push(ACTION_CONFIRM, ACTION_JUMP);
-    const action = actionFor(event.code, event.shiftKey);
-    if (action) actions.push(action);
+    else if (event.code === 'KeyM' && event.shiftKey) actions.push(ACTION_MUTE);
+    else if (actionKeys[event.code]) actions.push(actionKeys[event.code]);
   });
-  listen(window, 'keyup', event => held.delete(event.code));
-  listen(window, 'blur', () => { held.clear(); drag = null; });
-  listen(target, 'pointerdown', event => {
-    if (event.button !== 0) return;
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, distance: 0 };
+  on(window, 'keyup', event => held.delete(event.code));
+  on(window, 'blur', reset);
+  on(target, 'contextmenu', event => event.preventDefault());
+  on(target, 'pointerdown', event => {
+    if (event.pointerType === 'touch') return;
+    dragging = true; pointerX = event.clientX; pointerY = event.clientY; moved = 0;
     target.setPointerCapture?.(event.pointerId);
   });
-  listen(target, 'pointermove', event => {
-    if (!drag || drag.id !== event.pointerId) return;
-    const dx = event.clientX - drag.x;
-    const dy = event.clientY - drag.y;
-    drag.distance += Math.abs(dx) + Math.abs(dy);
-    drag.x = event.clientX;
-    drag.y = event.clientY;
-    pointer.dx += dx;
-    pointer.dy += dy;
+  on(target, 'pointermove', event => {
+    if (!dragging) return;
+    const dx = event.clientX - pointerX, dy = event.clientY - pointerY;
+    moved += Math.abs(dx) + Math.abs(dy);
+    look.dx += MathUtils.clamp(dx, -100, 100); look.dy += MathUtils.clamp(dy, -100, 100);
+    pointerX = event.clientX; pointerY = event.clientY;
   });
-  const release = event => {
-    if (!drag || event.pointerId !== drag.id) return;
-    if (event.type === 'pointerup' && drag.distance < 6) actions.push(ACTION_FIRE);
-    drag = null;
-  };
-  listen(target, 'pointerup', release);
-  listen(target, 'pointercancel', release);
-  listen(target, 'contextmenu', event => event.preventDefault());
-  listen(target, 'wheel', event => {
-    event.preventDefault();
-    pointer.wheel += event.deltaY;
-  }, { passive: false });
-  document.querySelectorAll('[data-touch]').forEach(button => {
-    const code = button.dataset.touch;
-    listen(button, 'pointerdown', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      button.setPointerCapture?.(event.pointerId);
-      held.add(code);
-      if (code === 'Space') actions.push(ACTION_JUMP, ACTION_CONFIRM);
-      else if (code === 'Fire') actions.push(ACTION_FIRE);
-      else {
-        const action = actionFor(code, false);
-        if (action) actions.push(action);
-      }
+  on(target, 'pointerup', event => { if (dragging && moved < 6 && event.button === 0) actions.push(ACTION_FIRE); dragging = false; });
+  on(target, 'pointercancel', () => { dragging = false; });
+  on(target, 'wheel', event => { event.preventDefault(); look.zoom += Math.sign(event.deltaY); }, { passive: false });
+  if (('ontouchstart' in window) || window.matchMedia?.('(pointer: coarse)').matches) document.body.classList.add('touch');
+  for (const button of document.querySelectorAll('[data-touch]')) {
+    const command = button.dataset.touch;
+    on(button, 'pointerdown', event => {
+      event.preventDefault(); button.setPointerCapture?.(event.pointerId);
+      if (movement[command]) touchHeld.set(event.pointerId, movement[command]);
+      if (touchActions[command]) actions.push(touchActions[command]);
+      button.classList.add('pressed');
     });
-    const clear = event => {
-      event.preventDefault();
-      event.stopPropagation();
-      held.delete(code);
-    };
-    listen(button, 'pointerup', clear);
-    listen(button, 'pointercancel', clear);
-  });
-  return {
-    down: code => held.has(code),
-    consumeActions: () => actions.splice(0),
-    consumePointer() {
-      const next = { ...pointer };
-      pointer.dx = pointer.dy = pointer.wheel = 0;
-      return next;
-    },
-    destroy() { listeners.forEach(remove => remove()); held.clear(); actions.length = 0; },
-  };
+    const release = event => { touchHeld.delete(event.pointerId); button.classList.remove('pressed'); };
+    on(button, 'pointerup', release); on(button, 'pointercancel', release);
+  }
+  const aliases = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD', ShiftRight: 'ShiftLeft' };
+  function down(code) {
+    const canonical = aliases[code] || code;
+    return held.has(code) || held.has(canonical) || [...held].some(key => aliases[key] === canonical) || [...touchHeld.values()].includes(canonical);
+  }
+  return { down, takeActions: () => actions.splice(0), takeLook: () => { const result = { ...look }; look.dx = look.dy = look.zoom = 0; return result; }, reset, dispose: () => { for (const dispose of disposers) dispose(); reset(); } };
 }
