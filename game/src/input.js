@@ -1,235 +1,104 @@
-// Keyboard, mouse and a cheap touch layer. Held controls are read as state; one-shot presses are
-// queued as bit flags and taken exactly once by the loop. Mouse drag orbits the camera, a click
-// without a drag fires the pistol, and the wheel zooms. The touch buttons in the HTML map to the
-// same action flags, so the game is playable without a keyboard.
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
-export const ACTION_ENTER = 4;
-export const ACTION_PUNCH = 8;
-export const ACTION_FIRE = 16;
-export const ACTION_MENU = 32;
-export const ACTION_MUTE = 64;
-export const ACTION_RESTART = 128;
-
-const KEYMAP = {
-  KeyW: 'up',
-  ArrowUp: 'up',
-  KeyS: 'down',
-  ArrowDown: 'down',
-  KeyA: 'left',
-  ArrowLeft: 'left',
-  KeyD: 'right',
-  ArrowRight: 'right',
-};
+// Input is a queue of deliberate actions plus a continuous keyboard state.
+export const ACTION_CONFIRM = 'confirm';
+export const ACTION_PAUSE = 'pause';
+export const ACTION_RESTART = 'restart';
+export const ACTION_MUTE = 'mute';
+export const ACTION_MENU = 'menu';
+export const ACTION_ENTER = 'enter';
+export const ACTION_PUNCH = 'punch';
+export const ACTION_FIRE = 'fire';
+export const ACTION_JUMP = 'jump';
 
 export function createInput(target) {
-  if ('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches) {
-    document.body?.classList.add('touch');
-    document.getElementById('touch')?.setAttribute('aria-hidden', 'false');
-  }
-  const held = { up: false, down: false, left: false, right: false, jump: false };
-  const touchHeld = { up: false, down: false, left: false, right: false, run: false };
-  const directionKeys = new Set();
-  const runKeys = new Set();
-  let actions = 0;
-  let dragX = 0;
-  let dragY = 0;
-  let wheel = 0;
-  let dragging = false;
-  let pointerId = null;
-  let lastX = 0;
-  let lastY = 0;
-  let downAt = 0;
-  let moved = 0;
-
-  function queue(action) {
-    actions |= action;
-  }
-
-  window.addEventListener('keydown', (event) => {
-    if (event.repeat) {
-      if (KEYMAP[event.code] || event.code === 'Space') event.preventDefault();
-      return;
-    }
-    const direction = KEYMAP[event.code];
-    if (direction) {
-      directionKeys.add(event.code);
-      held[direction] = true;
-      event.preventDefault();
-      return;
-    }
-    switch (event.code) {
-      case 'ShiftLeft':
-      case 'ShiftRight':
-        runKeys.add(event.code);
-        break;
-      case 'Space':
-        held.jump = true;
-        queue(ACTION_CONFIRM);
-        event.preventDefault();
-        break;
-      case 'Enter':
-        queue(ACTION_CONFIRM);
-        break;
-      case 'KeyE':
-        queue(ACTION_ENTER);
-        break;
-      case 'KeyF':
-        queue(ACTION_PUNCH);
-        break;
-      case 'KeyM':
-        if (event.shiftKey) queue(ACTION_MUTE);
-        else queue(ACTION_MENU);
-        break;
-      case 'KeyN':
-        queue(ACTION_MUTE);
-        break;
-      case 'KeyQ':
-        queue(ACTION_PAUSE);
-        break;
-      case 'KeyP':
-      case 'Escape':
-        queue(ACTION_PAUSE);
-        event.preventDefault();
-        break;
-      case 'KeyR':
-        queue(ACTION_RESTART);
-        break;
-      default:
-        return;
-    }
+  const held = new Set();
+  const actions = [];
+  const pointer = { dx: 0, dy: 0, wheel: 0 };
+  const listeners = [];
+  let drag = null;
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches;
+  document.body.classList.toggle('touch', Boolean(coarse || 'ontouchstart' in window));
+  const listen = (element, type, callback, options) => {
+    element.addEventListener(type, callback, options);
+    listeners.push(() => element.removeEventListener(type, callback, options));
+  };
+  const actionFor = (code, shift) => {
+    if (code === 'Enter') return ACTION_CONFIRM;
+    if (['Escape', 'KeyP', 'KeyQ'].includes(code)) return ACTION_PAUSE;
+    if (code === 'KeyR') return ACTION_RESTART;
+    if (code === 'KeyN' || code === 'KeyM' && shift) return ACTION_MUTE;
+    if (code === 'KeyM') return ACTION_MENU;
+    if (code === 'KeyE') return ACTION_ENTER;
+    if (code === 'KeyF') return ACTION_PUNCH;
+    return null;
+  };
+  listen(window, 'keydown', event => {
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+    held.add(event.code);
+    if (event.repeat) return;
+    if (event.code === 'Space') actions.push(ACTION_CONFIRM, ACTION_JUMP);
+    const action = actionFor(event.code, event.shiftKey);
+    if (action) actions.push(action);
   });
-
-  window.addEventListener('keyup', (event) => {
-    const direction = KEYMAP[event.code];
-    if (direction) {
-      directionKeys.delete(event.code);
-      held[direction] = [...directionKeys].some((code) => KEYMAP[code] === direction);
-      return;
-    }
-    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') runKeys.delete(event.code);
-    if (event.code === 'Space') held.jump = false;
+  listen(window, 'keyup', event => held.delete(event.code));
+  listen(window, 'blur', () => { held.clear(); drag = null; });
+  listen(target, 'pointerdown', event => {
+    if (event.button !== 0) return;
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, distance: 0 };
+    target.setPointerCapture?.(event.pointerId);
   });
-
-  function clearHeld() {
-    held.up = false;
-    held.down = false;
-    held.left = false;
-    held.right = false;
-    held.jump = false;
-    directionKeys.clear();
-    runKeys.clear();
-    touchHeld.up = false;
-    touchHeld.down = false;
-    touchHeld.left = false;
-    touchHeld.right = false;
-    touchHeld.run = false;
-    dragging = false;
-    pointerId = null;
-    dragX = 0;
-    dragY = 0;
-    wheel = 0;
-  }
-  window.addEventListener('blur', clearHeld);
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) clearHeld();
+  listen(target, 'pointermove', event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    drag.distance += Math.abs(dx) + Math.abs(dy);
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    pointer.dx += dx;
+    pointer.dy += dy;
   });
-
-  if (target && target.addEventListener) {
-    target.addEventListener('contextmenu', (event) => event.preventDefault());
-    target.addEventListener('pointerdown', (event) => {
-      if (event.button !== undefined && event.button !== 0) return;
-      pointerId = event.pointerId;
-      dragging = true;
-      lastX = event.clientX;
-      lastY = event.clientY;
-      downAt = performance.now();
-      moved = 0;
-      target.setPointerCapture?.(event.pointerId);
-    });
-    target.addEventListener('pointermove', (event) => {
-      if (!dragging || event.pointerId !== pointerId) return;
-      const dx = event.clientX - lastX;
-      const dy = event.clientY - lastY;
-      lastX = event.clientX;
-      lastY = event.clientY;
-      dragX += dx;
-      dragY += dy;
-      moved += Math.abs(dx) + Math.abs(dy);
-    });
-    const release = (event) => {
-      if (event.pointerId !== pointerId) return;
-      const elapsed = performance.now() - downAt;
-      if (moved < 7 && elapsed < 380) queue(ACTION_FIRE);
-      dragging = false;
-      pointerId = null;
-    };
-    target.addEventListener('pointerup', release);
-    target.addEventListener('pointercancel', () => {
-      dragging = false;
-      pointerId = null;
-    });
-    target.addEventListener('wheel', (event) => {
-      wheel += Math.sign(event.deltaY);
+  const release = event => {
+    if (!drag || event.pointerId !== drag.id) return;
+    if (event.type === 'pointerup' && drag.distance < 6) actions.push(ACTION_FIRE);
+    drag = null;
+  };
+  listen(target, 'pointerup', release);
+  listen(target, 'pointercancel', release);
+  listen(target, 'contextmenu', event => event.preventDefault());
+  listen(target, 'wheel', event => {
+    event.preventDefault();
+    pointer.wheel += event.deltaY;
+  }, { passive: false });
+  document.querySelectorAll('[data-touch]').forEach(button => {
+    const code = button.dataset.touch;
+    listen(button, 'pointerdown', event => {
       event.preventDefault();
-    }, { passive: false });
-  }
-
-  // Cheap touch controls: elements with data-touch="up" etc. hold their direction while pressed.
-  const touchButtons = typeof document !== 'undefined' ? document.querySelectorAll('[data-touch]') : [];
-  for (const button of touchButtons) {
-    const name = button.getAttribute('data-touch');
-    const press = (event) => {
+      event.stopPropagation();
+      button.setPointerCapture?.(event.pointerId);
+      held.add(code);
+      if (code === 'Space') actions.push(ACTION_JUMP, ACTION_CONFIRM);
+      else if (code === 'Fire') actions.push(ACTION_FIRE);
+      else {
+        const action = actionFor(code, false);
+        if (action) actions.push(action);
+      }
+    });
+    const clear = event => {
       event.preventDefault();
-      if (name === 'enter') queue(ACTION_ENTER);
-      else if (name === 'fire') queue(ACTION_FIRE);
-      else if (name === 'punch') queue(ACTION_PUNCH);
-      else if (name === 'menu') queue(ACTION_MENU);
-      else if (name === 'run') touchHeld.run = true;
-      else if (touchHeld[name] !== undefined) touchHeld[name] = true;
+      event.stopPropagation();
+      held.delete(code);
     };
-    const lift = (event) => {
-      event.preventDefault();
-      if (name === 'run') touchHeld.run = false;
-      else if (touchHeld[name] !== undefined) touchHeld[name] = false;
-    };
-    button.addEventListener('pointerdown', press);
-    button.addEventListener('pointerup', lift);
-    button.addEventListener('pointercancel', lift);
-    button.addEventListener('pointerleave', lift);
-  }
-
+    listen(button, 'pointerup', clear);
+    listen(button, 'pointercancel', clear);
+  });
   return {
-    state() {
-      return {
-        up: held.up || touchHeld.up,
-        down: held.down || touchHeld.down,
-        left: held.left || touchHeld.left,
-        right: held.right || touchHeld.right,
-        run: runKeys.size > 0 || touchHeld.run,
-        jump: held.jump,
-        brake: held.down,
-      };
+    down: code => held.has(code),
+    consumeActions: () => actions.splice(0),
+    consumePointer() {
+      const next = { ...pointer };
+      pointer.dx = pointer.dy = pointer.wheel = 0;
+      return next;
     },
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-    takeOrbit() {
-      const delta = { x: dragX, y: dragY };
-      dragX = 0;
-      dragY = 0;
-      return delta;
-    },
-    takeWheel() {
-      const value = wheel;
-      wheel = 0;
-      return value;
-    },
-    isDragging() {
-      return dragging;
-    },
-    clearHeld,
+    destroy() { listeners.forEach(remove => remove()); held.clear(); actions.length = 0; },
   };
 }

@@ -1,290 +1,233 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#131a24">
-<title>SOLMAR</title>
-<link rel="icon" href="./favicon.svg" type="image/svg+xml">
-<style>
-  :root {
-    --ink: #f7efe3;
-    --muted: #b6aa9a;
-    --gold: #ffc857;
-    --coral: #ff6b57;
-    --teal: #49c6b8;
-    --deep: #131a24;
-    --panel: rgba(16, 22, 30, 0.86);
-    --line: rgba(247, 239, 227, 0.16);
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #131a24; color: var(--ink); font-family: var(--font); -webkit-font-smoothing: antialiased; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; cursor: grab; }
-  #game:active { cursor: grabbing; }
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  button { font-family: inherit; }
-
-  /* ---------- HUD ---------- */
-  #hud { position: fixed; inset: 0; pointer-events: none; display: none; user-select: none; }
-  body[data-screen="playing"] #hud,
-  body[data-screen="paused"] #hud,
-  body[data-screen="mission-complete"] #hud,
-  body[data-screen="busted"] #hud,
-  body[data-screen="gameover"] #hud { display: block; }
-
-  .hud-top { position: absolute; top: 18px; left: 20px; right: 20px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-  .hud-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; backdrop-filter: blur(6px); box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28); }
-  .health-row { display: flex; align-items: center; gap: 10px; }
-  .health-label { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
-  #health-bar { position: relative; width: 172px; height: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
-  #health-fill { position: absolute; inset: 0; width: 100%; border-radius: 6px; background: var(--teal); transition: width 180ms ease, background 180ms ease; }
-  #health-text { font-size: 13px; font-weight: 700; min-width: 26px; text-align: right; }
-  .wanted-row { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
-  .wanted-label { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
-  #wanted-stars { display: flex; gap: 3px; font-size: 18px; line-height: 1; }
-  #wanted-stars .star { color: rgba(247, 239, 227, 0.22); transition: color 160ms ease, text-shadow 160ms ease; }
-  #wanted-stars .star.lit { color: var(--gold); text-shadow: 0 0 10px rgba(255, 200, 87, 0.55); }
-  #wanted-stars.active { animation: pulse 1.1s ease-in-out infinite; }
-  @keyframes pulse { 50% { transform: scale(1.05); } }
-
-  .hud-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-  .cash-panel { display: flex; align-items: baseline; gap: 8px; }
-  .cash-label { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
-  #cash-value { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: var(--gold); font-variant-numeric: tabular-nums; }
-  #speed-box { display: none; align-items: center; gap: 8px; }
-  #speed-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
-
-  #objective-box { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); max-width: min(560px, 62vw); display: none; text-align: center; }
-  #objective-text { font-size: 14px; font-weight: 650; letter-spacing: 0.01em; color: var(--ink); }
-  #objective-box::before { content: "OBJECTIVE"; display: block; font-size: 9px; letter-spacing: 0.28em; color: var(--gold); margin-bottom: 3px; }
-
-  #minimap-wrap { position: absolute; left: 20px; bottom: 20px; width: 190px; height: 190px; border-radius: 50%; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); border: 2px solid rgba(247, 239, 227, 0.22); background: rgba(16, 22, 30, 0.7); }
-  #minimap { width: 190px; height: 190px; border-radius: 50%; display: block; }
-
-  #toasts { position: absolute; right: 20px; bottom: 22px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(360px, 70vw); }
-  .toast { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 9px; padding: 8px 13px; font-size: 13px; line-height: 1.35; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32); animation: toast-in 220ms ease both; }
-  .toast.mission { border-left-color: var(--gold); color: var(--gold); }
-  .toast.danger { border-left-color: var(--coral); color: #ffd0c7; }
-  .toast.info { border-left-color: var(--teal); }
-  .toast.fade { opacity: 0; transform: translateY(6px); transition: opacity 420ms ease, transform 420ms ease; }
-  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
-
-  #dialogue { display: none; position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); max-width: min(680px, 78vw); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 18px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); }
-  #dialogue-text { font-size: 15px; line-height: 1.4; color: var(--ink); }
-  #dialogue-text strong { color: var(--gold); margin-right: 7px; letter-spacing: 0.04em; }
-
-  #hint { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); font-size: 13px; font-weight: 600; letter-spacing: 0.06em; color: var(--gold); text-shadow: 0 2px 10px rgba(0, 0, 0, 0.65); }
-  #subtitle { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); font-size: 14px; color: var(--muted); }
-
-  #mission-list { position: fixed; top: 50%; left: 50%; width: min(460px, 88vw); transform: translate(-50%, -46%); background: rgba(13, 18, 25, 0.96); border: 1px solid var(--line); border-radius: 16px; padding: 18px; box-shadow: 0 26px 70px rgba(0, 0, 0, 0.55); display: none; pointer-events: auto; z-index: 40; }
-  #mission-list.open { display: block; animation: pop 160ms ease both; }
-  #mission-list::before { content: "JOBS · SOLMAR"; display: block; font-size: 10px; letter-spacing: 0.3em; color: var(--gold); margin-bottom: 12px; }
-  .mission-row { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 10px; border: 1px solid transparent; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
-  .mission-row:hover, .mission-row:focus-visible { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 200, 87, 0.35); outline: none; }
-  .mission-row.active { border-color: rgba(255, 200, 87, 0.6); background: rgba(255, 200, 87, 0.09); }
-  .mission-row.done { opacity: 0.55; cursor: default; }
-  .mission-index { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: rgba(73, 198, 184, 0.18); color: var(--teal); }
-  .mission-row.done .mission-index { background: rgba(255, 200, 87, 0.18); color: var(--gold); }
-  .mission-name { font-size: 14px; font-weight: 650; }
-  .mission-reward { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-
-  /* ---------- Screens ---------- */
-  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 30; padding: 24px; }
-  .screen.visible { display: flex; animation: pop 240ms ease both; }
-  @keyframes pop { from { opacity: 0; transform: translateY(10px); } }
-  .screen .card { width: min(560px, 92vw); background: rgba(13, 18, 25, 0.9); border: 1px solid var(--line); border-radius: 20px; padding: 30px 32px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55); backdrop-filter: blur(10px); text-align: center; }
-  .kicker { font-size: 10px; letter-spacing: 0.36em; text-transform: uppercase; color: var(--teal); }
-  h1 { margin: 10px 0 2px; font-size: clamp(44px, 8vw, 74px); letter-spacing: 0.16em; line-height: 1; font-weight: 800; }
-  h1 span { color: var(--gold); }
-  .tagline { margin: 12px auto 0; max-width: 420px; color: var(--muted); font-size: 14px; line-height: 1.5; }
-  .rule { height: 1px; background: var(--line); margin: 22px 0 18px; }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 170px; padding: 12px 20px; border-radius: 10px; border: 1px solid transparent; background: var(--gold); color: #1b160c; font-weight: 800; font-size: 14px; letter-spacing: 0.04em; cursor: pointer; transition: transform 120ms ease, filter 120ms ease; }
-  .btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
-  .btn:active { transform: translateY(0); }
-  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
-  .btn.ghost:hover { border-color: rgba(247, 239, 227, 0.45); }
-  .btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  .keys { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin: 20px auto 0; max-width: 400px; text-align: left; }
-  .keys div { font-size: 12px; color: var(--muted); }
-  .keys b { display: inline-block; min-width: 72px; color: var(--ink); font-weight: 700; }
-  .stat-row { display: flex; justify-content: center; gap: 28px; margin: 18px 0 4px; flex-wrap: wrap; }
-  .stat { min-width: 92px; }
-  .stat .n { font-size: 24px; font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; }
-  .stat .l { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
-  #busted-screen .card { border-color: rgba(255, 107, 87, 0.4); }
-  #busted-screen h1 { color: var(--coral); letter-spacing: 0.1em; }
-  #game-over-screen .card { border-color: rgba(255, 107, 87, 0.3); }
-  .title-vignette { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 20%, rgba(8, 12, 17, 0) 30%, rgba(8, 12, 17, 0.55) 100%); pointer-events: none; }
-  #title-screen { align-items: flex-end; padding-bottom: 9vh; }
-  #title-screen .card { background: rgba(11, 16, 22, 0.72); border-color: rgba(255, 200, 87, 0.22); }
-
-  /* ---------- Touch ---------- */
-  #touch { position: fixed; inset: 0; display: none; pointer-events: none; z-index: 20; }
-  body.touch #touch { display: block; }
-  .touch-pad { position: absolute; left: 22px; bottom: 230px; width: 148px; height: 148px; }
-  .touch-pad button, .touch-actions button { pointer-events: auto; position: absolute; width: 48px; height: 48px; border-radius: 12px; border: 1px solid var(--line); background: rgba(16, 22, 30, 0.6); color: var(--ink); font-size: 18px; font-weight: 700; touch-action: none; }
-  .touch-pad [data-touch="up"] { left: 50px; top: 0; }
-  .touch-pad [data-touch="down"] { left: 50px; top: 100px; }
-  .touch-pad [data-touch="left"] { left: 0; top: 50px; }
-  .touch-pad [data-touch="right"] { left: 100px; top: 50px; }
-  .touch-actions { position: absolute; right: 20px; bottom: 230px; width: 128px; height: 148px; }
-  .touch-actions [data-touch="enter"] { right: 0; top: 0; font-size: 13px; }
-  .touch-actions [data-touch="fire"] { right: 66px; top: 62px; }
-  .touch-actions [data-touch="punch"] { right: 0; top: 62px; }
-  .touch-actions [data-touch="run"] { right: 66px; top: 0; font-size: 12px; }
-  .touch-actions [data-touch="menu"] { right: 33px; top: 118px; font-size: 12px; }
-
-  @media (max-width: 1100px) {
-    #objective-box { top: 110px; max-width: min(560px, 90vw); }
-  }
-  @media (max-width: 720px) {
-    #minimap-wrap { width: 130px; height: 130px; }
-    #minimap { width: 130px; height: 130px; }
-    .hud-top { top: 10px; left: 10px; right: 10px; }
-    #cash-value { font-size: 19px; }
-    #health-bar { width: 120px; }
-    #objective-box { top: 100px; max-width: 90vw; }
-    #dialogue { bottom: 84px; }
-    .keys { display: none; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .screen.visible, .toast { animation: none; }
-    #wanted-stars.active { animation: none; }
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="theme-color" content="#143e42">
+  <meta name="description" content="One driver. Five jobs. A whole coast to lose yourself in. Explore Solmar, an original open-world crime game.">
+  <title>SOLMAR — The coast is yours</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <style>
+    :root{color-scheme:dark;--ink:#11373b;--paper:#fff0ce;--gold:#ffd36c;--coral:#ff795f;--teal:#67e0cd;--muted:#b6c7b8}
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#234f58;font-family:Arial,Helvetica,sans-serif;color:var(--paper)}
+    button{font:inherit;cursor:pointer}
+    button:focus-visible{outline:3px solid var(--gold);outline-offset:5px}
+    button:disabled{cursor:default}
+    [hidden]{display:none!important}
+    #game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+    #status{position:fixed;left:18px;bottom:10px;z-index:30;font-size:11px;letter-spacing:.06em;color:#fff2cb}
+    #status:empty{display:none}
+    .screen{position:fixed;inset:0;display:none;z-index:10}
+    body[data-screen="title"] #title-screen{display:flex}
+    body[data-screen="paused"] #pause-screen,body[data-screen="busted"] #busted-screen,body[data-screen="gameover"] #game-over-screen,body[data-screen="mission-complete"] #complete-screen{display:flex}
+    .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;font-weight:800;color:var(--gold)}
+    #title-screen{align-items:center;padding:48px 6.1%;background:linear-gradient(90deg,rgba(12,41,43,.94) 0%,rgba(12,41,43,.88) 28%,rgba(12,41,43,.35) 56%,rgba(12,41,43,0) 83%)}
+    .title-content{width:520px;max-width:52vw;position:relative}
+    .edition{display:flex;align-items:center;gap:10px;margin:0 0 20px;font-size:10px;font-weight:800;letter-spacing:.21em;text-transform:uppercase}
+    .sun-mark{width:26px;height:26px;border:2px solid var(--coral);border-radius:50%;display:inline-block;position:relative;overflow:hidden}
+    .sun-mark:after{content:"";position:absolute;top:15px;left:-3px;width:32px;height:12px;background:var(--coral)}
+    h1{font-family:Impact,'Arial Black',Arial,sans-serif;font-size:clamp(76px,10.8vw,150px);font-weight:900;letter-spacing:-.035em;line-height:.83;margin:0 0 23px;color:var(--paper);text-shadow:5px 5px 0 rgba(255,121,95,.8)}
+    .tagline{font-size:14px;letter-spacing:.065em;color:var(--teal);font-weight:bold;margin:0 0 18px}
+    .story{max-width:400px;font-size:14px;line-height:1.65;color:#e2e3c8;margin:0 0 23px}
+    .story strong{color:var(--paper)}
+    .title-buttons{display:flex;gap:10px;flex-wrap:wrap;max-width:450px;margin-bottom:13px}
+    .button{display:inline-flex;justify-content:center;align-items:center;min-height:46px;padding:13px 23px;letter-spacing:.11em;font-size:11px;font-weight:900;text-transform:uppercase;border:1px solid rgba(255,240,206,.32);background:rgba(17,55,59,.85);color:var(--paper);transition:background .15s,transform .15s}
+    .button:hover{background:#28565a;transform:translateY(-1px)}
+    .button.primary{background:var(--coral);border-color:var(--coral);color:#17393b}
+    .button.primary:hover{background:#ff9b77}
+    .button.gold{background:var(--gold);border-color:var(--gold);color:var(--ink)}
+    .button.quiet{border:0;background:transparent;padding:5px 0;min-height:28px;color:#bfdbcf}
+    .title-secondary{display:flex;gap:22px;margin:3px 0 22px}
+    .controls{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;max-width:420px;padding-top:16px;border-top:1px solid #a2b8a34d;color:#c6d3c1;font-size:10px;letter-spacing:.035em}
+    .controls span{white-space:nowrap}
+    .controls b{display:inline-block;color:var(--paper);min-width:52px;font-size:10px;letter-spacing:.03em}
+    .vista-caption{position:absolute;right:5%;bottom:48px;text-align:right;text-shadow:0 2px 8px #183e42}
+    .vista-caption strong{display:block;font-size:11px;letter-spacing:.32em;text-transform:uppercase;margin-bottom:7px}
+    .vista-caption span{font-size:11px;color:#fff4d5;letter-spacing:.08em}
+    .modal-screen{align-items:center;justify-content:center;background:rgba(8,31,35,.52);backdrop-filter:blur(4px);padding:30px}
+    .card{width:450px;max-width:100%;background:rgba(15,48,52,.97);padding:38px 42px;border-top:5px solid var(--coral);box-shadow:0 20px 80px #09272d66}
+    .card h2{font-family:Impact,'Arial Black',Arial,sans-serif;font-weight:900;font-size:57px;letter-spacing:.01em;line-height:1;margin:15px 0 19px}
+    .card p{font-size:14px;line-height:1.6;color:#c5d6c6}
+    .card .button{width:100%;margin-top:10px}
+    .card small{display:block;color:#9ab7ad;font-size:10px;letter-spacing:.08em;margin-top:23px}
+    #complete-screen{justify-content:flex-end;padding-right:9%;background:linear-gradient(90deg,transparent,rgba(9,32,37,.4))}
+    #complete-screen .card{border-color:var(--gold);width:430px}
+    #complete-title{font-size:60px;color:var(--paper)}
+    .complete-award{font-family:Impact,'Arial Black',Arial,sans-serif;font-size:66px;color:var(--gold);letter-spacing:.015em;margin:25px 0 6px}
+    .complete-stats{display:flex;justify-content:space-between;gap:12px;padding:18px 0;border-top:1px solid #f5e9bc26;border-bottom:1px solid #f5e9bc26;margin:20px 0}
+    #complete-extra{font-size:12px;color:#d2dfc7}
+    #complete-time{font-size:12px;color:var(--teal);white-space:nowrap}
+    #busted-fine{font-family:Impact,Arial,sans-serif;color:var(--coral);font-size:38px;letter-spacing:.03em}
+    #hud{position:fixed;inset:0;z-index:3;pointer-events:none}
+    .vitals{position:absolute;left:30px;top:27px;width:224px;filter:drop-shadow(0 2px 5px #113b4566)}
+    .health-row{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;letter-spacing:.15em;font-weight:bold}
+    #health-text{font-size:19px;font-weight:900;letter-spacing:0}
+    .health-track{width:100%;height:5px;background:#183d41a6;margin:7px 0 12px}
+    #health-fill{width:100%;height:100%;background:#b7f09b}
+    .money-row{display:flex;justify-content:space-between;align-items:baseline}
+    .wallet-label{font-size:9px;font-weight:bold;letter-spacing:.17em;color:#ccdfd1}
+    #cash-value{font-size:28px;font-weight:900;letter-spacing:-.04em;color:#fff5d8;font-variant-numeric:tabular-nums}
+    .heat-panel{position:absolute;right:31px;top:28px;text-align:right;text-shadow:0 2px 5px #143e49}
+    .heat-panel .eyebrow{font-size:9px;color:#e6e2c6;letter-spacing:.2em}
+    #wanted-stars{font-size:26px;letter-spacing:.09em;line-height:1.5;color:#b6c5af}
+    #wanted-stars.hot{color:var(--coral)}
+    #objective-box{position:absolute;left:30px;top:151px;width:300px;max-width:calc(100% - 60px);padding:12px 15px 14px;background:rgba(14,47,51,.88);border-left:3px solid var(--gold)}
+    #objective-box .eyebrow{font-size:8px;letter-spacing:.19em;margin-bottom:6px}
+    #objective-text{font-size:13px;line-height:1.5;color:#fff3d0}
+    .map-wrap{position:absolute;left:25px;bottom:27px;width:190px;height:213px;filter:drop-shadow(0 3px 10px #0b343b66)}
+    #minimap{display:block;width:190px;height:190px}
+    .map-caption{margin-top:4px;display:flex;justify-content:space-between;font-size:8px;letter-spacing:.15em;font-weight:800;color:#f1e9cc;padding:0 12px}
+    .map-caption span:last-child{color:var(--teal);letter-spacing:.06em}
+    #speed-box{position:absolute;right:32px;bottom:32px;text-align:right;line-height:1;text-shadow:0 3px 5px #183e47}
+    #speed-value{font-family:Impact,'Arial Black',Arial,sans-serif;font-size:73px;letter-spacing:.015em;font-variant-numeric:tabular-nums}
+    #speed-box small{display:block;font-size:10px;letter-spacing:.28em;color:var(--teal);margin-top:6px}
+    #dialogue{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);width:480px;max-width:calc(100% - 470px);padding:15px 19px;background:rgba(15,46,50,.92);border-top:2px solid var(--teal)}
+    #subtitle{font-size:9px;font-weight:900;letter-spacing:.18em;color:var(--teal);margin-bottom:6px;text-transform:uppercase}
+    #dialogue-text{font-size:13px;line-height:1.5;color:#fff2d7}
+    #hint{position:absolute;left:50%;bottom:146px;transform:translateX(-50%);padding:10px 16px;max-width:75%;background:#173e41dc;color:var(--gold);font-size:11px;letter-spacing:.04em;text-align:center;white-space:pre-line}
+    #toasts{position:absolute;right:30px;top:112px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:320px}
+    .toast{padding:11px 15px;border-left:3px solid var(--teal);background:#143c40eb;font-size:12px;line-height:1.4;color:#fff1d1;box-shadow:0 3px 12px #14383a22}
+    .toast-error,.toast-danger{border-color:var(--coral)}
+    .toast-success{border-color:var(--gold)}
+    .hud-bottom-label{position:absolute;right:32px;bottom:132px;color:#f7efce;font-size:9px;letter-spacing:.14em;text-shadow:0 2px 3px #1c4345}
+    #mission-list{position:fixed;right:28px;top:100px;width:460px;max-width:calc(100vw - 56px);z-index:25;background:#123a3ef7;border-top:4px solid var(--gold);box-shadow:0 20px 90px #0a242c88;padding:22px;pointer-events:auto}
+    .jobs-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+    .jobs-heading h2{font-family:Impact,Arial,sans-serif;font-size:31px;letter-spacing:.03em;margin:5px 0 0}
+    #btn-close-jobs{width:32px;height:32px;background:transparent;border:1px solid #d8e4bd55;font-size:20px;color:var(--paper)}
+    .mission-row{display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:#20494a;border:0;border-bottom:1px solid #d6ddbf1c;color:var(--paper);padding:17px 13px}
+    .mission-row:hover:enabled{background:#32605a}
+    .mission-row:disabled{opacity:.45}
+    .mission-row.done .mission-number,.mission-row.done .mission-reward{color:var(--teal)}
+    .mission-number{font-family:Impact,Arial,sans-serif;font-size:26px;color:var(--gold)}
+    .mission-detail{flex:1}
+    .mission-detail strong{display:block;font-size:13px;letter-spacing:.025em;margin-bottom:5px}
+    .mission-detail small{display:block;font-size:10px;color:#bbcec0}
+    .mission-reward{font-size:11px;font-weight:bold;color:var(--gold)}
+    .jobs-note{font-size:10px;color:#afc8bc;line-height:1.5;margin:16px 0 0}
+    #touch-controls{display:none;position:fixed;inset:0;z-index:6;pointer-events:none}
+    body.touch[data-screen="playing"] #touch-controls{display:block}
+    .touch-pad{position:absolute;left:22px;bottom:26px;display:grid;grid-template-columns:repeat(3,46px);gap:5px}
+    .touch-actions{position:absolute;right:20px;bottom:25px;display:flex;gap:6px;flex-wrap:wrap;width:165px;justify-content:flex-end}
+    #touch-controls button{width:46px;height:46px;color:#fff2d1;font-weight:bold;background:#143e42b8;border:1px solid #d5e3c370;pointer-events:auto;touch-action:none;border-radius:6px}
+    .touch-pad button:first-child{grid-column:2}
+    .touch-pad button:nth-child(2){grid-column:1}
+    .touch-actions button{font-size:11px}
+    @media(max-width:850px){
+      #title-screen{padding:30px 5%;background:linear-gradient(90deg,#0d3032ed,#0d3032bb 47%,#0d30322b)}
+      .title-content{max-width:68vw;width:460px}
+      h1{font-size:100px}
+      .story{font-size:12px;max-width:340px;line-height:1.6;margin-bottom:15px}
+      .tagline{font-size:11px}
+      .edition{margin-bottom:15px}
+      .title-secondary{margin-bottom:10px}
+      .controls{font-size:9px;gap:7px;max-width:355px}
+      .controls b{font-size:9px;min-width:45px}
+      .vista-caption{right:4%;bottom:25px}
+      .vitals{left:21px;top:22px;width:194px}
+      #objective-box{left:21px;top:141px;width:270px;padding:10px 12px}
+      .heat-panel{right:21px;top:24px}
+      #wanted-stars{font-size:22px}
+      #dialogue{width:380px;max-width:calc(100% - 345px);left:53%;padding:12px;bottom:28px}
+      #dialogue-text{font-size:11px}
+      .map-wrap{width:158px;left:17px;bottom:25px;height:179px}
+      #minimap{width:158px;height:158px}
+      #speed-value{font-size:58px}
+      #speed-box{right:20px;bottom:27px}
+      #hint{bottom:146px;max-width:65%;font-size:10px}
+      .hud-bottom-label{right:20px;bottom:111px;font-size:8px}
+      #toasts{right:21px;top:104px;max-width:250px}
+      .toast{font-size:11px}
+      #complete-screen{padding-right:5%}
+      #complete-screen .card{width:380px;padding:30px}
+    }
+    @media(max-width:560px){
+      .title-content{max-width:100%;width:100%}h1{font-size:90px}.story{max-width:350px}.edition{font-size:8px}
+      #title-screen{padding:25px;background:#123739bb}.tagline{font-size:10px}.controls{max-width:100%}.vista-caption{display:none}
+      .button{min-height:40px;padding:11px 15px;font-size:10px}.title-buttons{margin-bottom:8px}.title-secondary{margin-bottom:12px}
+      .vitals{width:145px;left:15px;top:15px}#cash-value{font-size:24px}.wallet-label{font-size:8px}.health-row{font-size:8px}
+      .heat-panel{right:14px;top:16px}#wanted-stars{font-size:19px}#objective-box{left:15px;top:132px;width:225px}
+      #objective-text{font-size:11px}.map-wrap{left:10px;bottom:23px;width:128px;height:150px}#minimap{width:128px;height:128px}.map-caption{font-size:6px;padding:0 7px}
+      #dialogue{left:50%;bottom:186px;max-width:calc(100% - 30px);width:calc(100% - 30px)}#hint{bottom:286px;max-width:90%;width:max-content}
+      #speed-box{right:15px;bottom:25px}#speed-value{font-size:53px}.hud-bottom-label{right:15px;bottom:102px;font-size:7px}
+      #toasts{top:220px;right:15px;max-width:230px}.toast{font-size:10px;padding:8px 10px}
+      .card{padding:28px}.card h2{font-size:44px}#complete-title{font-size:47px}.complete-award{font-size:55px}
+      #complete-screen{justify-content:center;padding:20px}.complete-stats{gap:8px}#complete-extra,#complete-time{font-size:10px}
+      #mission-list{top:70px;left:15px;right:15px;max-width:none;width:auto;padding:18px}.mission-row{padding:13px 10px}
+      body.touch .map-wrap{bottom:145px}body.touch #dialogue{bottom:310px}body.touch #hint{bottom:405px}
+    }
+    @media(max-height:650px) and (min-width:561px){
+      #title-screen{padding-top:25px;padding-bottom:25px}h1{font-size:100px;margin-bottom:18px}.edition{margin-bottom:13px}.story{font-size:12px;margin-bottom:16px}.title-secondary{margin-bottom:12px}.controls{padding-top:11px;gap:6px}.tagline{margin-bottom:12px}
+    }
+  </style>
+  <script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
 </head>
 <body data-screen="title">
-<canvas id="game" aria-label="SOLMAR: an open-world driving game set in the coastal city of Solmar"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
+  <canvas id="game" tabindex="0" aria-label="Solmar city. Use WASD to move, E to enter a car, M for jobs."></canvas>
+  <div id="status" role="status" aria-live="polite"></div>
 
-<div id="hud" aria-hidden="true">
-  <div class="hud-top">
-    <div class="hud-panel">
-      <div class="health-row">
-        <span class="health-label">Health</span>
-        <div id="health-bar"><div id="health-fill"></div></div>
-        <span id="health-text">100</span>
+  <section id="title-screen" class="screen" aria-label="Solmar main menu">
+    <div class="title-content">
+      <div class="edition"><span class="sun-mark" aria-hidden="true"></span> A city of sun. A life of trouble.</div>
+      <h1>SOLMAR</h1>
+      <p class="tagline">A coastal city · an ex-getaway driver</p>
+      <p class="story"><strong>Jax Moreno</strong> came home for a clean start. Mara has other plans. Five last jobs between him and a place in the sun. Keep your wheels close, your friends closer, and the coast in sight.</p>
+      <div class="title-buttons">
+        <button id="btn-start" class="button primary">Start a new story ↗</button>
+        <button id="btn-continue" class="button gold" hidden>Continue</button>
       </div>
-      <div class="wanted-row">
-        <span class="wanted-label">Wanted</span>
-        <span id="wanted-stars" aria-label="wanted level"></span>
+      <div class="title-secondary">
+        <button id="btn-walk" class="button quiet">Just take a walk</button>
+        <button id="btn-title-jobs" class="button quiet">The five jobs</button>
+      </div>
+      <div class="controls" aria-label="Controls">
+        <span><b>WASD</b> Move / drive</span><span><b>SHIFT</b> Sprint</span>
+        <span><b>SPACE</b> Jump / handbrake</span><span><b>E</b> Enter / exit car</span>
+        <span><b>F</b> Punch</span><span><b>CLICK</b> Pistol</span>
+        <span><b>M</b> Jobs menu</span><span><b>P / ESC</b> Pause</span>
+        <span><b>DRAG</b> Look · wheel zoom</span><span><b>N</b> Mute audio</span>
       </div>
     </div>
-    <div class="hud-right">
-      <div class="hud-panel cash-panel">
-        <span class="cash-label">Cash</span>
-        <span id="cash-value">$250</span>
-      </div>
-      <div class="hud-panel" id="speed-box">
-        <span id="speed-value">0 KM/H</span>
-      </div>
-    </div>
-  </div>
-  <div id="objective-box"><div id="objective-text"></div></div>
-  <div id="minimap-wrap"><canvas id="minimap" width="190" height="190" aria-label="minimap"></canvas></div>
-  <div id="toasts" aria-live="polite"></div>
-  <div id="dialogue"><div id="dialogue-text"></div></div>
-  <div id="hint"></div>
-  <div id="subtitle"></div>
-</div>
+    <div class="vista-caption"><strong>Welcome to Solmar</strong><span>Blue water. Dirty money. One last run.</span></div>
+  </section>
 
-<div id="mission-list" role="dialog" aria-label="Available jobs"></div>
-
-<div id="title-screen" class="screen">
-  <div class="title-vignette"></div>
-  <div class="card">
-    <div class="kicker">A coastal city · an ex-getaway driver</div>
-    <h1>SOL<span>MAR</span></h1>
-    <p class="tagline">Jax Moreno knows every back street from the harbor to the pier. One last run of jobs and the coast is his — if the SMPD and a few old friends let him keep it.</p>
-    <div class="rule"></div>
-    <div class="btn-row">
-      <button class="btn" id="btn-start" type="button">New Game</button>
-      <button class="btn ghost" id="btn-continue" type="button"><span>Continue</span></button>
+  <div id="hud" hidden aria-hidden="true">
+    <div class="vitals">
+      <div class="health-row"><span>JAX MORENO</span><span><span id="health-text">100</span> HP</span></div>
+      <div class="health-track"><div id="health-fill"></div></div>
+      <div class="money-row"><span class="wallet-label">CASH ON HAND</span><span id="cash-value">$250</span></div>
     </div>
-    <div class="keys">
-      <div><b>WASD</b> move / drive</div>
-      <div><b>Shift</b> sprint</div>
-      <div><b>Space</b> jump / handbrake</div>
-      <div><b>E</b> enter / exit car</div>
-      <div><b>F</b> punch</div>
-      <div><b>Click</b> pistol</div>
-      <div><b>M</b> jobs menu</div>
-      <div><b>P / Esc</b> pause</div>
-    </div>
+    <div class="heat-panel"><div class="eyebrow">Keep a low profile</div><div id="wanted-stars" aria-label="0 of 5 wanted stars">☆ ☆ ☆ ☆ ☆</div></div>
+    <div id="objective-box"><div class="eyebrow">The next move</div><div id="objective-text">Explore Solmar. Find a gold beacon to take a job.</div></div>
+    <div class="map-wrap"><canvas id="minimap" width="256" height="256" aria-label="Rotating city minimap"></canvas><div class="map-caption"><span>SOLMAR</span><span>COASTAL DISTRICT</span></div></div>
+    <div id="speed-box" hidden><span id="speed-value">000</span><small>KM / H</small></div>
+    <div class="hud-bottom-label">M &nbsp; JOBS &nbsp; / &nbsp; P &nbsp; PAUSE</div>
+    <div id="dialogue" hidden><div id="subtitle">MARA</div><div id="dialogue-text"></div></div>
+    <div id="hint" hidden></div>
+    <div id="toasts" role="status" aria-live="polite"></div>
   </div>
-</div>
 
-<div id="pause-screen" class="screen">
-  <div class="card">
-    <div class="kicker">Solmar waits</div>
-    <h1>PAUSED</h1>
-    <p class="tagline">The sun is still up. The cops are still looking.</p>
-    <div class="rule"></div>
-    <div class="btn-row">
-      <button class="btn" id="btn-resume" type="button">Resume</button>
-      <button class="btn ghost" id="btn-restart-pause" type="button">Restart</button>
-      <button class="btn ghost" id="btn-jobs" type="button">Jobs</button>
-    </div>
-  </div>
-</div>
+  <section id="pause-screen" class="screen modal-screen" aria-label="Paused">
+    <div class="card"><div class="eyebrow">Take a breath</div><h2>COAST IS CLEAR.</h2><p>The city can wait. Your run is paused.</p><button id="btn-resume" class="button primary">Back to Solmar</button><button id="btn-jobs" class="button">The five jobs</button><button id="btn-restart-pause" class="button quiet">Start a new run</button><small>P / ESC / Q TO RESUME · N TO MUTE</small></div>
+  </section>
+  <section id="busted-screen" class="screen modal-screen" aria-label="Busted">
+    <div class="card"><div class="eyebrow">Solmar Police Department</div><h2>BUSTED.</h2><p>A few questions. A lighter wallet. Another chance.</p><div id="busted-fine">−$250</div><button class="button primary" data-action="resume">Back on the street</button><small>PRESS ENTER TO CONTINUE</small></div>
+  </section>
+  <section id="game-over-screen" class="screen modal-screen" aria-label="Game over">
+    <div class="card"><div class="eyebrow">The coast slips away</div><h2>END OF THE ROAD.</h2><p>Solmar keeps its secrets. Try a different route.</p><button id="btn-restart" class="button primary">One more run</button><small>PRESS ENTER OR R TO RESTART</small></div>
+  </section>
+  <section id="complete-screen" class="screen modal-screen" aria-label="Mission complete">
+    <div class="card"><div class="eyebrow">Job complete / Solmar stories</div><h2 id="complete-title">First Fare</h2><p>You delivered. The coast is a little closer.</p><div id="complete-cash" class="complete-award">+$500</div><div class="complete-stats"><span id="complete-extra">1 of 5 jobs complete</span><span id="complete-time">46.8 s</span></div><button id="btn-continue-story" class="button gold">Keep the story going ↗</button><small>PRESS ENTER TO RETURN TO THE CITY</small></div>
+  </section>
 
-<div id="complete-screen" class="screen">
-  <div class="card">
-    <div class="kicker">Mission complete</div>
-    <h1 id="complete-title">First Fare</h1>
-    <div class="stat-row">
-      <div class="stat"><div class="n" id="complete-cash">+$500</div><div class="l">Payout</div></div>
-      <div class="stat"><div class="n" id="complete-time">—</div><div class="l">Time</div></div>
-    </div>
-    <p class="tagline" id="complete-extra">1 of 5 jobs complete.</p>
-    <div class="rule"></div>
-    <div class="btn-row">
-      <button class="btn" id="btn-continue-story" type="button">Back to Solmar</button>
-    </div>
+  <section id="mission-list" hidden aria-hidden="true" aria-label="The five jobs">
+    <div class="jobs-heading"><div><div class="eyebrow">One last run</div><h2>THE FIVE JOBS</h2></div><button id="btn-close-jobs" aria-label="Close jobs">×</button></div>
+    <div id="mission-rows"></div><p class="jobs-note">Select an unlocked job, or find its gold beacon in the city. Complete jobs in order to follow Jax’s story.</p>
+  </section>
+  <div id="touch-controls" aria-label="Touch game controls">
+    <div class="touch-pad"><button data-touch="KeyW" aria-label="Forward">↑</button><button data-touch="KeyA" aria-label="Left">←</button><button data-touch="KeyS" aria-label="Back">↓</button><button data-touch="KeyD" aria-label="Right">→</button></div>
+    <div class="touch-actions"><button data-touch="KeyE">E</button><button data-touch="KeyF">F</button><button data-touch="Fire">FIRE</button><button data-touch="ShiftLeft">RUN</button><button data-touch="Space">JUMP</button><button data-touch="KeyP">Ⅱ</button></div>
   </div>
-</div>
-
-<div id="busted-screen" class="screen">
-  <div class="card">
-    <div class="kicker">The SMPD has you</div>
-    <h1>BUSTED</h1>
-    <p class="tagline">Impound fee and a fine: <strong id="busted-fine">$0</strong>. Jax walks out with empty pockets and a shorter temper.</p>
-    <div class="rule"></div>
-    <div class="btn-row">
-      <button class="btn" id="btn-walk" type="button">Walk out</button>
-    </div>
-  </div>
-</div>
-
-<div id="game-over-screen" class="screen">
-  <div class="card">
-    <div class="kicker">The coast takes its own</div>
-    <h1>GAME OVER</h1>
-    <p class="tagline">Jax went down. Solmar does not wait for anyone.</p>
-    <div class="rule"></div>
-    <div class="btn-row">
-      <button class="btn" id="btn-restart" type="button">Restart</button>
-    </div>
-  </div>
-</div>
-
-<div id="touch" aria-hidden="true">
-  <div class="touch-pad">
-    <button type="button" data-touch="up" aria-label="forward">▲</button>
-    <button type="button" data-touch="left" aria-label="left">◀</button>
-    <button type="button" data-touch="right" aria-label="right">▶</button>
-    <button type="button" data-touch="down" aria-label="back">▼</button>
-  </div>
-  <div class="touch-actions">
-    <button type="button" data-touch="run" aria-label="sprint">RUN</button>
-    <button type="button" data-touch="enter" aria-label="enter car">CAR</button>
-    <button type="button" data-touch="fire" aria-label="pistol">●</button>
-    <button type="button" data-touch="punch" aria-label="punch">✊</button>
-    <button type="button" data-touch="menu" aria-label="jobs">JOBS</button>
-  </div>
-</div>
-
-<script type="module" src="./src/main.js"></script>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>

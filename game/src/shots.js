@@ -1,165 +1,79 @@
-// Deterministic screenshot staging using the game's seeded world and its live systems.
-import { CAMERA, MISSIONS, STEP } from './config.js';
-
-const FIXED_STEP_COUNT = 120;
-const STARTER_POSITION = { x: 4.6, z: 100, heading: 0 };
-
-function setReady(value) {
-  if (typeof window !== 'undefined') window.__shotReady = value;
-}
-
-function prepareFreshRun(game) {
-  const { player, vehicles, police, combat, missions, state, orbit } = game;
-  player.reset();
-  missions.reset();
-  missions.setProgress([]);
-  police.clear();
-  combat.reset();
-
-  for (let index = vehicles.cars.length - 1; index >= 0; index -= 1) {
-    const car = vehicles.cars[index];
-    car.state.occupied = false;
-    if (car.kind === 'mission' || car.kind === 'police') {
-      game.renderer.scene.remove(car.group);
-      vehicles.cars.splice(index, 1);
-    }
-  }
-  const starter = vehicles.cars.find((car) => car.id === 'starter');
-  if (starter) {
-    vehicles.repair(starter);
-    starter.state.speed = 0;
-    vehicles.setCarPosition(starter, STARTER_POSITION.x, STARTER_POSITION.z, STARTER_POSITION.heading);
-  }
-
-  state.cash = MISSIONS.startCash;
-  state.missionBest = {};
-  state.completed = [];
-  state.finalMission = null;
-  state.bustedFine = 0;
-  state.elapsed = 0;
-  state.started = true;
-  orbit.yaw = 0;
-  orbit.pitch = CAMERA.pitch;
-  orbit.distance = CAMERA.distance;
-  player.state.x = 7.4;
-  player.state.z = 100;
-  player.state.heading = 0;
-  player.syncMesh();
-  missions.takeEvents();
-}
-
-function freezeMissionVisuals(scene) {
-  scene.traverse((node) => {
-    const { ring, gem, beam } = node.userData || {};
-    if (ring) {
-      ring.rotation.z = 0;
-      ring.scale.setScalar(1);
-    }
-    if (gem) {
-      gem.rotation.y = 0;
-      gem.position.y = 3.2;
-    }
-    if (beam?.material) beam.material.opacity = 0.16;
-  });
-}
-
-function fixedAdvance(game, count, controls = null) {
-  const { player, vehicles, traffic, missions, police, combat, city } = game;
-  for (let index = 0; index < count; index += 1) {
-    const car = player.state.inCar;
-    if (car) {
-      vehicles.stepCar(car, STEP, controls || {
-        accelerate: false,
-        brake: false,
-        left: false,
-        right: false,
-        handbrake: false,
-      }, city.colliders);
-      player.state.x = car.state.x;
-      player.state.z = car.state.z;
-      player.state.heading = car.state.heading;
-    } else {
-      player.syncMesh();
-    }
-    traffic.update(STEP, player, vehicles);
-    combat.update(STEP, player);
-    police.update(STEP, player, combat);
-    missions.update(STEP);
-    game.state.elapsed += STEP;
-  }
-}
+// Reproducible editorial views use the same game objects as normal play.
+import * as THREE from '../vendor/three.module.min.js';
+import { syncCar } from './vehicles.js';
 
 export function stageShot(name, game) {
-  const shot = name === 'play' || name === 'end' ? name : 'start';
-  const { player, vehicles, missions, hud, renderer, orbit, state, setScreen } = game;
-  setReady(false);
-  prepareFreshRun(game);
-
-  if (shot === 'start') {
-    setScreen('title');
-    hud.setVisible(false);
-    renderer.frameTitle();
-    fixedAdvance(game, FIXED_STEP_COUNT);
-    freezeMissionVisuals(renderer.scene);
-    setReady(true);
-    return {
-      screen: 'title',
-      update() {},
-    };
+  if (!['start', 'play', 'end'].includes(name)) return false;
+  const { player, vehicles, traffic, missions, police, hud, render } = game;
+  if (name === 'start') {
+    game.setScreen('title');
+    document.getElementById('btn-continue').hidden = true;
+    render.frameTitle(0);
+    game.shotFrozen = true;
+    return true;
   }
-
-  if (shot === 'play') {
-    player.state.x = 0;
-    player.state.z = 236;
-    player.syncMesh();
-    missions.start('first-fare');
-    const starter = vehicles.cars.find((car) => car.id === 'starter');
-    if (starter) {
-      vehicles.setCarPosition(starter, 0, 250, 0);
-      player.enterCar(starter);
-    }
-    orbit.yaw = 0.35;
-    orbit.pitch = 0.24;
-    orbit.distance = 9.4;
-    state.cash = 1200;
-    setScreen('playing');
-    hud.setHint('E — exit car');
-    fixedAdvance(game, FIXED_STEP_COUNT, {
-      accelerate: true,
-      brake: false,
-      left: false,
-      right: false,
-      handbrake: false,
-    });
-    freezeMissionVisuals(renderer.scene);
-    setReady(true);
-    return {
-      screen: 'playing',
-      update() {},
-    };
-  }
-
-  // Put the actual first-fare state machine at its drop-off, then let it issue the completion.
-  const starter = vehicles.cars.find((car) => car.id === 'starter');
+  game.startRun(false);
+  const car = vehicles.cars.find(item => item.starter);
+  Object.assign(car, { x: 0, z: 252, heading: 0, speed: 29, vx: 0, vz: 29, stolen: true, driver: 'player' });
+  syncCar(car);
+  player.state.inCar = car;
+  player.step(0, {}, 0);
   missions.start('first-fare');
-  if (starter) {
-    vehicles.setCarPosition(starter, 288, 268, Math.PI / 2);
-    player.enterCar(starter);
-    player.state.x = starter.state.x;
-    player.state.z = starter.state.z;
-    player.state.heading = starter.state.heading;
+  if (name === 'play') {
+    missions.state.stage = 'dropoff';
+    missions.state.elapsed = 24.6;
+    // Advance the actual pickup transition to put the active marker at Pier 9.
+    car.x = 80; car.z = 152; car.speed = 0;
+    player.step(0, {}, 0);
+    missions.state.stage = 'pickup';
+    missions.update(.01);
+    Object.assign(car, { x: 0, z: 252, speed: 29, vx: 0, vz: 29 });
+    syncCar(car); player.step(0, {}, 0);
+    hud.setDialogue('MARA', 'Pier 9, Jax. A smooth ride, a quiet handoff. Then we talk about your future.');
+    hud.setObjective('FIRST FARE · Client aboard. Deliver to Pier 9. Keep it smooth.');
+    police.setWanted(2);
+    police.update(.01, player.state, {});
+    police.state.copCars.forEach((cop, index) => {
+      cop.x = index ? 4 : -4;
+      cop.z = 264 + index * 13;
+      cop.heading = 0;
+      syncCar(cop);
+    });
+    // Keep a clean lane for the staged drive while retaining ambient street life.
+    traffic.cars.forEach((ambient, index) => {
+      if (Math.hypot(ambient.x, ambient.z - 252) < 18) {
+        ambient.x = index % 2 ? 72 : -72;
+        ambient.z = 215 + index * 3;
+        syncCar(ambient);
+      }
+    });
+    traffic.cars.slice(0, 2).forEach((ambient, index) => {
+      Object.assign(ambient, { x: index ? -4 : 4, z: 307 + index * 24, heading: index ? 0 : Math.PI });
+      syncCar(ambient);
+    });
+    traffic.pedestrians.slice(0, 2).forEach((person, index) => {
+      person.x = index ? -12 : 12;
+      person.z = 280 + index * 12;
+      person.group.position.set(person.x, 0, person.z);
+    });
+    render.state.yaw = -.10;
+    render.state.pitch = .39;
+    render.state.zoom = 12;
+    render.follow(player.state, 1, {});
+    render.camera.lookAt(new THREE.Vector3(player.state.x, 1.3, player.state.z + 7));
+  } else {
+    Object.assign(car, { x: 80, z: 152, speed: 0, vx: 0, vz: 0 });
+    player.step(0, {}, 0);
+    missions.update(.1);
+    Object.assign(car, { x: 288, z: 268, speed: 0 });
+    syncCar(car); player.step(0, {}, 0);
+    missions.state.elapsed = 46.7;
+    missions.update(.1);
+    for (const event of missions.takeEvents()) if (event.type === 'complete') game.completeMission(event);
+    render.state.yaw = -.45;
+    render.state.zoom = 13;
+    render.follow(player.state, 1, {});
   }
-  missions.state.stage = 'dropoff';
-  missions.state.elapsed = 46.8;
-  if (starter) starter.state.speed = 0;
-  const event = missions.complete();
-  missions.takeEvents();
-  freezeMissionVisuals(renderer.scene);
-  if (event) game.completeMission(event);
-  else setScreen('mission-complete');
-  setReady(true);
-  return {
-    screen: 'mission-complete',
-    update() {},
-  };
+  game.shotFrozen = true;
+  return true;
 }

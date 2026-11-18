@@ -1,208 +1,60 @@
-// three.js rendering: the scene, warm coastal light, sky and fog, a follow camera for foot and
-// car, plus resize handling. Shadows are one directional light with a tight box that moves with
-// the player instead of covering the whole city, which keeps the polygon and draw cost modest.
 import * as THREE from '../vendor/three.module.min.js';
-import { CAMERA, PALETTE, TITLE_CAMERA } from './config.js';
+import { CAMERA, PALETTE } from './config.js';
 
 export function createRenderer(canvas) {
-  const viewport = () => ({
-    width: Number.isFinite(window.innerWidth) && window.innerWidth > 0 ? window.innerWidth : 1280,
-    height: Number.isFinite(window.innerHeight) && window.innerHeight > 0 ? window.innerHeight : 720,
-  });
-  const initialSize = viewport();
-  let renderer;
-  try {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-  } catch {
-    renderer = null;
-  }
-  if (renderer) {
-    renderer.setPixelRatio(Math.min(Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : 1, 1.75));
-    renderer.setSize(initialSize.width, initialSize.height, false);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
-  }
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(PALETTE.sky);
-  scene.fog = new THREE.Fog(PALETTE.fog, 140, 620);
-
-  const camera = new THREE.PerspectiveCamera(58, initialSize.width / initialSize.height, 0.1, 1800);
-  camera.position.set(0, 8, 14);
-
-  const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 0.72);
-  scene.add(hemi);
-
-  const sun = new THREE.DirectionalLight(PALETTE.sun, 2.1);
-  sun.position.set(-140, 170, 90);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.near = 20;
-  sun.shadow.camera.far = 420;
-  sun.shadow.camera.left = -95;
-  sun.shadow.camera.right = 95;
-  sun.shadow.camera.top = 95;
-  sun.shadow.camera.bottom = -95;
-  sun.shadow.bias = -0.0008;
-  sun.shadow.normalBias = 0.02;
-  scene.add(sun);
-  scene.add(sun.target);
-
-  const skyGeometry = new THREE.SphereGeometry(1500, 20, 12);
-  const skyMaterial = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: {
-      top: { value: new THREE.Color(PALETTE.skyTop) },
-      bottom: { value: new THREE.Color(PALETTE.sky) },
-      sunColor: { value: new THREE.Color(0xffd9a0) },
-    },
-    vertexShader: 'varying vec3 vWorld; void main(){ vWorld = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `
-      uniform vec3 top;
-      uniform vec3 bottom;
-      uniform vec3 sunColor;
-      varying vec3 vWorld;
-      void main() {
-        float h = clamp(vWorld.y * 1.15 + 0.18, 0.0, 1.0);
-        vec3 color = mix(bottom, top, pow(h, 0.8));
-        float glow = pow(max(dot(normalize(vWorld), normalize(vec3(-0.55, 0.25, 0.8))), 0.0), 6.0);
-        color += sunColor * glow * 0.4;
-        gl_FragColor = vec4(color, 1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }
-    `,
-  });
-  const skyDome = new THREE.Mesh(skyGeometry, skyMaterial);
-  scene.add(skyDome);
-
-  const cameraState = {
-    yaw: 0,
-    pitch: CAMERA.pitch,
-    distance: CAMERA.distance,
-    target: new THREE.Vector3(),
-    pos: new THREE.Vector3(0, 6, 12),
-    mode: 'foot',
-  };
-  let snapCamera = true;
-  let hasPreviousFocus = false;
-  const previousFocus = new THREE.Vector3();
-
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, 1.5));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.12;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(PALETTE.sky); scene.fog = new THREE.Fog(0xa6d4d4, 210, 1100);
+  const camera = new THREE.PerspectiveCamera(56, 16 / 9, 0.1, 4200);
+  const state = { yaw: 0, pitch: 0.36, zoom: 8 };
+  scene.add(new THREE.HemisphereLight(0xffedcd, 0x55858c, 2.2));
+  const sun = new THREE.DirectionalLight(0xffe1a2, 2.9); sun.position.set(-180, 320, 180);
+  sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = -95; sun.shadow.camera.right = 95;
+  sun.shadow.camera.top = 95; sun.shadow.camera.bottom = -95; sun.shadow.camera.near = 1; sun.shadow.camera.far = 700;
+  sun.shadow.normalBias = 0.06; sun.shadow.bias = -0.0002; scene.add(sun); scene.add(sun.target);
+  // Three supplies colour and tone-mapping pars to ShaderMaterial itself.
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(2700, 24, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    uniforms: { upper: { value: new THREE.Color(0x65badb) }, horizon: { value: new THREE.Color(0xffe1b0) } },
+    vertexShader: 'varying vec3 skyPosition; void main(){skyPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader: 'uniform vec3 upper;uniform vec3 horizon;varying vec3 skyPosition;void main(){float t=clamp(normalize(skyPosition).y*2.1,0.0,1.0);gl_FragColor=vec4(mix(horizon,upper,pow(t,0.58)),1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}'
+  }));
+  sky.frustumCulled = false; scene.add(sky);
+  const disc = new THREE.Mesh(new THREE.SphereGeometry(50, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffe3a1, fog: false }));
+  disc.position.set(-930, 620, 1700); scene.add(disc);
+  const desired = new THREE.Vector3(), look = new THREE.Vector3();
+  let following = false;
   function resize() {
-    const { width, height } = viewport();
-    if (renderer) {
-      renderer.setPixelRatio(Math.min(Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : 1, 1.75));
-      renderer.setSize(width, height, false);
+    const width = canvas.clientWidth || globalThis.innerWidth || 1280, height = canvas.clientHeight || globalThis.innerHeight || 720;
+    renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix();
+  }
+  globalThis.addEventListener?.('resize', resize); resize();
+  function frameTitle(time = 0) {
+    const drift = Math.sin(time * 0.055) * 15;
+    camera.position.set(CAMERA.title.x + drift, CAMERA.title.y, CAMERA.title.z);
+    camera.lookAt(-5, CAMERA.title.lookY, 115); following = false;
+  }
+  function follow(target, dt = 1 / 60, pointer = {}) {
+    state.yaw -= (pointer.dx || 0) * 0.005;
+    state.pitch = THREE.MathUtils.clamp(state.pitch + (pointer.dy || 0) * 0.0035, 0.14, 1.12);
+    state.zoom = THREE.MathUtils.clamp(state.zoom + (pointer.wheel || 0) * 0.008, CAMERA.minZoom, CAMERA.maxZoom);
+    const car = target.inCar;
+    if (car && !pointer.dx) {
+      const difference = Math.atan2(Math.sin(car.heading - state.yaw), Math.cos(car.heading - state.yaw));
+      state.yaw += difference * (1 - Math.exp(-dt * 1.4));
     }
-    camera.aspect = width / Math.max(1, height);
-    camera.updateProjectionMatrix();
+    const distance = state.zoom + (car ? 4.3 + Math.min(2.2, Math.abs(car.speed || 0) * 0.055) : 0);
+    const height = car ? 1.2 : 1.65;
+    look.set(target.x, (target.y || 0) + height, target.z);
+    desired.set(look.x - Math.sin(state.yaw) * Math.cos(state.pitch) * distance, look.y + Math.sin(state.pitch) * distance + (car ? 1.3 : 0), look.z - Math.cos(state.yaw) * Math.cos(state.pitch) * distance);
+    if (!following || dt >= 1) camera.position.copy(desired); else camera.position.lerp(desired, 1 - Math.exp(-dt * 9));
+    camera.lookAt(look); following = true;
+    sun.target.position.set(target.x, 0, target.z); sun.position.set(target.x - 180, 320, target.z + 180);
   }
-  window.addEventListener('resize', resize);
-
-  /**
-   * Follow the player or their car. `orbit` is the player's mouse-orbit state ({yaw, pitch});
-   * `cameraYaw` is the direction the minimap uses. The camera's own state is smoothed.
-   */
-  function updateCamera(dt, player, orbit, shake) {
-    const state = player?.state ?? {};
-    const inCar = state.inCar;
-    const focus = inCar ? inCar.state : player.state;
-    const height = inCar ? CAMERA.carHeight : CAMERA.height;
-    const requestedDistance = inCar ? CAMERA.carDistance : orbit?.distance ?? CAMERA.distance;
-    const distance = THREE.MathUtils.clamp(
-      Number.isFinite(requestedDistance) ? requestedDistance : CAMERA.distance,
-      CAMERA.minDistance,
-      CAMERA.maxDistance,
-    );
-    const requestedYaw = Number.isFinite(orbit?.yaw) ? orbit.yaw : 0;
-    const requestedPitch = Number.isFinite(orbit?.pitch) ? orbit.pitch : CAMERA.pitch;
-    const yaw = requestedYaw;
-    const pitch = THREE.MathUtils.clamp(requestedPitch, CAMERA.minPitch, CAMERA.maxPitch);
-    const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(state.y) ? state.y : 0);
-    cameraState.target.set(focus.x, focusY + 0.9, focus.z);
-    const horizontal = Math.cos(pitch) * distance;
-    const desiredX = focus.x - Math.sin(yaw) * horizontal;
-    const desiredZ = focus.z - Math.cos(yaw) * horizontal;
-    const desiredY = focusY + height + Math.sin(pitch) * distance * 0.55;
-    const elapsed = Number.isFinite(dt) ? Math.max(0, dt) : 0;
-    const lerp = 1 - Math.exp(-elapsed * CAMERA.follow);
-    const teleported = hasPreviousFocus && Math.hypot(focus.x - previousFocus.x, focus.z - previousFocus.z) > 80;
-    if (snapCamera || teleported) {
-      cameraState.pos.set(desiredX, desiredY, desiredZ);
-      snapCamera = false;
-    } else {
-      cameraState.pos.x += (desiredX - cameraState.pos.x) * lerp;
-      cameraState.pos.y += (desiredY - cameraState.pos.y) * lerp;
-      cameraState.pos.z += (desiredZ - cameraState.pos.z) * lerp;
-    }
-    previousFocus.set(focus.x, focusY, focus.z);
-    hasPreviousFocus = true;
-    if (shake > 0) {
-      camera.position.copy(cameraState.pos);
-      camera.position.x += (Math.random() - 0.5) * shake * 0.18;
-      camera.position.y += (Math.random() - 0.5) * shake * 0.18;
-    } else {
-      camera.position.copy(cameraState.pos);
-    }
-    camera.lookAt(cameraState.target);
-    cameraState.yaw = yaw;
-    cameraState.pitch = pitch;
-    cameraState.distance = distance;
-    cameraState.mode = inCar ? 'car' : 'foot';
-    skyDome.position.copy(camera.position);
-    const shadowX = Math.round(focus.x / 90) * 90;
-    const shadowZ = Math.round(focus.z / 90) * 90;
-    sun.position.set(shadowX - 110, 160, shadowZ + 95);
-    sun.target.position.set(shadowX, 0, shadowZ);
-    sun.target.updateMatrixWorld();
-  }
-
-  function frameTitle() {
-    camera.position.set(TITLE_CAMERA.x, TITLE_CAMERA.y, TITLE_CAMERA.z);
-    camera.lookAt(TITLE_CAMERA.lookX, TITLE_CAMERA.lookY, TITLE_CAMERA.lookZ);
-    cameraState.pos.copy(camera.position);
-    cameraState.target.set(TITLE_CAMERA.lookX, TITLE_CAMERA.lookY, TITLE_CAMERA.lookZ);
-    const dx = TITLE_CAMERA.lookX - TITLE_CAMERA.x;
-    const dy = TITLE_CAMERA.lookY - TITLE_CAMERA.y;
-    const dz = TITLE_CAMERA.lookZ - TITLE_CAMERA.z;
-    cameraState.distance = Math.hypot(dx, dy, dz);
-    cameraState.yaw = Math.atan2(-dx, -dz);
-    cameraState.pitch = Math.asin(dy / cameraState.distance);
-    skyDome.position.copy(camera.position);
-    snapCamera = true;
-    hasPreviousFocus = false;
-  }
-
-  function render() {
-    if (renderer) renderer.render(scene, camera);
-  }
-
-  function dispose() {
-    window.removeEventListener('resize', resize);
-    scene.remove(skyDome, sun, sun.target, hemi);
-    skyGeometry.dispose();
-    skyMaterial.dispose();
-    if (renderer) renderer.dispose();
-  }
-
-  return {
-    scene,
-    camera,
-    cameraState,
-    sun,
-    hemi,
-    resize,
-    updateCamera,
-    frameTitle,
-    render,
-    dispose,
-    get renderer() {
-      return renderer;
-    },
-  };
+  function render() { renderer.render(scene, camera); }
+  frameTitle();
+  return { scene, camera, renderer, state, frameTitle, follow, render, resize };
 }

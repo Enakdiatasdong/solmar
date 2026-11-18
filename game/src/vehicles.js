@@ -1,382 +1,280 @@
-// Arcade cars: box bodies with cabins, bumpers, lights and spinning wheels. Jax has a starter car,
-// a handful of other cars are parked and stealable, and damaged cars smoke when wrecked. The
-// driving model is deliberately simple: accelerate, brake/reverse, steer with speed-scaled grip,
-// handbrake for a loose tail. Collision with buildings uses the city AABBs and the car's radius.
 import * as THREE from '../vendor/three.module.min.js';
-import { PALETTE, STARTER_CAR, VEHICLE } from './config.js';
-import { clampToWorld, resolveCollisions } from './world.js';
+import { clampToWorld, resolveCollisions, isOnSand } from './world.js';
 
-const wheelGeometry = new THREE.CylinderGeometry(0.42, 0.42, 0.28, 10);
-wheelGeometry.rotateZ(Math.PI / 2);
-const wheelMaterial = new THREE.MeshLambertMaterial({ color: 0x1d1e21 });
-const glassMaterial = new THREE.MeshLambertMaterial({ color: 0x24323c });
-const lightMaterial = new THREE.MeshLambertMaterial({ color: 0xfff1c0, emissive: 0xffcf7a, emissiveIntensity: 0.6 });
-const brakeMaterial = new THREE.MeshLambertMaterial({ color: 0xa32f2a, emissive: 0x8c1f1c, emissiveIntensity: 0.5 });
+let nextCarId = 1;
+const wrapAngle = angle => Math.atan2(Math.sin(angle), Math.cos(angle));
+const paintColors = [0xe6a23c, 0x119d9a, 0xf46d55, 0xf4e9cd, 0x5d6b9c, 0xbf6389];
 
-function buildCarMesh(spec) {
-  const group = new THREE.Group();
-  const bodyMaterial = new THREE.MeshLambertMaterial({ color: spec.body });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.62, 4.4), bodyMaterial);
-  body.position.y = 0.66;
-  body.castShadow = true;
-  group.add(body);
-
-  const lower = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.3, 4.1), new THREE.MeshLambertMaterial({ color: spec.cabin }));
-  lower.position.y = 0.36;
-  group.add(lower);
-
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.86, 0.56, 2.15), glassMaterial);
-  cabin.position.set(0, 1.2, -0.15);
-  cabin.castShadow = true;
-  group.add(cabin);
-
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 2.2), bodyMaterial);
-  roof.position.set(0, 1.51, -0.15);
-  group.add(roof);
-
-  if (spec.variant === 'van') {
-    cabin.scale.set(0.96, 1.5, 1.3);
-    cabin.position.set(0, 1.42, -0.1);
-    roof.position.set(0, 1.9, -0.1);
-  } else if (spec.variant === 'pickup') {
-    cabin.scale.set(1, 0.9, 0.8);
-    cabin.position.set(0, 1.13, -0.7);
-    roof.position.set(0, 1.44, -0.7);
-    const bed = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.4, 1.5), new THREE.MeshLambertMaterial({ color: spec.cabin }));
-    bed.position.set(0, 1.06, 1.2);
-    group.add(bed);
-  } else if (spec.variant === 'coupe') {
-    cabin.scale.set(0.94, 0.8, 0.86);
-    cabin.position.set(0, 1.12, -0.35);
-    roof.position.set(0, 1.38, -0.35);
-    body.scale.set(1, 0.9, 1);
+// Static pieces sharing paint become one draw call; wheels and flashing lamps stay editable.
+function batchBody(group, excluded) {
+  const batches = new Map();
+  for (const mesh of [...group.children]) {
+    if (!mesh.isMesh || excluded.has(mesh)) continue;
+    mesh.updateMatrix();
+    const geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+    geometry.applyMatrix4(mesh.matrix);
+    const key = mesh.material.uuid;
+    if (!batches.has(key)) batches.set(key, { material: mesh.material, positions: [], normals: [], uvs: [] });
+    const batch = batches.get(key);
+    for (const [name, destination] of [['position', batch.positions], ['normal', batch.normals], ['uv', batch.uvs]]) {
+      const attribute = geometry.getAttribute(name);
+      if (attribute) for (const value of attribute.array) destination.push(value);
+    }
+    geometry.dispose();
+    mesh.geometry.dispose();
+    group.remove(mesh);
   }
-
-  for (const side of [-1, 1]) {
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.08), lightMaterial);
-    head.position.set(side * 0.68, 0.76, 2.2);
-    group.add(head);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.08), brakeMaterial);
-    tail.position.set(side * 0.68, 0.78, -2.2);
-    group.add(tail);
+  for (const batch of batches.values()) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(batch.positions, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(batch.normals, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(batch.uvs, 2));
+    geometry.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geometry, batch.material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
   }
-
-  const wheels = [];
-  for (const [x, z] of [[-1.04, 1.38], [1.04, 1.38], [-1.04, -1.38], [1.04, -1.38]]) {
-    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-    wheel.position.set(x, 0.42, z);
-    wheel.castShadow = true;
-    group.add(wheel);
-    wheels.push({ mesh: wheel, front: z > 0 });
-  }
-
-  if (spec.police) {
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.18, 3.4), new THREE.MeshLambertMaterial({ color: spec.stripe }));
-    stripe.position.y = 0.82;
-    group.add(stripe);
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.16, 0.3), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
-    bar.position.set(0, 1.64, -0.2);
-    group.add(bar);
-    const red = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.32), new THREE.MeshLambertMaterial({ color: spec.lightAlt, emissive: spec.lightAlt, emissiveIntensity: 1.4 }));
-    red.position.set(-0.3, 1.76, -0.2);
-    group.add(red);
-    const blue = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.32), new THREE.MeshLambertMaterial({ color: spec.light, emissive: spec.light, emissiveIntensity: 1.4 }));
-    blue.position.set(0.3, 1.76, -0.2);
-    group.add(blue);
-    group.userData.lightbar = { red, blue };
-  }
-
-  return { group, wheels };
 }
 
-function addSmoke(car) {
-  if (car.smoke) return car.smoke;
-  const smoke = new THREE.Group();
-  const material = new THREE.MeshLambertMaterial({ color: 0x66625e, transparent: true, opacity: 0.55 });
-  const puffs = [];
-  for (let puff = 0; puff < 5; puff += 1) {
-    const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5 + puff * 0.09, 0), material.clone());
-    mesh.position.y = 0.6 + puff * 0.28;
-    mesh.visible = false;
-    smoke.add(mesh);
-    puffs.push(mesh);
+export function createCar(options = {}) {
+  const group = new THREE.Group();
+  const body = new THREE.MeshLambertMaterial({ color: options.color ?? 0x17a8a2 });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x17272f });
+  const glass = new THREE.MeshLambertMaterial({ color: 0x315765 });
+  const chrome = new THREE.MeshLambertMaterial({ color: 0xb9c5bb });
+  const tire = new THREE.MeshLambertMaterial({ color: 0x172024 });
+  const frontLight = new THREE.MeshBasicMaterial({ color: 0xffefb4 });
+  const rearLight = new THREE.MeshBasicMaterial({ color: 0xfd493b });
+  const box = (w, h, d, material, x, y, z) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  box(2.1, .62, 4.65, body, 0, .76, 0);
+  box(1.88, .24, 1.35, body, 0, 1.12, 1.37);
+  box(1.76, .69, 2.12, glass, 0, 1.3, -.2);
+  box(1.81, .12, 1.55, body, 0, 1.69, -.3);
+  box(.12, .69, 2.1, body, -.89, 1.3, -.2);
+  box(.12, .69, 2.1, body, .89, 1.3, -.2);
+  box(2.15, .18, .18, chrome, 0, .58, 2.31);
+  box(2.15, .18, .18, chrome, 0, .58, -2.31);
+  box(.75, .2, .05, dark, 0, .82, 2.34);
+  for (const side of [-1, 1]) {
+    box(.48, .22, .08, frontLight, side * .73, .9, 2.35);
+    box(.54, .2, .08, rearLight, side * .7, .9, -2.35);
+    box(.24, .14, .32, body, side * 1.12, 1.25, .55);
   }
+  const wheels = [];
+  for (const x of [-1.05, 1.05]) {
+    for (const z of [-1.48, 1.5]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.46, .46, .29, 12), tire);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, .47, z);
+      group.add(wheel);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(.22, .22, .31, 8), chrome);
+      hub.rotation.z = Math.PI / 2;
+      hub.position.copy(wheel.position);
+      group.add(hub);
+      wheels.push(wheel);
+    }
+  }
+  const smoke = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(.4, 0), new THREE.MeshBasicMaterial({ color: 0x3a4146, transparent: true, opacity: .48, depthWrite: false }));
+    smoke.add(puff);
+  }
+  group.add(smoke);
   smoke.visible = false;
-  car.group.add(smoke);
-  car.smoke = { group: smoke, puffs, material };
-  return car.smoke;
+  let beacon = null;
+  if (options.isPolice) {
+    body.color.setHex(0xf3edda);
+    box(2.12, .38, 1.2, dark, 0, .88, 0);
+    box(1.3, .12, .5, dark, 0, 1.82, -.3);
+    const red = box(.57, .19, .42, new THREE.MeshBasicMaterial({ color: 0xff453c }), -.34, 1.97, -.3);
+    const blue = box(.57, .19, .42, new THREE.MeshBasicMaterial({ color: 0x3a9bfd }), .34, 1.97, -.3);
+    beacon = { red, blue };
+  }
+  batchBody(group, new Set([...wheels, ...(beacon ? [beacon.red, beacon.blue] : [])]));
+  const car = {
+    id: nextCarId++, x: options.x ?? 0, z: options.z ?? 96,
+    heading: options.heading ?? 0, speed: options.speed ?? 0,
+    health: options.health ?? 100, group, isPolice: !!options.isPolice,
+    parked: options.parked ?? true, stolen: !!options.stolen, wrecked: false,
+    driver: null, vx: 0, vz: 0, radius: 1.85, impactCooldown: 0,
+    contactCooldown: 0, drift: 0, smokeTime: 0, wheels, smoke, beacon,
+    starter: !!options.starter, mission: options.mission ?? null, paintMaterial: body,
+  };
+  syncCar(car);
+  return car;
+}
+
+export function syncCar(car) {
+  car.group.position.set(car.x, 0, car.z);
+  car.group.rotation.y = car.heading;
+}
+
+export function exitSpot(car) {
+  return { x: car.x + Math.cos(car.heading) * 2.8, z: car.z - Math.sin(car.heading) * 2.8 };
 }
 
 export function createVehicles(city, scene) {
-  const cityColliders = city?.colliders ?? [];
   const cars = [];
-  const collisionGroups = [cars];
-  const smokeMaterial = new THREE.MeshLambertMaterial({ color: 0x55524e, transparent: true, opacity: 0.5 });
-
-  function addCar(spec, position, heading, options = {}) {
-    const built = buildCarMesh(spec);
-    const group = built.group;
-    group.position.set(position.x, 0, position.z);
-    group.rotation.y = heading;
-    scene.add(group);
-    const car = {
-      id: options.id ?? `car-${cars.length}`,
-      group,
-      wheels: built.wheels,
-      spec,
-      state: {
-        x: position.x,
-        z: position.z,
-        heading,
-        speed: 0,
-        steerAngle: 0,
-        health: VEHICLE.health,
-        maxHealth: VEHICLE.health,
-        wrecked: false,
-        occupied: false,
-        stolen: Boolean(options.stolen),
-        isPolice: Boolean(spec.police),
-        wheelSpin: 0,
-        bob: 0,
-      },
-      smoke: null,
-      ai: options.ai ?? null,
-      kind: options.kind ?? 'parked',
-    };
+  function spawnCar(options = {}) {
+    const car = createCar(options);
     cars.push(car);
+    scene.add(car.group);
     return car;
   }
-
-  function spawnStarter() {
-    return addCar(
-      { body: 0xc9a227, cabin: 0x2d2a22, name: 'Cometa GT', variant: 'coupe' },
-      { x: STARTER_CAR.x, z: STARTER_CAR.z },
-      STARTER_CAR.heading,
-      { id: 'starter', stolen: true },
-    );
+  function remove(car) {
+    const index = cars.indexOf(car);
+    if (index >= 0) cars.splice(index, 1);
+    scene.remove(car.group);
+    car.removed = true;
   }
-
-  function spawnParked(random) {
-    const edges = city?.graph?.edges ?? [];
-    const spots = [];
-    for (const edge of edges) {
-      for (const t of [0.22, 0.5, 0.78]) {
-        const centerX = edge.a.x + edge.dx * t;
-        const centerZ = edge.a.z + edge.dz * t;
-        const normalX = -edge.dz / edge.length;
-        const normalZ = edge.dx / edge.length;
-        for (const side of [-1, 1]) {
-          const x = centerX + normalX * side * 5.2;
-          const z = centerZ + normalZ * side * 5.2;
-          if (resolveCollisions(cityColliders, x, z, 2.25).hit) continue;
-          spots.push({ x, z, heading: Math.atan2(edge.dx, edge.dz) });
-        }
-      }
-    }
-    random.shuffle(spots);
-    let spawned = 0;
-    for (const spot of spots) {
-      if (spawned >= 9) break;
-      if (cars.some((car) => Math.hypot(car.state.x - spot.x, car.state.z - spot.z) < 12)) continue;
-      const base = PALETTE.cars[spawned % PALETTE.cars.length];
-      const variant = random.pick(['sedan', 'coupe', 'van', 'pickup']);
-      const spec = {
-        ...base,
-        name: variant === 'coupe' ? 'Cometa GT' : variant === 'pickup' ? 'Bison Pickup' : variant === 'sedan' ? 'Vela Sedan' : 'Marina Van',
-        variant,
-      };
-      addCar(spec, spot, spot.heading, { kind: 'parked' });
-      spawned += 1;
-    }
-  }
-
-  function spawnPoliceCar(x, z, heading) {
-    return addCar(
-      { body: PALETTE.police.body, cabin: PALETTE.police.cabin, stripe: PALETTE.police.stripe, light: PALETTE.police.light, lightAlt: PALETTE.police.lightAlt, police: true, name: 'SMPD cruiser', variant: 'sedan' },
-      { x, z },
-      heading,
-      { kind: 'police', ai: 'pursue' },
-    );
-  }
-
   function damage(car, amount) {
-    if (car.state.wrecked) return;
-    car.state.health = Math.max(0, car.state.health - amount);
-    if (car.state.health <= 0) {
-      car.state.wrecked = true;
-      car.state.speed = 0;
-      addSmoke(car).group.visible = true;
-      car.group.rotation.z = car.state.isPolice ? 0 : 0.06;
-    } else if (car.state.health < VEHICLE.smokeBelow) {
-      addSmoke(car).group.visible = true;
+    if (!car || car.wrecked) return;
+    car.health = Math.max(0, car.health - Math.max(0, amount));
+    if (car.health === 0) {
+      car.wrecked = true;
+      car.speed = 0;
+      car.vx = 0;
+      car.vz = 0;
+      car.paintMaterial.color.multiplyScalar(.48);
     }
   }
-
-  function repair(car) {
-    car.state.health = car.state.maxHealth;
-    car.state.wrecked = false;
-    if (car.smoke) car.smoke.group.visible = false;
-    car.group.rotation.z = 0;
-  }
-
-  /** The nearest car Jax may enter, looking from his current position. */
-  function nearest(x, z, maxDistance = 4.5) {
-    let best = null;
-    let bestDistance = maxDistance;
-    for (let index = 0; index < cars.length; index += 1) {
-      const car = cars[index];
-      if (car.state.wrecked) continue;
-      const distance = Math.hypot(car.state.x - x, car.state.z - z);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = car;
-      }
+  function spawnParked() {
+    if (!cars.some(car => car.starter && !car.removed)) {
+      spawnCar({ x: 3.7, z: 91.5, heading: 0, color: 0xeb9a39, starter: true });
     }
-    return best;
-  }
-
-  function resolveCarCollisions(car) {
-    const state = car.state ?? car;
-    for (const group of collisionGroups) {
-      for (const other of group) {
-        if (other === car) continue;
-        const otherState = other.state ?? other;
-        const dx = state.x - otherState.x;
-        const dz = state.z - otherState.z;
-        const distance = Math.hypot(dx, dz);
-        const separation = VEHICLE.radius * 2;
-        if (distance >= separation) continue;
-        const nx = distance > 0.001 ? dx / distance : Math.sin(state.heading);
-        const nz = distance > 0.001 ? dz / distance : Math.cos(state.heading);
-        const push = (separation - distance + 0.01) * 0.5;
-        const position = clampToWorld(resolveCollisions(cityColliders, state.x + nx * push, state.z + nz * push, VEHICLE.radius));
-        const otherPosition = clampToWorld(resolveCollisions(cityColliders, otherState.x - nx * push, otherState.z - nz * push, VEHICLE.radius));
-        state.x = position.x;
-        state.z = position.z;
-        otherState.x = otherPosition.x;
-        otherState.z = otherPosition.z;
-        const closingSpeed = (Math.sin(otherState.heading) * otherState.speed - Math.sin(state.heading) * state.speed) * nx
-          + (Math.cos(otherState.heading) * otherState.speed - Math.cos(state.heading) * state.speed) * nz;
-        if (closingSpeed > 0) {
-          state.speed *= 0.55;
-          otherState.speed *= 0.55;
-          if (closingSpeed > 4) {
-            const impactDamage = Math.min(4, closingSpeed * 0.15);
-            if (car.state) damage(car, impactDamage);
-            if (other.state) damage(other, impactDamage);
-          }
-        }
-        car.group.position.set(state.x, 0, state.z);
-        other.group.position.set(otherState.x, 0, otherState.z);
-      }
+    const points = city.spawnPoints?.parkedCars ?? [];
+    let count = 0;
+    for (const point of points) {
+      if (count >= 25) break;
+      const p = { x: point.x, z: point.z };
+      const test = resolveCollisions(city.colliders, p.x, p.z, 2.3);
+      if (test.hit || cars.some(other => Math.hypot(other.x - p.x, other.z - p.z) < 13)) continue;
+      spawnCar({ ...p, heading: point.heading ?? 0, color: paintColors[count % paintColors.length] });
+      count++;
     }
+    return cars;
   }
-
-  function stepCar(car, dt, controls, colliders = cityColliders) {
-    const state = car.state;
-    if (state.wrecked) {
-      state.speed *= Math.max(0, 1 - dt * 2.2);
+  function spawnPoliceCar(x, z) {
+    const car = spawnCar({ x, z, isPolice: true, parked: false });
+    car.driver = 'police';
+    return car;
+  }
+  function nearest(x, z, radius = 5) {
+    let result = null, distance = radius;
+    for (const car of cars) {
+      if (car.removed || !car.group.visible || car.driver) continue;
+      const d = Math.hypot(car.x - x, car.z - z);
+      if (d < distance) { distance = d; result = car; }
+    }
+    return result;
+  }
+  function stepCar(car, dt, controls = {}) {
+    if (!car || car.removed) return;
+    car.impactCooldown = Math.max(0, car.impactCooldown - dt);
+    const throttle = Math.max(-1, Math.min(1, Number(controls.throttle) || 0));
+    const steer = Math.max(-1, Math.min(1, Number(controls.steer) || 0));
+    if (car.wrecked) { car.speed = 0; syncCar(car); return; }
+    if (throttle !== 0) {
+      const braking = car.speed * throttle < -1;
+      car.speed += throttle * (braking ? 23 : 11.5) * dt;
     } else {
-      const accelerating = Boolean(controls.accelerate);
-      const braking = Boolean(controls.brake);
-      if (accelerating && !braking) {
-        if (state.speed < 0) state.speed = Math.min(0, state.speed + VEHICLE.brake * dt);
-        else state.speed += VEHICLE.accel * dt;
-      } else if (braking && !accelerating) {
-        if (state.speed > 0) state.speed = Math.max(0, state.speed - VEHICLE.brake * dt);
-        else state.speed -= VEHICLE.reverseAccel * dt;
-      } else if (!accelerating && !braking) {
-        const drag = state.speed < 0 ? VEHICLE.drag : VEHICLE.roll;
-        state.speed -= Math.sign(state.speed) * Math.min(Math.abs(state.speed), drag * dt);
+      car.speed *= Math.exp(-.58 * dt);
+      if (Math.abs(car.speed) < .08) car.speed = 0;
+    }
+    if (controls.handbrake) car.speed *= Math.exp(-1.35 * dt);
+    const onSand = isOnSand(car.x, car.z);
+    if (onSand) car.speed *= Math.exp(-.27 * dt);
+    car.speed = Math.max(-10, Math.min(onSand ? 23 : 33, car.speed));
+    const steeringStrength = Math.min(1, Math.abs(car.speed) / 7);
+    const steerRate = controls.handbrake ? 1.9 : 1.17;
+    car.heading = wrapAngle(car.heading - steer * steerRate * steeringStrength * Math.sign(car.speed) * dt);
+    const grip = controls.handbrake ? 1.7 : (onSand ? 4.2 : 8.5);
+    const blend = 1 - Math.exp(-grip * dt);
+    car.vx += (Math.sin(car.heading) * car.speed - car.vx) * blend;
+    car.vz += (Math.cos(car.heading) * car.speed - car.vz) * blend;
+    const nextX = car.x + car.vx * dt;
+    const nextZ = car.z + car.vz * dt;
+    const resolved = resolveCollisions(city.colliders, nextX, nextZ, car.radius);
+    const clamped = clampToWorld(resolved.x, resolved.z, car.radius);
+    const hit = resolved.hit || Math.abs(clamped.x - resolved.x) > .01 || Math.abs(clamped.z - resolved.z) > .01;
+    car.x = clamped.x;
+    car.z = clamped.z;
+    if (hit) {
+      const impact = Math.abs(car.speed);
+      if (impact > 2.2 && car.impactCooldown <= 0) {
+        damage(car, 3 + impact * 1.25);
+        car.impactCooldown = .35;
       }
-      if (controls.handbrake) state.speed *= Math.max(0, 1 - VEHICLE.handbrakeDrag * dt);
-      state.speed = Math.max(-VEHICLE.maxReverse, Math.min(VEHICLE.maxSpeed, state.speed));
+      car.speed *= .2;
+      car.vx *= .13;
+      car.vz *= .13;
     }
-
-    const speedRatio = Math.min(1, Math.abs(state.speed) / VEHICLE.maxSpeed);
-    const steerInput = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
-    const grip = controls.handbrake ? 0.55 : 1;
-    const turnRate = (controls.handbrake ? VEHICLE.handbrakeSteer : VEHICLE.steer) * (0.35 + speedRatio * 0.85);
-    if (state.speed !== 0 || controls.handbrake) {
-      const direction = state.speed < 0 ? -1 : 1;
-      state.heading += steerInput * turnRate * dt * direction * grip;
-    }
-    state.steerAngle += (steerInput * 0.5 - state.steerAngle) * Math.min(1, dt * 8);
-
-    const sin = Math.sin(state.heading);
-    const cos = Math.cos(state.heading);
-    let nextX = state.x + sin * state.speed * dt;
-    let nextZ = state.z + cos * state.speed * dt;
-    const resolved = resolveCollisions(colliders, nextX, nextZ, VEHICLE.radius);
-    if (resolved.hit) {
-      const impact = Math.abs(state.speed);
-      if (impact > VEHICLE.crashSpeed) damage(car, impact * 0.9);
-      state.speed *= 0.25;
-      nextX = resolved.x;
-      nextZ = resolved.z;
-    }
-    const bounded = clampToWorld({ x: nextX, z: nextZ });
-    state.x = bounded.x;
-    state.z = bounded.z;
-    resolveCarCollisions(car);
-
-    car.group.position.set(state.x, 0, state.z);
-    car.group.rotation.y = state.heading;
-    state.wheelSpin += state.speed * dt * 2.4;
-    const spin = state.steerAngle;
-    for (const wheel of car.wheels) {
-      wheel.mesh.rotation.x = state.wheelSpin;
-      if (wheel.front) wheel.mesh.rotation.y = spin;
-    }
-    if (car.smoke && car.smoke.group.visible) {
-      for (let index = 0; index < car.smoke.puffs.length; index += 1) {
-        const puff = car.smoke.puffs[index];
-        const phase = (state.wheelSpin * 0.05 + index * 0.37) % 1;
-        puff.position.y = 0.6 + phase * 2.2;
-        puff.position.x = Math.sin(phase * 6 + index) * 0.25;
-        puff.position.z = -1.6 + phase * 0.6;
-        puff.scale.setScalar(0.6 + phase * 1.4);
-        puff.visible = true;
-        if (puff.material) puff.material.opacity = 0.5 * (1 - phase);
+    for (const wheel of car.wheels) wheel.rotation.x += car.speed * dt * 1.4;
+    syncCar(car);
+  }
+  function resolveCarCollisions(extraCars = []) {
+    const all = [...new Set([...cars, ...extraCars])].filter(car => !car.removed && car.group.visible);
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const a = all[i], b = all[j];
+        const dx = b.x - a.x, dz = b.z - a.z;
+        const min = (a.radius ?? 1.85) + (b.radius ?? 1.85);
+        const distance = Math.hypot(dx, dz);
+        if (distance >= min) continue;
+        const nx = distance > .001 ? dx / distance : 1;
+        const nz = distance > .001 ? dz / distance : 0;
+        const overlap = min - distance + .025;
+        const aFixed = a.parked && !a.driver, bFixed = b.parked && !b.driver;
+        const aShare = aFixed && !bFixed ? 0 : (bFixed && !aFixed ? 1 : .5);
+        a.x -= nx * overlap * aShare;
+        a.z -= nz * overlap * aShare;
+        b.x += nx * overlap * (1 - aShare);
+        b.z += nz * overlap * (1 - aShare);
+        const relative = Math.abs((b.vx ?? 0) - (a.vx ?? 0)) + Math.abs((b.vz ?? 0) - (a.vz ?? 0));
+        if (relative > 3 && (a.contactCooldown ?? 0) <= 0 && (b.contactCooldown ?? 0) <= 0) {
+          damage(a, Math.min(12, 1 + relative * .25));
+          damage(b, Math.min(12, 1 + relative * .25));
+          a.contactCooldown = b.contactCooldown = .4;
+          a.speed *= .75;
+          b.speed *= .75;
+        }
+        syncCar(a);
+        syncCar(b);
       }
-    }
-    if (car.group.userData.lightbar) {
-      const flash = Math.floor(performance.now() / 260) % 2 === 0;
-      car.group.userData.lightbar.red.visible = flash;
-      car.group.userData.lightbar.blue.visible = !flash;
     }
   }
-
-  function setCarPosition(car, x, z, heading) {
-    car.state.x = x;
-    car.state.z = z;
-    car.state.heading = heading;
-    car.group.position.set(x, 0, z);
-    car.group.rotation.y = heading;
+  function update(dt) {
+    for (const car of cars) {
+      car.contactCooldown = Math.max(0, (car.contactCooldown ?? 0) - dt);
+      car.smokeTime += dt;
+      car.smoke.visible = car.health < 34;
+      if (car.smoke.visible) {
+        for (let i = 0; i < car.smoke.children.length; i++) {
+          const phase = (car.smokeTime * .7 + i / 5) % 1;
+          const puff = car.smoke.children[i];
+          puff.position.set(Math.sin(i * 5 + phase) * phase * .8, 1.2 + phase * 3.4, 1.1 - phase * .5);
+          puff.scale.setScalar(.45 + phase * 1.6);
+          puff.material.opacity = (1 - phase) * .52;
+        }
+      }
+      if (car.beacon) {
+        const flash = Math.sin(car.smokeTime * 14) > 0;
+        car.beacon.red.visible = flash;
+        car.beacon.blue.visible = !flash;
+      }
+    }
   }
-
-  return {
-    cars,
-    collisionGroups,
-    scene,
-    addCar,
-    spawnStarter,
-    spawnParked,
-    spawnPoliceCar,
-    damage,
-    repair,
-    nearest,
-    resolveCarCollisions,
-    stepCar,
-    setCarPosition,
-    smokeMaterial,
-  };
-}
-
-/** Where Jax should stand when leaving a car: to the driver's left, clear of the body. */
-export function exitSpot(car) {
-  const heading = car.state.heading;
-  const rightX = Math.cos(heading);
-  const rightZ = -Math.sin(heading);
-  return { x: car.state.x - rightX * 1.9, z: car.state.z - rightZ * 1.9, heading };
+  function reset() {
+    for (const car of [...cars]) remove(car);
+    spawnParked();
+  }
+  return { cars, spawnCar, spawnParked, spawnPoliceCar, stepCar, nearest, damage, remove, resolveCarCollisions, update, reset };
 }

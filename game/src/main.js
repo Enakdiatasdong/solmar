@@ -1,688 +1,336 @@
-// SOLMAR boot, system adapters and fixed-step simulation. All assets and imports are local.
-// ?seed=N selects the city; ?shot=start|play|end stages a frozen, reproducible scene.
-import * as THREE from '../vendor/three.module.min.js';
-import {
-  CAMERA, MAX_FRAME, MISSIONS, PLAYER, POLICE, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
-} from './config.js';
+// SOLMAR connects a living coastal city to Jax's last five jobs.
+import { STEP, MAX_FRAME } from './config.js';
 import { createRandom, parseSeed } from './random.js';
-import { clampToWorld, createCity, resolveCollisions } from './world.js';
+import { createCity, resolveCollisions } from './world.js';
+import { createRenderer } from './render.js';
 import { createPlayer } from './player.js';
 import { createVehicles, exitSpot } from './vehicles.js';
 import { createTraffic } from './traffic.js';
 import { createPolice } from './police.js';
 import { createCombat } from './combat.js';
-import { createAudio } from './audio.js';
-import { createHud } from './hud.js';
 import { createMissions } from './missions.js';
-import { createRenderer } from './render.js';
+import { createHud } from './hud.js';
+import { createAudio } from './audio.js';
 import { readSave, writeSave } from './save.js';
-import {
-  ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_MENU, ACTION_MUTE,
-  ACTION_PAUSE, ACTION_PUNCH, ACTION_RESTART, createInput,
-} from './input.js';
+import { createInput, ACTION_CONFIRM, ACTION_PAUSE, ACTION_RESTART, ACTION_MUTE, ACTION_MENU, ACTION_ENTER, ACTION_PUNCH, ACTION_FIRE, ACTION_JUMP } from './input.js';
 import { stageShot } from './shots.js';
 
-const DOM_IDS = [
-  'game', 'status', 'title-screen', 'btn-start', 'btn-walk', 'btn-jobs', 'btn-continue',
-  'btn-continue-story', 'pause-screen', 'busted-screen', 'busted-fine', 'game-over-screen',
-  'btn-restart', 'complete-screen', 'complete-title', 'complete-cash', 'complete-extra',
-  'complete-time', 'btn-resume', 'btn-restart-pause',
-  // Keep this inventory aligned with hud.js; every element is optional.
-  'hud', 'health-fill', 'health-text', 'cash-value', 'wanted-stars', 'speed-value',
-  'speed-box', 'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
-  'dialogue', 'dialogue-text', 'subtitle', 'hint',
-];
-const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
-const OVERLAYS = {
-  menu: 'title-screen', paused: 'pause-screen', busted: 'busted-screen',
-  gameover: 'game-over-screen', 'mission-complete': 'complete-screen',
-};
-const MAX_STEPS = 8;
-const clamp = THREE.MathUtils.clamp;
+const $ = id => document.getElementById(id);
+const money = value => `$${Math.round(value).toLocaleString('en-US')}`;
+window.__shotReady = false;
+window.addEventListener('error', event => {
+  window.__gameError = event.message;
+  if ($('status')) $('status').textContent = `Solmar could not continue: ${event.message}`;
+});
+window.addEventListener('unhandledrejection', event => {
+  window.__gameError = String(event.reason?.stack || event.reason);
+});
 
-function element(id) {
-  return typeof document === 'undefined' ? null : document.getElementById(id);
-}
-
-function makeGame(seedValue, shotName = null) {
-  const nodes = Object.fromEntries(DOM_IDS.map((id) => [id, element(id)]));
-  let canvas = nodes.game;
-  if (!canvas || typeof canvas.getContext !== 'function') {
-    canvas = document.createElement('canvas');
-    canvas.id = nodes.game ? 'solmar-canvas' : 'game';
-    document.body?.prepend(canvas);
-  }
-  const random = createRandom(seedValue);
-  const renderer = createRenderer(canvas);
-  const city = createCity(random);
-  renderer.scene.add(city.group);
+function boot() {
+  const params = new URLSearchParams(location.search);
+  const seed = parseSeed(params.get('seed') ?? '1');
+  const render = createRenderer($('game'));
+  const city = createCity(createRandom(seed));
+  render.scene.add(city.group);
   const player = createPlayer(city);
-  renderer.scene.add(player.group);
-  const vehicles = createVehicles(city, renderer.scene);
-  vehicles.spawnStarter();
-  vehicles.spawnParked(random);
-  const parked = vehicles.cars.map((car) => ({ car, ...car.state }));
-  const traffic = createTraffic(city, renderer.scene, createRandom(seedValue ^ 0x51a7));
-  const police = createPolice(city, renderer.scene, vehicles);
-  vehicles.collisionGroups.push(traffic.cars, police.state.copCars);
-  const combatCity = {
-    ...city,
-    peds: traffic.peds,
-    cops: police.state.cops,
-    knockPed: traffic.knockPed,
-    resolvePlayerCollision: (x, z, radius) => resolveCollisions(city.colliders, x, z, radius),
-  };
-  const combat = createCombat(renderer.scene, () => player, () => combatCity);
-  const audio = createAudio();
+  render.scene.add(player.group);
+  const vehicles = createVehicles(city, render.scene);
+  const traffic = createTraffic(city, render.scene, createRandom(seed ^ 0x59b1e));
+  const police = createPolice(city, render.scene, vehicles);
   const hud = createHud();
-  const missions = createMissions({
-    scene: renderer.scene, city, player, vehicles, police, combat, hud,
-    // missions.js asks for a one-shot siren cue; audio.js exposes a wanted-level updater.
-    audio: { ...audio, siren: () => audio.updateSiren(police.state.wanted) },
-  });
-  const orbit = player.orbit;
-  const input = createInput(canvas);
-  const clock = { accumulator: 0, last: null };
-  const state = {
-    screen: 'menu', cash: MISSIONS.startCash, completed: [], missionBest: {},
-    muted: Boolean(readSave()?.muted), started: false, elapsed: 0, lastSave: 0,
-    pauseReason: '', bustedFine: 0, finalMission: null, pedHitCooldown: 0,
-    shotsFired: 0, shot: shotName,
-  };
-  let shotMode = Boolean(shotName);
-  let frameId = null;
-  let shotFrameId = null;
-  let booted = false;
-  let shotGeneration = 0;
+  const audio = createAudio();
+  const input = createInput($('game'));
+  const combat = createCombat(render.scene, () => player, () => city);
+  const missions = createMissions({ player, vehicles, police, combat, hud, audio, city });
+  const state = { screen: 'title', cash: 250, completed: [], bestTimes: {}, muted: false, time: 0, fine: 0 };
+  let saved = readSave();
+  let accumulator = 0, lastFrame = 0, frameCount = 0, jump = false;
+  let pedestrianCooldown = 0, shotHeatCooldown = 0;
+  const game = { state, city, player, vehicles, traffic, police, combat, missions, hud, audio, input, render, seed, startRun, step, setScreen, completeMission, saveNow, enterExit, shotFrozen: false };
+  window.__game = game;
 
-  function announce(message) {
-    if (nodes.status) nodes.status.textContent = message;
+  function refreshContinue() {
+    saved = readSave();
+    $('btn-continue').hidden = !saved;
+    if (saved) $('btn-continue').textContent = `Continue · ${money(saved.cash)}`;
   }
-
-  function resetClock() {
-    clock.last = null;
-    clock.accumulator = 0;
-  }
-
-  function clearInput() {
-    input.clearHeld();
-    input.takeActions();
-    input.takeOrbit();
-    input.takeWheel();
-  }
-
-  function syncRider() {
-    const car = player.state.inCar;
-    if (!car) return;
-    player.state.x = car.state.x;
-    player.state.z = car.state.z;
-    player.state.y = 0;
-    player.state.heading = car.state.heading;
-    player.state.speed = Math.abs(car.state.speed);
-    player.syncMesh();
-  }
-
-  // player.step deliberately does nothing in a car. Keep its position current for every
-  // consumer, including missions/police and shots.js, which call vehicle methods directly.
-  const enterCar = player.enterCar;
-  player.enterCar = (car) => {
-    if (!car || car.state.wrecked) return false;
-    if (player.state.inCar && player.state.inCar !== car) leaveCar();
-    enterCar(car);
-    syncRider();
-    return true;
-  };
-  const stepCar = vehicles.stepCar;
-  vehicles.stepCar = (car, dt, controls, colliders) => {
-    stepCar(car, dt, controls, colliders);
-    if (player.state.inCar === car) syncRider();
-  };
-  const setCarPosition = vehicles.setCarPosition;
-  vehicles.setCarPosition = (car, x, z, heading) => {
-    setCarPosition(car, x, z, heading);
-    if (player.state.inCar === car) syncRider();
-  };
-
-  function setScreen(name) {
-    const screen = SCREEN_ALIASES[name] || name;
-    if (screen !== 'playing' && !Object.hasOwn(OVERLAYS, screen)) return false;
+  function setScreen(screen) {
     state.screen = screen;
-    clearInput();
-    resetClock();
-    for (const [key, id] of Object.entries(OVERLAYS)) {
-      const node = nodes[id];
-      if (!node) continue;
-      node.classList.toggle('visible', key === screen);
-      node.hidden = key !== screen;
-      node.setAttribute('aria-hidden', String(key !== screen));
+    document.body.dataset.screen = screen;
+    const screens = { title: 'title-screen', paused: 'pause-screen', busted: 'busted-screen', gameover: 'game-over-screen', 'mission-complete': 'complete-screen' };
+    for (const [name, id] of Object.entries(screens)) {
+      const element = $(id);
+      element.hidden = screen !== name;
+      element.setAttribute('aria-hidden', String(screen !== name));
     }
-    if (document.body) {
-      document.body.dataset.screen = screen;
-      document.body.classList.toggle('in-menu', screen !== 'playing');
-    }
-    hud.setVisible(screen !== 'menu');
-    hud.hideMissionList();
-    if (screen === 'playing') audio.startMusic();
-    else {
-      audio.stopMusic();
-      audio.updateEngine(0, false, false);
-      audio.updateSiren(0);
-    }
-    return true;
+    hud.setVisible(screen !== 'title');
+    if (screen !== 'paused') hud.hideMissionList();
+    accumulator = 0;
+    $('status').textContent = screen === 'title' ? 'Solmar. Press Enter to start your story.' : `${screen === 'playing' ? 'Exploring Solmar' : screen}.`;
   }
-
-  function refreshHud() {
-    syncRider();
-    hud.setHealth(player.state.health, player.state.maxHealth);
-    hud.setCash(state.cash);
-    hud.setWanted(police.state.wanted);
-    hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
-    const blips = missions.getBlips();
-    for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
-    for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
-    // Mission markers are already included by getBlips(), so do not draw a second copy.
-    hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw);
+  function saveNow() {
+    state.bestTimes = missions.bestTimes;
+    writeSave({ version: 2, cash: state.cash, completed: [...state.completed], bestTimes: state.bestTimes, muted: state.muted });
   }
-
-  function leaveCar() {
+  function startRun(continuing = false) {
+    const restore = continuing ? readSave() : null;
+    game.shotFrozen = false;
+    forceExit();
+    police.clear();
+    missions.reset();
+    combat.reset();
+    for (const car of [...vehicles.cars]) vehicles.remove(car);
+    traffic.reset();
+    player.reset();
+    vehicles.spawnCar({ x: 2, z: 92, heading: 0, color: 0xefae45, starter: true });
+    vehicles.spawnParked();
+    state.cash = restore?.cash ?? 250;
+    state.completed = [...(restore?.completed ?? [])];
+    state.bestTimes = { ...(restore?.bestTimes ?? {}) };
+    state.muted = restore?.muted ?? state.muted;
+    missions.setProgress(state.completed, state.bestTimes);
+    audio.setMuted(state.muted);
+    audio.unlock();
+    render.state.yaw = 0;
+    render.state.pitch = .36;
+    render.state.zoom = 8;
+    state.time = 0;
+    pedestrianCooldown = 0;
+    shotHeatCooldown = 0;
+    hud.setObjective('JAX MORENO · Find Mara at the gold Moreno Garage beacon. M opens your jobs.');
+    hud.setDialogue('', '');
+    setScreen('playing');
+    hud.toast('Solmar. The coast is yours, Jax.');
+    render.follow(player.state, 1);
+    updateHud(0);
+  }
+  function forceExit() {
     const car = player.state.inCar;
     if (!car) return;
-    const spot = exitSpot(car);
-    const resolved = resolveCollisions(city.colliders, spot.x, spot.z, PLAYER.radius);
-    player.exitCar(clampToWorld(resolved), car.state.heading);
-    car.state.speed = 0;
-    player.state.speed = 0;
-    player.state.vy = 0;
-    player.state.grounded = true;
+    const position = exitSpot(car);
+    const safe = resolveCollisions(city.colliders, position.x, position.z, .55);
+    car.driver = null;
+    player.state.inCar = null;
+    player.teleport(safe.x, safe.z);
   }
-
-  function cleanPoliceCars() {
-    const active = new Set(police.state.copCars);
-    for (let index = vehicles.cars.length - 1; index >= 0; index -= 1) {
-      const car = vehicles.cars[index];
-      if (car.kind !== 'police' || active.has(car) || player.state.inCar === car) continue;
-      renderer.scene.remove(car.group);
-      vehicles.cars.splice(index, 1);
+  function enterExit() {
+    const p = player.state;
+    if (p.inCar) {
+      forceExit();
+      hud.toast('Back on the street.');
+      return;
     }
-  }
-
-  function saveNow() {
-    if (!state.started || shotMode) return false;
-    return writeSave({
-      cash: state.cash, missions: missions.completedIds, best: { ...state.missionBest },
-      muted: state.muted, seed: seedValue, version: SAVE_VERSION,
-    });
-  }
-
-  function startRun(continueSave = false) {
-    const save = continueSave ? readSave() : null;
-    leaveCar();
-    missions.reset();
-    police.clear();
-    combat.reset();
-    // Restore the original fleet instead of retaining mission/cruiser objects from an old run.
-    for (const car of [...vehicles.cars]) {
-      if (parked.some((entry) => entry.car === car)) continue;
-      renderer.scene.remove(car.group);
-      vehicles.cars.splice(vehicles.cars.indexOf(car), 1);
+    if (missions.interact()) return;
+    let car = vehicles.nearest(p.x, p.z, 5.6);
+    for (const other of traffic.cars) {
+      if (other.driver || other.removed) continue;
+      const distance = Math.hypot(other.x - p.x, other.z - p.z);
+      if (distance < 5.6 && (!car || distance < Math.hypot(car.x - p.x, car.z - p.z))) car = other;
     }
-    for (const entry of parked) {
-      const { car, x, z, heading, stolen } = entry;
-      if (!vehicles.cars.includes(car)) vehicles.cars.push(car);
-      renderer.scene.add(car.group);
-      vehicles.repair(car);
-      Object.assign(car.state, { speed: 0, steerAngle: 0, wheelSpin: 0, occupied: false, stolen });
-      vehicles.setCarPosition(car, x, z, heading);
+    if (!car) { hud.toast('Nothing to use here. Find a car or a gold job beacon.'); return; }
+    if (car.wrecked || car.health <= 0) { hud.toast('That car is wrecked. Find another ride.'); return; }
+    const index = traffic.cars.indexOf(car);
+    if (index !== -1) { traffic.cars.splice(index, 1); vehicles.cars.push(car); }
+    p.inCar = car;
+    car.driver = 'player';
+    car.parked = false;
+    if (!car.stolen) {
+      car.stolen = true;
+      if (!car.missionCar) police.addWanted(2, 'Stolen ride');
+      hud.toast('Stolen ride. Keep an eye on those wanted stars.');
     }
-    player.reset();
-    Object.assign(player.state, { ...SPAWN, invuln: PLAYER.respawnInvuln });
-    player.syncMesh();
-    traffic.reset();
-    traffic.spawnAll(player.state.x, player.state.z);
-    state.cash = save && Number.isFinite(save.cash) ? clamp(save.cash, 0, 1e9) : MISSIONS.startCash;
-    state.completed = missions.list.filter((mission) => save?.missions?.includes(mission.id)).map((mission) => mission.id);
-    state.missionBest = {};
-    for (const mission of missions.list) {
-      const best = save?.best?.[mission.id];
-      if (Number.isFinite(best) && best >= 0) state.missionBest[mission.id] = best;
-      mission.best = state.missionBest[mission.id] ?? null;
-    }
-    // Restore progress containers explicitly, including best times from a continued save.
-    missions.takeEvents();
-    missions.state.completed = new Set(state.completed);
-    missions.state.bestTimes = { ...state.missionBest };
-    missions.setProgress(state.completed);
-    if (save) state.muted = Boolean(save.muted);
-    Object.assign(state, {
-      started: true, elapsed: 0, lastSave: 0, finalMission: null, bustedFine: 0,
-      pedHitCooldown: 0, shotsFired: 0, pauseReason: '',
-    });
-    Object.assign(orbit, { yaw: SPAWN.heading, pitch: CAMERA.pitch, distance: CAMERA.distance });
-    audio.setMuted(state.muted);
-    if (!shotMode) audio.unlock();
-    setScreen('playing');
-    hud.setDialogue('', '');
-    hud.setHint('');
-    hud.setObjective('Explore Solmar. Find a gold beacon for a job, or press M.');
-    hud.toast(save ? 'Welcome back to Solmar.' : 'Solmar. The coast is yours, Jax.', 'mission', 4);
-    renderer.updateCamera(1, player, orbit, 0);
-    refreshHud();
-    announce('Playing SOLMAR. WASD to move, E to use a car or job, M for jobs, P to pause.');
+    player.step(0, {}, render.state.yaw);
   }
-
-  function restart() {
-    startRun(false);
-  }
-
-  function pause(reason = 'Paused') {
-    if (state.screen !== 'playing') return;
-    state.pauseReason = reason;
-    saveNow();
-    setScreen('paused');
-    announce(`${reason}. Press P or Enter to resume.`);
-  }
-
-  function resume() {
-    if (state.screen !== 'paused') return;
-    setScreen('playing');
-    announce('Playing SOLMAR.');
-  }
-
   function completeMission(event) {
-    const mission = missions.list.find((item) => item.id === event?.mission?.id);
-    if (!mission || state.completed.includes(mission.id)) return false;
-    state.completed.push(mission.id);
-    state.cash += mission.reward;
-    const elapsed = Number.isFinite(event.elapsed) && event.elapsed >= 0 ? event.elapsed : null;
-    if (elapsed !== null) {
-      state.missionBest[mission.id] = Math.min(state.missionBest[mission.id] ?? Infinity, elapsed);
-      missions.state.bestTimes[mission.id] = state.missionBest[mission.id];
-    }
-    state.finalMission = { ...event, mission, elapsed };
-    const values = {
-      'complete-title': mission.title,
-      'complete-cash': `+$${mission.reward.toLocaleString('en-US')}`,
-      'complete-time': elapsed === null ? '—' : `${elapsed.toFixed(1)}s`,
-      'complete-extra': `${missions.completedCount()} of ${missions.list.length} jobs complete.`,
-    };
-    for (const [id, value] of Object.entries(values)) if (nodes[id]) nodes[id].textContent = value;
-    // A delivered mission car may have been removed by the mission module.
-    if (player.state.inCar && !vehicles.cars.includes(player.state.inCar)) leaveCar();
-    cleanPoliceCars();
-    setScreen('mission-complete');
+    state.cash += event.reward;
+    if (!state.completed.includes(event.id)) state.completed.push(event.id);
+    state.bestTimes = missions.bestTimes;
+    $('complete-title').textContent = event.title;
+    $('complete-cash').textContent = `+${money(event.reward)}`;
+    $('complete-extra').textContent = `${state.completed.length} of 5 jobs complete`;
+    $('complete-time').textContent = `${event.time.toFixed(1)} s`;
     audio.chime();
-    refreshHud();
     saveNow();
-    announce(`Mission complete: ${mission.title}. Earned $${mission.reward}.`);
-    return true;
+    setScreen('mission-complete');
   }
-
-  function busted() {
-    if (state.screen !== 'playing') return;
-    state.bustedFine = Math.min(state.cash, Math.round(POLICE.fine * (1 + police.state.wanted * 0.2)));
-    state.cash -= state.bustedFine;
-    leaveCar();
-    missions.fail('Busted.');
-    police.clear();
-    cleanPoliceCars();
-    state.finalMission = null;
-    if (nodes['busted-fine']) nodes['busted-fine'].textContent = `$${state.bustedFine.toLocaleString('en-US')}`;
-    setScreen('busted');
-    refreshHud();
-    saveNow();
-    announce('Busted. Press Enter to return to the garage.');
-  }
-
-  function gameOver() {
-    if (state.screen !== 'playing') return;
-    missions.fail('Jax went down.');
-    state.finalMission = null;
-    setScreen('gameover');
-    refreshHud();
-    saveNow();
-    announce('Jax went down. Press R or Enter for a new run.');
-  }
-
-  function leaveBusted() {
-    if (state.screen !== 'busted') return;
-    player.reset();
-    Object.assign(player.state, { ...SPAWN, health: 75, invuln: PLAYER.respawnInvuln });
-    player.syncMesh();
-    const starter = vehicles.cars.find((car) => car.id === 'starter');
-    if (starter) {
-      vehicles.repair(starter);
-      starter.state.speed = 0;
-      starter.state.occupied = false;
-      vehicles.setCarPosition(starter, STARTER_CAR.x, STARTER_CAR.z, STARTER_CAR.heading);
-    }
-    missions.takeEvents();
-    setScreen('playing');
-    hud.setObjective('Back in Solmar. Follow a gold beacon or press M for jobs.');
-    refreshHud();
-    announce('Released. Back to work.');
-  }
-
-  function continueAfterMission() {
-    if (state.screen !== 'mission-complete') return;
-    state.finalMission = null;
-    setScreen('playing');
-    const allDone = missions.completedCount() === missions.list.length;
-    hud.setObjective(allDone ? 'All jobs complete. The coast is yours to explore.' : 'Next job marked on the map. Press M to pick one.');
-    announce(allDone ? 'Story complete. Explore Solmar.' : 'Playing SOLMAR. A new job is available.');
-  }
-
-  const missionList = hud.hud?.missionList || nodes['mission-list'];
-  function showJobs(toggle = false) {
-    if (state.screen !== 'playing' && state.screen !== 'paused') return;
-    if (toggle && missionList?.classList.contains('open')) {
-      hud.hideMissionList();
-      return;
-    }
-    hud.showMissionList(missions.list, missions.list.findIndex((mission) => mission.active));
-    // hud.js creates rows at show time without data attributes. Bind through their container.
-    const rows = missionList?.querySelectorAll('.mission-row') ?? [];
-    rows.forEach((row, index) => {
-      const mission = missions.list[index];
-      if (!mission) return;
-      row.setAttribute('data-mission', mission.id);
-      row.setAttribute('role', 'button');
-      row.setAttribute('tabindex', state.screen === 'paused' ? '-1' : '0');
-      row.setAttribute('aria-disabled', String(state.screen === 'paused' || mission.locked || mission.completed));
-      row.classList.toggle('locked', mission.locked);
-    });
-    if (!missionList) hud.toast('Find the gold job beacon and press E.', 'info', 3);
-  }
-
-  function chooseJob(id) {
-    if (state.screen !== 'playing') return false;
-    const mission = missions.list.find((item) => item.id === id);
-    if (!mission || !missions.start(id)) {
-      hud.toast('That job is not available yet.', 'info', 2);
-      return false;
-    }
-    hud.hideMissionList();
-    announce(`Job started: ${mission.title}.`);
-    return true;
-  }
-
-  function enterOrExit() {
-    if (player.state.inCar) {
-      leaveCar();
-      announce('On foot.');
-      return;
-    }
-    const mission = missions.nearestStart(player.state.x, player.state.z);
-    if (mission) {
-      chooseJob(mission.id);
-      return;
-    }
-    const car = vehicles.nearest(player.state.x, player.state.z, 4.6);
-    if (!car || car.state.occupied) {
-      hud.toast('Nothing to use here.', 'info', 1.6);
-      return;
-    }
-    const stealing = !car.state.stolen;
-    if (!player.enterCar(car)) return;
-    if (stealing) {
-      car.state.stolen = true;
-      // The coupe job raises its own wanted level when it observes the entry.
-      if (car !== missions.state.car) police.addWanted(POLICE.steal, 'Vehicle theft');
-      hud.toast('Stolen ride. The SMPD noticed.', 'danger', 3);
-    }
-    orbit.yaw = car.state.heading;
-    announce('Driving. Space is the handbrake; E exits.');
-  }
-
-  function handleActions(actions) {
-    if (actions & ACTION_MUTE) {
-      state.muted = audio.toggleMute();
-      hud.toast(state.muted ? 'Sound muted' : 'Sound on', 'info', 1.5);
-      saveNow();
-    }
-    if (state.screen === 'menu') {
-      if (actions & (ACTION_CONFIRM | ACTION_RESTART)) startRun(false);
-      else if (actions & ACTION_MENU) { startRun(false); showJobs(); }
-      return;
-    }
-    if (actions & ACTION_RESTART) { restart(); return; }
-    if (state.screen === 'paused') {
-      if (actions & (ACTION_CONFIRM | ACTION_PAUSE)) resume();
-      else if (actions & ACTION_MENU) showJobs(true);
-      return;
-    }
-    if (state.screen === 'busted') {
-      if (actions & (ACTION_CONFIRM | ACTION_ENTER)) leaveBusted();
-      return;
-    }
-    if (state.screen === 'gameover') {
-      if (actions & ACTION_CONFIRM) restart();
-      return;
-    }
-    if (state.screen === 'mission-complete') {
-      if (actions & (ACTION_CONFIRM | ACTION_ENTER)) continueAfterMission();
-      return;
-    }
-    if (actions & ACTION_PAUSE) { pause(); return; }
-    if (actions & ACTION_MENU) showJobs(true);
-    if (actions & ACTION_ENTER) enterOrExit();
-    if (actions & ACTION_PUNCH) {
-      const hit = combat.punch();
-      if (hit) audio.thud();
-      if (hit && police.distanceToNearest(player.state.x, player.state.z) < 12) police.addWanted(1, 'Assault');
-    }
-    if (actions & ACTION_FIRE && combat.shoot()) {
-      state.shotsFired += 1;
-      audio.gunshot();
-      if (police.distanceToNearest(player.state.x, player.state.z) < POLICE.hear) police.addWanted(POLICE.gunNearCop, 'Shots fired');
-      hud.toast(`Pistol ammo: ${combat.state.ammo}`, 'info', 1.2);
-    }
-  }
-
-  function step(dt = STEP) {
-    if (state.screen !== 'playing' || !Number.isFinite(dt) || dt <= 0) return;
-    dt = Math.min(dt, MAX_FRAME);
-    const controls = input.state();
-    state.elapsed += dt;
-    state.pedHitCooldown = Math.max(0, state.pedHitCooldown - dt);
-    if (player.state.inCar) {
-      const car = player.state.inCar;
-      if (car.state.wrecked) {
-        leaveCar();
-        hud.toast('The car is wrecked.', 'danger', 2.4);
-      } else {
-        player.state.invuln = Math.max(0, player.state.invuln - dt);
-        vehicles.stepCar(car, dt, {
-          accelerate: controls.up, brake: controls.down, left: controls.left,
-          right: controls.right, handbrake: controls.jump,
-        }, city.colliders);
-        const angle = Math.atan2(Math.sin(car.state.heading - orbit.yaw), Math.cos(car.state.heading - orbit.yaw));
-        if (!input.isDragging()) orbit.yaw += angle * Math.min(1, dt * 2.4);
-        if (state.pedHitCooldown === 0 && Math.abs(car.state.speed) > 3.5) {
-          const ped = traffic.nearestPed(car.state.x, car.state.z, 2.8);
-          if (ped) {
-            traffic.knockPed(ped, car.state.heading);
-            state.pedHitCooldown = 1.4;
-            police.addWanted(POLICE.pedHit, 'Hit and run');
-            audio.thud();
-            hud.toast('Hit and run. Wanted level up.', 'danger', 2.6);
-          }
-        }
-      }
-    } else {
-      const forward = Number(controls.up) - Number(controls.down);
-      const right = Number(controls.right) - Number(controls.left);
-      player.step(dt, {
-        x: Math.sin(orbit.yaw) * forward - Math.cos(orbit.yaw) * right,
-        z: Math.cos(orbit.yaw) * forward + Math.sin(orbit.yaw) * right,
-        run: controls.run, jump: controls.jump && player.state.grounded,
-      }, city.colliders);
-    }
-    traffic.update(dt, player, vehicles);
-    combat.update(dt, player);
-    police.update(dt, player, combat);
-    syncRider();
-    // Handle arrest before missions.fail() can clear the police's busted flag.
-    if (!player.state.alive || player.state.health <= 0) { gameOver(); return; }
-    if (police.state.busted) { busted(); return; }
-    const active = missions.active;
-    missions.update(dt);
-    cleanPoliceCars();
+  function consumeMissionEvents() {
     for (const event of missions.takeEvents()) {
-      if (event.type === 'complete' && completeMission(event)) return;
-      if (event.type === 'fail') {
-        hud.toast(`Mission failed: ${event.reason}`, 'danger', 4.5);
-        announce(`Mission failed: ${event.reason}`);
-      }
+      if (event.type === 'complete') completeMission(event);
+      else if (event.type === 'fail') hud.toast(`Job failed · ${event.reason}`, 'warning');
     }
-    // If a removed mission car was being driven when a mission failed, disembark it safely.
-    if (active && !missions.active && player.state.inCar && !vehicles.cars.includes(player.state.inCar)) leaveCar();
-    const car = player.state.inCar;
-    const job = !car && missions.nearestStart(player.state.x, player.state.z);
-    const nearestCar = !car && vehicles.nearest(player.state.x, player.state.z, 4.6);
-    hud.setHint(car ? 'E — exit car' : job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state.stolen ? 'E — drive' : 'E — use this car') : '');
-    refreshHud();
-    if (state.elapsed - state.lastSave >= 15) { saveNow(); state.lastSave = state.elapsed; }
   }
-
-  function frame(now) {
-    frameId = requestAnimationFrame(frame);
-    handleActions(input.takeActions());
-    const delta = clock.last === null ? 0 : clamp((now - clock.last) / 1000, 0, MAX_FRAME);
-    clock.last = now;
-    if (state.screen === 'playing') {
-      const drag = input.takeOrbit();
-      orbit.yaw -= drag.x * CAMERA.sensitivity;
-      orbit.pitch = clamp(orbit.pitch + drag.y * CAMERA.sensitivity, CAMERA.minPitch, CAMERA.maxPitch);
-      orbit.distance = clamp(orbit.distance + input.takeWheel() * 0.9, CAMERA.minDistance, CAMERA.maxDistance);
-      clock.accumulator += delta;
-      let steps = 0;
-      while (state.screen === 'playing' && clock.accumulator >= STEP && steps < MAX_STEPS) {
-        clock.accumulator -= STEP;
-        step(STEP);
-        steps += 1;
-      }
-      if (steps === MAX_STEPS) clock.accumulator %= STEP;
-      renderer.updateCamera(delta, player, orbit, 0);
-      const car = player.state.inCar;
-      const speed = Math.abs(car?.state.speed ?? 0) / VEHICLE.maxSpeed;
-      const playing = state.screen === 'playing';
-      audio.updateEngine(speed, Boolean(playing && car && input.state().jump && speed > 0.2), Boolean(playing && car));
-      audio.updateSiren(playing ? police.state.wanted : 0);
-      if (playing) audio.update(delta);
-    } else if (state.screen === 'menu') renderer.frameTitle();
-    renderer.render();
+  function busted(wanted) {
+    missions.fail('Busted. The client cannot wait for you.');
+    consumeMissionEvents();
+    state.fine = Math.min(state.cash, Math.round(350 * (1 + wanted * .2)));
+    state.cash -= state.fine;
+    forceExit();
+    police.clear();
+    player.teleport(2, 88);
+    player.state.health = 60;
+    player.state.alive = true;
+    $('busted-fine').textContent = `${money(state.fine)} fine · A second chance at the garage.`;
+    saveNow();
+    setScreen('busted');
   }
-
-  function boot() {
-    if (booted) return;
-    booted = true;
-    audio.setMuted(state.muted);
-    setScreen('menu');
-    renderer.frameTitle();
-    const saved = readSave();
-    if (nodes['btn-continue']) {
-      nodes['btn-continue'].hidden = !saved;
-      nodes['btn-continue'].style.display = saved ? 'inline-flex' : 'none';
-      const label = nodes['btn-continue'].querySelector('span');
-      if (label && saved) label.textContent = `Continue — $${Math.round(saved.cash).toLocaleString('en-US')}`;
-    }
-    function bind(id, listener) { nodes[id]?.addEventListener('click', listener); }
-    bind('btn-start', () => startRun(false));
-    bind('btn-continue', () => state.screen === 'paused' ? resume() : startRun(true));
-    bind('btn-walk', () => state.screen === 'busted' ? leaveBusted() : startRun(false));
-    bind('btn-jobs', () => { if (state.screen === 'menu') startRun(false); showJobs(); });
-    bind('btn-resume', resume);
-    bind('btn-restart-pause', restart);
-    bind('btn-restart', restart);
-    bind('btn-continue-story', continueAfterMission);
-    function selectMission(event) {
-      const row = event.target?.closest?.('[data-mission]');
-      if (!row || !missionList?.contains(row)) return;
-      if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      event.stopPropagation();
-      clearInput();
-      chooseJob(row.getAttribute('data-mission'));
-    }
-    missionList?.addEventListener('click', selectMission);
-    missionList?.addEventListener('keydown', selectMission);
-    const unlockAudio = () => { if (!shotMode) { audio.unlock(); audio.setMuted(state.muted); } };
-    window.addEventListener('pointerdown', unlockAudio, { once: true });
-    window.addEventListener('keydown', unlockAudio, { once: true });
-    window.addEventListener('blur', () => { if (!shotMode) pause('Window inactive'); });
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden && !shotMode) { pause('Window inactive'); saveNow(); }
+  function die() {
+    missions.fail('You ran out of road.');
+    consumeMissionEvents();
+    saveNow();
+    setScreen('gameover');
+  }
+  function showJobs() {
+    hud.toggleMissionList(missions.list, id => {
+      if (state.screen === 'title') startRun(false);
+      if (missions.start(id)) hud.hideMissionList();
     });
-    window.addEventListener('pagehide', saveNow);
-    announce(renderer.renderer ? 'SOLMAR. Press Enter to start, or Continue.' : 'SOLMAR requires WebGL. Enable hardware acceleration and reload.');
-    if (!shotMode) frameId = requestAnimationFrame(frame);
   }
-
-  function beginShot(name) {
-    shotMode = true;
-    state.shot = ['play', 'end'].includes(name) ? name : 'start';
-    const generation = ++shotGeneration;
-    window.__shotReady = false;
-    window.__gameError = null;
-    if (frameId !== null) cancelAnimationFrame(frameId);
-    if (shotFrameId !== null) cancelAnimationFrame(shotFrameId);
-    frameId = null;
-    startRun(false);
-    const staged = stageShot(state.shot, game);
-    setScreen(staged.screen);
-    staged.update?.();
-    // Some shot-module revisions mark readiness during staging; rendering owns this flag.
-    window.__shotReady = false;
-    syncRider();
-    refreshHud();
-    if (state.screen === 'menu') renderer.frameTitle();
-    else renderer.updateCamera(1, player, orbit, 0);
-    let painted = 0;
-    function paint() {
-      if (generation !== shotGeneration) return;
-      renderer.render();
-      painted += 1;
-      if (painted < 3) shotFrameId = requestAnimationFrame(paint);
-      else {
-        shotFrameId = null;
-        window.__shotReady = Boolean(renderer.renderer);
-        if (!renderer.renderer) window.__gameError = 'WebGL is unavailable; screenshot could not be rendered.';
+  function resume() {
+    if (state.screen === 'title') startRun(!!saved);
+    else if (state.screen === 'gameover') startRun(false);
+    else {
+      game.shotFrozen = false;
+      setScreen('playing');
+    }
+  }
+  function handleActions() {
+    for (const action of input.consumeActions()) {
+      if (action === ACTION_MUTE) {
+        state.muted = !state.muted;
+        audio.setMuted(state.muted);
+        hud.toast(state.muted ? 'Sound muted · N to listen' : 'Sound on');
+        if (state.screen === 'title' && saved) {
+          writeSave({ ...saved, muted: state.muted });
+          refreshContinue();
+        } else saveNow();
+      } else if (action === ACTION_RESTART) startRun(false);
+      else if (action === ACTION_CONFIRM) {
+        if (state.screen !== 'playing') resume();
+      } else if (action === ACTION_PAUSE) {
+        if (state.screen === 'playing') setScreen('paused');
+        else if (state.screen === 'paused') resume();
+      } else if (action === ACTION_MENU) showJobs();
+      else if (state.screen === 'playing') {
+        if (action === ACTION_ENTER) enterExit();
+        else if (action === ACTION_JUMP) jump = true;
+        else if (action === ACTION_PUNCH) { combat.punch(); audio.thud(); }
+        else if (action === ACTION_FIRE) combat.shoot(render.state.yaw);
       }
     }
-    shotFrameId = requestAnimationFrame(paint);
-    return staged;
+  }
+  function checkPedestrianHits(dt) {
+    pedestrianCooldown = Math.max(0, pedestrianCooldown - dt);
+    const car = player.state.inCar;
+    if (!car || Math.abs(car.speed) < 4.5) return;
+    for (const person of traffic.pedestrians) {
+      if (person.alive === false || person.down || Math.hypot(person.x - car.x, person.z - car.z) > 2.3) continue;
+      person.down = true;
+      person.alive = false;
+      person.health = 0;
+      person.group.rotation.z = Math.PI / 2;
+      person.group.position.y = .3;
+      car.speed *= .8;
+      audio.thud();
+      if (pedestrianCooldown === 0) { police.addWanted(1, 'Dangerous driving'); pedestrianCooldown = 1.5; }
+    }
+  }
+  function updateHud(dt) {
+    const p = player.state;
+    hud.setHealth(p.health);
+    hud.setMoney(state.cash);
+    hud.setWanted(police.state.wanted);
+    hud.setSpeed(p.inCar ? Math.abs(p.inCar.speed) : null);
+    hud.setHint(p.inCar ? 'WASD drive · Space handbrake · E exit' : missions.getHint() || (vehicles.nearest(p.x, p.z, 5.6) ? 'E — take the wheel' : 'WASD move · Shift run · E interact · F punch · Click pistol'));
+    const ammoLabel = document.querySelector('.hud-bottom-label');
+    if (ammoLabel) ammoLabel.textContent = `JAX MORENO · ${combat.state.ammo} ROUNDS`;
+    hud.drawMinimap(city, p, render.state.yaw, missions, police.state);
+    hud.update(dt);
+  }
+  function step(dt) {
+    if (state.screen !== 'playing') return;
+    state.time += dt;
+    shotHeatCooldown = Math.max(0, shotHeatCooldown - dt);
+    const down = code => input.down(code);
+    const forward = Number(down('KeyW') || down('ArrowUp')) - Number(down('KeyS') || down('ArrowDown'));
+    const right = Number(down('KeyD') || down('ArrowRight')) - Number(down('KeyA') || down('ArrowLeft'));
+    const p = player.state;
+    if (p.inCar) vehicles.stepCar(p.inCar, dt, { throttle: forward, steer: right, handbrake: down('Space') });
+    player.step(dt, { forward, right, sprint: down('ShiftLeft') || down('ShiftRight'), jump }, render.state.yaw);
+    jump = false;
+    traffic.update(dt, p, vehicles);
+    police.update(dt, p, { damage: amount => player.damage(amount), toast: text => hud.toast(text), shootAtPlayer: cop => combat.shootAtPlayer(cop) });
+    vehicles.resolveCarCollisions(traffic.cars);
+    vehicles.update(dt);
+    combat.setTargets({ pedestrians: traffic.pedestrians, footCops: police.state.footCops });
+    combat.update(dt);
+    if (p.inCar?.wrecked || p.inCar?.health <= 0) { forceExit(); hud.toast('Your ride is wrecked. Get clear!'); }
+    else if (p.inCar?.removed) { forceExit(); hud.toast('The patrol recovered its car. Find another ride.'); }
+    if (p.inCar) player.step(0, {}, render.state.yaw);
+    checkPedestrianHits(dt);
+    for (const event of police.takeEvents()) {
+      if (event.type === 'busted') { busted(event.wanted || police.state.wanted); return; }
+    }
+    if (p.health <= 0) { die(); return; }
+    missions.update(dt);
+    consumeMissionEvents();
+    audio.update(dt, { speed: p.inCar?.speed || 0, wanted: police.state.wanted, playing: true, inCar: !!p.inCar });
   }
 
-  const game = {
-    seed: seedValue, city, renderer, player, vehicles, traffic, police, combat, audio,
-    hud, missions, input, state, orbit, setScreen, startRun, restart, pause, resume,
-    boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
-    leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,
-    missingElements: DOM_IDS.filter((id) => !nodes[id]),
-  };
-  return game;
-}
+  combat.setCallbacks({
+    onDamage: amount => player.damage(amount),
+    toast: text => hud.toast(text),
+    onShot(x, z) {
+      audio.gunshot();
+      traffic.scatter(x, z);
+      const cops = [...police.state.copCars, ...police.state.footCops];
+      if (shotHeatCooldown === 0 && cops.some(cop => Math.hypot(cop.x - x, cop.z - z) < 65)) {
+        police.addWanted(1, 'Shots near a patrol');
+        shotHeatCooldown = 1;
+      }
+    },
+  });
+  for (const [id, callback] of Object.entries({
+    'btn-start': () => startRun(false), 'btn-continue': () => startRun(true),
+    'btn-walk': resume, 'btn-continue-story': resume, 'btn-resume': resume,
+    'btn-restart': () => startRun(false), 'btn-restart-pause': () => startRun(false),
+    'btn-jobs': showJobs, 'btn-title-jobs': showJobs,
+  })) $(id)?.addEventListener('click', callback);
+  document.querySelectorAll('[data-action="resume"]').forEach(button => button.addEventListener('click', resume));
+  document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
+  document.addEventListener('keydown', () => audio.unlock(), { once: true });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && state.screen === 'playing') setScreen('paused'); });
+  state.muted = saved?.muted ?? false;
+  audio.setMuted(state.muted);
+  refreshContinue();
+  vehicles.spawnCar({ x: 2, z: 92, heading: 0, color: 0xefae45, starter: true });
+  vehicles.spawnParked();
+  setScreen('title');
+  if (params.has('shot')) stageShot(params.get('shot'), game);
 
-function initialize() {
-  window.__shotReady = false;
-  window.__gameError = null;
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const saved = readSave();
-    const shot = params.has('shot') ? params.get('shot') || 'start' : null;
-    const seed = parseSeed(params.get('seed'), shot === null ? saved?.seed ?? 1 : 1);
-    const game = makeGame(seed, shot);
-    window.__game = game;
-    window.__solmar = game;
-    game.boot();
-    if (shot !== null) game.beginShot(shot);
-  } catch (error) {
-    window.__gameError = error instanceof Error ? error.message : String(error);
-    const status = element('status');
-    if (status) status.textContent = `SOLMAR could not start: ${window.__gameError}`;
-    console.error('SOLMAR startup failed:', error);
+  function frame(timestamp) {
+    const elapsed = lastFrame ? Math.min(MAX_FRAME, Math.max(0, (timestamp - lastFrame) / 1000)) : 0;
+    lastFrame = timestamp;
+    handleActions();
+    const pointer = input.consumePointer();
+    if (!game.shotFrozen && state.screen === 'playing') {
+      accumulator = Math.min(accumulator + elapsed, STEP * 8);
+      while (accumulator >= STEP && state.screen === 'playing') { step(STEP); accumulator -= STEP; }
+      render.follow(player.state, elapsed, pointer);
+    } else {
+      accumulator = 0;
+      if (state.screen === 'title') render.frameTitle(game.shotFrozen ? 0 : timestamp / 1000);
+    }
+    if (state.screen !== 'playing') audio.update(elapsed, { speed: 0, wanted: 0, playing: false, inCar: false });
+    if (state.screen !== 'title') updateHud(game.shotFrozen ? 0 : elapsed);
+    render.render();
+    frameCount++;
+    if (frameCount >= 4) window.__shotReady = true;
+    requestAnimationFrame(frame);
   }
+  requestAnimationFrame(frame);
 }
-
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
-else initialize();
+try { boot(); } catch (error) {
+  window.__gameError = error.stack || String(error);
+  $('status').textContent = `Solmar could not start: ${error.message}`;
+  console.error(error);
+}

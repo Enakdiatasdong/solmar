@@ -1,54 +1,35 @@
-// Seeded randomness: mulberry32, plus the small helpers the world generators need. The same seed
-// (from ?seed=N) always rebuilds the same city, traffic, missions and screenshot scenes.
-
+// A string seed is hashed once; all procedural decisions then use this small generator.
+export function parseSeed(value = 1) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value >>> 0;
+  const source = String(value ?? '1');
+  if (/^[-+]?\d+$/.test(source)) return Number(source) >>> 0;
+  let hash = 2166136261;
+  for (let i = 0; i < source.length; i++) hash = Math.imul(hash ^ source.charCodeAt(i), 16777619);
+  return hash >>> 0;
+}
 export function mulberry32(seed) {
-  let a = seed >>> 0;
+  let counter = parseSeed(seed);
   return function random() {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    counter = (counter + 0x6d2b79f5) | 0;
+    let bits = Math.imul(counter ^ counter >>> 15, 1 | counter);
+    bits ^= bits + Math.imul(bits ^ bits >>> 7, 61 | bits);
+    return ((bits ^ bits >>> 14) >>> 0) / 4294967296;
   };
 }
-
-/** A mulberry32 function decorated with range/int/pick/chance helpers. */
-export function createRandom(seed) {
+export function createRandom(seed = 1) {
   const random = mulberry32(seed);
-  random.range = (min, max) => min + (max - min) * random();
-  random.int = (min, max) => {
-    const first = Math.ceil(min);
-    const last = Math.floor(max);
-    const count = last - first + 1;
-    if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || !Number.isSafeInteger(count) || count <= 0) {
-      throw new RangeError('Integer range must contain a finite, safely representable integer.');
-    }
-    return first + Math.floor(random() * count);
-  };
-  random.pick = (items) => items[Math.floor(random() * items.length)];
-  random.chance = (probability) => random() < probability;
-  random.sign = () => (random() < 0.5 ? -1 : 1);
-  random.shuffle = (items) => {
-    for (let index = items.length - 1; index > 0; index -= 1) {
-      const other = Math.floor(random() * (index + 1));
-      const value = items[index];
-      items[index] = items[other];
-      items[other] = value;
+  random.range = (low, high) => low + (high - low) * random();
+  random.int = (low, high) => Math.floor(random.range(low, high + 1));
+  random.pick = items => items.length ? items[Math.floor(random() * items.length)] : undefined;
+  random.chance = probability => random() < probability;
+  random.sign = () => random() < 0.5 ? -1 : 1;
+  random.shuffle = source => {
+    const items = source.slice();
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = random.int(0, i);
+      [items[i], items[j]] = [items[j], items[i]];
     }
     return items;
   };
   return random;
-}
-
-function integerSeed(value) {
-  if (typeof value === 'string') {
-    const text = value.trim();
-    if (!/^[+-]?\d+$/.test(text)) return null;
-    value = Number(text);
-  }
-  return Number.isSafeInteger(value) ? value >>> 0 : null;
-}
-
-/** Parse a whole decimal integer; valid seeds and fallbacks both wrap to uint32. */
-export function parseSeed(value, fallback = 1) {
-  return integerSeed(value) ?? integerSeed(fallback) ?? 1;
 }

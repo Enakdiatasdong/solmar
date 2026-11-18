@@ -1,79 +1,41 @@
-// Versioned localStorage persistence. Invalid or incompatible data is ignored safely.
-import { MISSIONS, SAVE_KEY, SAVE_VERSION } from './config.js';
+// A bad or unavailable browser store must never prevent a new run.
+export const SAVE_KEY = 'solmar.save.v2';
+const JOBS = ['first-fare', 'hot-wheels', 'beach-run', 'heat', 'harbor-job'];
 
-function safeStorage() {
-  try {
-    return typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
-  } catch {
-    return null;
+function validSave(value) {
+  if (!value || typeof value !== 'object' || value.version !== 2) return null;
+  if (!Number.isFinite(value.cash) || !Array.isArray(value.completed)) return null;
+  const bestTimes = {};
+  for (const id of JOBS) {
+    const time = value.bestTimes?.[id];
+    if (Number.isFinite(time) && time > 0) bestTimes[id] = Math.round(time * 10) / 10;
   }
-}
-
-function finiteNumber(value, fallback) {
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function normalizeBest(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const best = {};
-  for (const [id, time] of Object.entries(value)) {
-    if (MISSIONS.order.includes(id) && Number.isFinite(time) && time >= 0 && time <= 1e7) {
-      best[id] = time;
-    }
-  }
-  return best;
-}
-
-function normalizeSave(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  if (value.version !== SAVE_VERSION) return null;
-  const missions = Array.isArray(value.missions)
-    ? [...new Set(value.missions.filter((id) => MISSIONS.order.includes(id)))]
-    : [];
   return {
-    cash: Math.max(0, Math.min(1e9, finiteNumber(value.cash, MISSIONS.startCash))),
-    missions,
-    best: normalizeBest(value.best),
+    version: 2,
+    cash: Math.max(0, Math.floor(value.cash)),
+    completed: JOBS.filter(id => value.completed.includes(id)),
+    bestTimes,
     muted: value.muted === true,
-    seed: Number.isInteger(value.seed) ? value.seed >>> 0 : 1,
-    version: SAVE_VERSION,
-    updatedAt: Number.isFinite(value.updatedAt) && value.updatedAt >= 0 ? value.updatedAt : 0,
   };
 }
 
-export function readSave(storage = safeStorage()) {
-  if (!storage) return null;
+export function readSave() {
   try {
-    const raw = storage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    return normalizeSave(JSON.parse(raw));
-  } catch {
-    return null;
-  }
+    const raw = localStorage.getItem(SAVE_KEY);
+    return raw ? validSave(JSON.parse(raw)) : null;
+  } catch { return null; }
 }
 
-export function writeSave(data, storage = safeStorage()) {
-  if (!storage || !data || typeof data !== 'object') return false;
-  const save = normalizeSave({
-    ...data,
-    version: SAVE_VERSION,
-    updatedAt: Date.now(),
-  });
-  if (!save) return false;
+export function writeSave(data) {
   try {
-    storage.setItem(SAVE_KEY, JSON.stringify(save));
+    const clean = validSave({ ...data, version: 2 });
+    if (!clean) return false;
+    localStorage.setItem(SAVE_KEY, JSON.stringify(clean));
     return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
-export function clearSave(storage = safeStorage()) {
-  if (!storage) return false;
-  try {
-    storage.removeItem(SAVE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
+export function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); return true; }
+  catch { return false; }
 }

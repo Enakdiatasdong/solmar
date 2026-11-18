@@ -1,312 +1,206 @@
-// DOM HUD and canvas minimap. The optional lookups keep the game playable when a screen is absent.
-import { CITY, PALETTE } from './config.js';
-
-function element(id) {
-  return typeof document === 'undefined' ? null : document.getElementById(id);
-}
-
-function context2d(canvas) {
-  if (!canvas || typeof canvas.getContext !== 'function') return null;
-  try {
-    return canvas.getContext('2d');
-  } catch {
-    return null;
-  }
-}
+const money = value => `$${Math.max(0, Math.floor(value || 0)).toLocaleString('en-US')}`;
+const byId = id => document.getElementById(id);
 
 export function createHud() {
-  const hud = {
-    root: element('hud'),
-    healthFill: element('health-fill'),
-    healthText: element('health-text'),
-    cash: element('cash-value'),
-    stars: element('wanted-stars'),
-    speed: element('speed-value'),
-    speedBox: element('speed-box'),
-    objective: element('objective-text'),
-    objectiveBox: element('objective-box'),
-    toasts: element('toasts'),
-    minimap: element('minimap'),
-    missionList: element('mission-list'),
-    dialogue: element('dialogue'),
-    dialogueText: element('dialogue-text'),
-    subtitle: element('subtitle'),
-    hint: element('hint'),
-  };
-  const cache = {
-    health: null,
-    healthPercent: null,
-    cash: null,
-    stars: null,
-    speed: null,
-    inCar: null,
-    objective: null,
-    dialogue: null,
-  };
-  const mapContext = context2d(hud.minimap);
-
-  function setText(node, value) {
-    if (node && node.textContent !== value) node.textContent = value;
+  const root = byId('hud');
+  const missionList = byId('mission-list');
+  const map = byId('minimap');
+  const context = map.getContext('2d');
+  const toasts = [];
+  let jobsOpen = false;
+  function setHealth(value) {
+    const health = Math.max(0, Math.min(100, Math.ceil(value || 0)));
+    byId('health-fill').style.width = `${health}%`;
+    byId('health-fill').style.background = health < 30 ? '#ff7168' : '#b7f09b';
+    byId('health-text').textContent = String(health);
   }
-
-  function setHealth(value, max) {
-    const health = Number.isFinite(value) ? Math.max(0, value) : 0;
-    const maximum = Number.isFinite(max) && max > 0 ? max : 1;
-    const rounded = Math.round(health);
-    const percent = Math.max(0, Math.min(100, (health / maximum) * 100));
-    if (rounded !== cache.health) {
-      cache.health = rounded;
-      setText(hud.healthText, String(rounded));
-    }
-    if (percent !== cache.healthPercent) {
-      cache.healthPercent = percent;
-      if (hud.healthFill) {
-        hud.healthFill.style.width = percent + '%';
-        hud.healthFill.style.background = percent < 28
-          ? PALETTE.css.coral
-          : percent < 55 ? PALETTE.css.gold : PALETTE.css.teal;
-      }
-    }
+  function setMoney(value) { byId('cash-value').textContent = money(value); }
+  function setWanted(value) {
+    const level = Math.max(0, Math.min(5, Math.ceil(value || 0)));
+    const stars = byId('wanted-stars');
+    stars.textContent = Array.from({ length: 5 }, (_, i) => i < level ? '★' : '☆').join(' ');
+    stars.setAttribute('aria-label', `${level} of 5 wanted stars`);
+    stars.classList.toggle('hot', level > 0);
   }
-
-  function setMoney(value) {
-    const amount = Number.isFinite(value) ? Math.round(value) : 0;
-    if (amount === cache.cash) return;
-    cache.cash = amount;
-    setText(hud.cash, '$' + amount.toLocaleString('en-US'));
+  function setSpeed(value) {
+    const show = value !== null && value !== undefined;
+    byId('speed-box').hidden = !show;
+    if (show) byId('speed-value').textContent = String(Math.round(Math.abs(value) * 3.6)).padStart(3, '0');
   }
-
-  function setWanted(stars) {
-    const count = Number.isFinite(stars) ? Math.max(0, Math.min(5, Math.round(stars))) : 0;
-    if (count === cache.stars) return;
-    cache.stars = count;
-    if (!hud.stars) return;
-    hud.stars.replaceChildren();
-    for (let index = 1; index <= 5; index += 1) {
-      const star = document.createElement('span');
-      star.className = 'star' + (index <= count ? ' lit' : '');
-      star.textContent = '★';
-      hud.stars.appendChild(star);
-    }
-    hud.stars.classList.toggle('active', count > 0);
-    hud.stars.setAttribute('aria-label', count + ' wanted stars');
+  function setObjective(text) {
+    byId('objective-text').textContent = text || 'Explore Solmar. Find a gold beacon to take a job.';
   }
-
-  function setSpeed(speed, inCar) {
-    const value = Number.isFinite(speed) ? Math.max(0, Math.round(Math.abs(speed) * 3.6)) : 0;
-    const driving = Boolean(inCar);
-    if (value === cache.speed && driving === cache.inCar) return;
-    cache.speed = value;
-    cache.inCar = driving;
-    if (hud.speedBox) hud.speedBox.style.display = driving ? 'flex' : 'none';
-    setText(hud.speed, driving ? value + ' KM/H' : '');
+  function setDialogue(speaker, text) {
+    if (text === undefined) { text = speaker; speaker = 'SOLMAR'; }
+    byId('dialogue').hidden = !text;
+    byId('subtitle').textContent = speaker || 'SOLMAR';
+    byId('dialogue-text').textContent = text || '';
   }
-
-  function setMission(mission, objective) {
-    let text = objective;
-    if (text == null) {
-      if (typeof mission === 'string') text = mission;
-      else if (mission && typeof mission === 'object') {
-        text = mission.briefing || mission.objective || mission.title || '';
-      } else {
-        text = '';
-      }
-    }
-    text = typeof text === 'string' ? text : String(text);
-    if (text === cache.objective) return;
-    cache.objective = text;
-    if (hud.objectiveBox) hud.objectiveBox.style.display = text ? 'block' : 'none';
-    setText(hud.objective, text);
-  }
-
-  function toast(message, kind = 'info', seconds = 3.4) {
-    if (!hud.toasts || typeof document === 'undefined') return null;
-    const node = document.createElement('div');
-    const safeKind = ['info', 'mission', 'danger'].includes(kind) ? kind : 'info';
-    node.className = 'toast ' + safeKind;
-    node.textContent = String(message ?? '');
-    hud.toasts.appendChild(node);
-    while (hud.toasts.childElementCount > 5) hud.toasts.firstElementChild?.remove();
-
-    const duration = Number.isFinite(seconds) ? Math.max(0, seconds) * 1000 : 3400;
-    const schedule = typeof window !== 'undefined' && window.setTimeout
-      ? window.setTimeout.bind(window)
-      : typeof setTimeout === 'function' ? setTimeout : null;
-    if (schedule) {
-      schedule(() => {
-        node.classList.add('fade');
-        schedule(() => node.remove(), 500);
-      }, duration);
-    }
-    return node;
-  }
-
-  function setDialogue(speaker, line) {
-    const name = typeof speaker === 'string' ? speaker : '';
-    const text = typeof line === 'string' ? line : '';
-    const key = name + '|' + text;
-    if (key === cache.dialogue) return;
-    cache.dialogue = key;
-    if (!hud.dialogue) return;
-    if (!text) {
-      hud.dialogue.style.display = 'none';
-      if (hud.dialogueText) hud.dialogueText.replaceChildren();
-      return;
-    }
-    hud.dialogue.style.display = 'block';
-    if (hud.dialogueText) {
-      hud.dialogueText.replaceChildren();
-      const strong = document.createElement('strong');
-      strong.textContent = name;
-      hud.dialogueText.append(strong, document.createTextNode(' ' + text));
-    }
-  }
-
   function setHint(text) {
-    setText(hud.hint, text ? String(text) : '');
+    byId('hint').textContent = text || '';
+    byId('hint').hidden = !text;
   }
-
-  function showMissionList(missions, activeIndex) {
-    if (!hud.missionList) return;
-    hud.missionList.replaceChildren();
-    const list = Array.isArray(missions) ? missions : [];
-    for (let index = 0; index < list.length; index += 1) {
-      const mission = list[index] || {};
-      const row = document.createElement('div');
-      row.className = 'mission-row' +
-        (mission.completed ? ' done' : '') +
-        (index === activeIndex ? ' active' : '');
+  function toast(text, kind = 'info') {
+    if (!text) return;
+    const item = document.createElement('div');
+    item.className = `toast toast-${kind}`;
+    item.textContent = text;
+    byId('toasts').append(item);
+    toasts.push({ element: item, remaining: 4.5 });
+    while (toasts.length > 5) toasts.shift().element.remove();
+  }
+  function update(dt) {
+    for (let i = toasts.length - 1; i >= 0; i--) {
+      toasts[i].remaining -= dt;
+      if (toasts[i].remaining <= 0) {
+        toasts[i].element.remove();
+        toasts.splice(i, 1);
+      }
+    }
+  }
+  function setVisible(visible) {
+    root.hidden = !visible;
+    root.setAttribute('aria-hidden', String(!visible));
+  }
+  function hideMissionList() {
+    missionList.hidden = true;
+    missionList.setAttribute('aria-hidden', 'true');
+    jobsOpen = false;
+  }
+  function showMissionList(list, onSelect) {
+    const rows = byId('mission-rows');
+    rows.replaceChildren();
+    list.forEach((mission, index) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `mission-row${mission.completed ? ' done' : ''}`;
+      row.dataset.mission = mission.id;
+      row.disabled = Boolean(mission.locked);
       const number = document.createElement('span');
-      number.className = 'mission-index';
-      number.textContent = mission.completed ? '✓' : String(index + 1);
-      const label = document.createElement('span');
-      label.className = 'mission-name';
-      label.textContent = String(mission.title ?? '');
+      number.className = 'mission-number';
+      number.textContent = String(index + 1).padStart(2, '0');
+      const detail = document.createElement('span');
+      detail.className = 'mission-detail';
+      const name = document.createElement('strong');
+      name.textContent = mission.title;
+      const status = document.createElement('small');
+      status.textContent = mission.locked ? 'Complete the previous job to unlock' : mission.completed ? `Complete${mission.best ? ` · best ${mission.best.toFixed(1)}s` : ''}` : 'Ready to play';
+      detail.append(name, status);
       const reward = document.createElement('span');
       reward.className = 'mission-reward';
-      reward.textContent = '$' + String(Number.isFinite(mission.reward) ? mission.reward : 0);
-      row.append(number, label, reward);
-      hud.missionList.appendChild(row);
-    }
-    hud.missionList.classList.add('open');
+      reward.textContent = mission.locked ? 'LOCKED' : mission.completed ? '✓' : money(mission.reward);
+      row.append(number, detail, reward);
+      row.addEventListener('click', () => { if (typeof onSelect === 'function') onSelect(mission.id); });
+      rows.append(row);
+    });
+    missionList.hidden = false;
+    missionList.setAttribute('aria-hidden', 'false');
+    jobsOpen = true;
   }
-
-  function hideMissionList() {
-    hud.missionList?.classList.remove('open');
-  }
-
-  function toggleMissionList(missions, activeIndex) {
-    if (!hud.missionList) return;
-    if (hud.missionList.classList.contains('open')) hideMissionList();
-    else showMissionList(missions, activeIndex);
-  }
-
-  function drawMinimap(player, wanted, missions, blips, cameraYaw) {
-    if (!mapContext || !hud.minimap || !player?.state) return;
-    const width = hud.minimap.width;
-    const height = hud.minimap.height;
-    if (!(width > 0 && height > 0)) return;
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const scale = 0.105;
-    const actor = player.state.inCar ? player.state.inCar.state : player.state;
-    const heading = Number.isFinite(cameraYaw) ? cameraYaw : actor.heading || 0;
-
-    mapContext.save();
-    mapContext.clearRect(0, 0, width, height);
-    mapContext.beginPath();
-    mapContext.arc(centerX, centerY, Math.min(width, height) / 2 - 2, 0, Math.PI * 2);
-    mapContext.clip();
-    mapContext.fillStyle = 'rgba(22, 30, 39, 0.92)';
-    mapContext.fillRect(0, 0, width, height);
-    mapContext.translate(centerX, centerY);
-    // Camera-forward is up; at yaw zero, world -X is screen-right.
-    mapContext.rotate(heading);
-    mapContext.scale(-scale, -scale);
-    mapContext.translate(-actor.x, -actor.z);
-
-    mapContext.fillStyle = 'rgba(132, 140, 145, 0.5)';
-    const pitch = CITY.pitch;
-    const road = CITY.road;
-    for (let line = 0; line <= CITY.grid; line += 1) {
-      const offset = CITY.nodeMin + line * pitch;
-      mapContext.fillRect(offset - road / 2, CITY.nodeMin - road / 2, road, CITY.grid * pitch + road);
-      mapContext.fillRect(CITY.nodeMin - road / 2, offset - road / 2, CITY.grid * pitch + road, road);
+  byId('btn-close-jobs').addEventListener('click', hideMissionList);
+  function drawMinimap(city, subject, cameraYaw, missions, police) {
+    if (!context) return;
+    const player = subject.state || subject;
+    const pos = player.inCar || player;
+    const yaw = cameraYaw || 0;
+    const size = map.width;
+    const centre = size / 2;
+    const scale = size / 490;
+    const radius = centre - 8;
+    context.clearRect(0, 0, size, size);
+    context.save();
+    context.beginPath();
+    context.arc(centre, centre, radius, 0, Math.PI * 2);
+    context.clip();
+    context.fillStyle = '#183b3d';
+    context.fillRect(0, 0, size, size);
+    context.translate(centre, centre);
+    context.transform(-Math.cos(yaw) * scale, -Math.sin(yaw) * scale, Math.sin(yaw) * scale, -Math.cos(yaw) * scale, 0, 0);
+    context.translate(-pos.x, -pos.z);
+    context.fillStyle = '#2b777a';
+    context.fillRect(-1000, 540, 2000, 1200);
+    context.fillStyle = '#b9ad79';
+    context.fillRect(-385, 372, 770, 168);
+    context.fillStyle = '#345850';
+    for (const park of city.parks || []) {
+      const x = park.x ?? -360 + ((park.col ?? park[0]) + .5) * 72;
+      const z = park.z ?? -360 + ((park.row ?? park[1]) + .5) * 72;
+      const width = park.width || 48;
+      const depth = park.depth || 48;
+      context.fillRect(x - width / 2, z - depth / 2, width, depth);
     }
-    mapContext.fillStyle = 'rgba(83, 103, 80, 0.5)';
-    for (const block of CITY.parkBlocks) {
-      mapContext.fillRect(CITY.nodeMin + (block[0] + 0.5) * pitch - 20, CITY.nodeMin + (block[1] + 0.5) * pitch - 20, 40, 40);
+    context.lineWidth = 11;
+    context.strokeStyle = '#72847a';
+    context.beginPath();
+    for (const edge of city.graph.edges) {
+      context.moveTo(edge.a.x, edge.a.z);
+      context.lineTo(edge.b.x, edge.b.z);
     }
-    mapContext.fillStyle = 'rgba(44, 120, 138, 0.55)';
-    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.oceanStart, CITY.oceanWidth, 1600);
-    mapContext.fillStyle = 'rgba(196, 172, 120, 0.4)';
-    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.beachStart, CITY.oceanWidth, CITY.beachEnd - CITY.beachStart);
-
-    if (Array.isArray(missions)) {
-      for (const mission of missions) {
-        if (!mission?.marker || mission.completed) continue;
-        mapContext.fillStyle = mission.active ? PALETTE.css.gold : PALETTE.css.teal;
-        mapContext.beginPath();
-        mapContext.arc(mission.marker.x, mission.marker.z, 26, 0, Math.PI * 2);
-        mapContext.fill();
+    context.stroke();
+    context.strokeStyle = '#7d9587';
+    context.lineWidth = 5;
+    context.beginPath();
+    context.moveTo(-360, 410);
+    context.lineTo(360, 410);
+    context.moveTo(-288, 360);
+    context.lineTo(-288, 464);
+    context.stroke();
+    context.restore();
+    const point = (x, z, color, markerRadius = 4) => {
+      const dx = x - pos.x;
+      const dz = z - pos.z;
+      let mx = (-Math.cos(yaw) * dx + Math.sin(yaw) * dz) * scale;
+      let my = (-Math.sin(yaw) * dx - Math.cos(yaw) * dz) * scale;
+      const distance = Math.hypot(mx, my);
+      if (distance > radius - 9) { mx *= (radius - 9) / distance; my *= (radius - 9) / distance; }
+      context.beginPath();
+      context.arc(centre + mx, centre + my, markerRadius, 0, Math.PI * 2);
+      context.fillStyle = color;
+      context.fill();
+      context.strokeStyle = '#173334';
+      context.lineWidth = 1.5;
+      context.stroke();
+    };
+    if (!missions.active) {
+      for (const job of missions.list || []) {
+        if (job.locked) continue;
+        const location = job.location || job.start || job;
+        if (Number.isFinite(location.x) && Number.isFinite(location.z)) point(location.x, location.z, job.completed ? '#68dbca' : '#ffd76e', 4);
       }
     }
-    if (Array.isArray(blips)) {
-      for (const blip of blips) {
-        if (!Number.isFinite(blip?.x) || !Number.isFinite(blip?.z)) continue;
-        mapContext.fillStyle = blip.color || PALETTE.css.teal;
-        mapContext.beginPath();
-        mapContext.arc(blip.x, blip.z, Number.isFinite(blip.size) ? blip.size : 22, 0, Math.PI * 2);
-        mapContext.fill();
-      }
+    for (const beacon of missions.beacons || []) point(beacon.x, beacon.z, beacon.color || '#ffd76e', 5);
+    const policeState = police?.state || police || {};
+    for (const cop of [...policeState.copCars || [], ...policeState.footCops || []]) {
+      if (cop.alive !== false) point(cop.x, cop.z, '#ff746a', 3.5);
     }
-    mapContext.restore();
-
-    mapContext.save();
-    mapContext.translate(centerX, centerY);
-    mapContext.rotate(heading - (actor.heading || 0));
-    mapContext.fillStyle = PALETTE.css.gold;
-    mapContext.beginPath();
-    mapContext.moveTo(0, -7);
-    mapContext.lineTo(5.5, 6);
-    mapContext.lineTo(0, 3);
-    mapContext.lineTo(-5.5, 6);
-    mapContext.closePath();
-    mapContext.fill();
-    mapContext.restore();
-
-    mapContext.strokeStyle = 'rgba(255, 236, 200, 0.35)';
-    mapContext.lineWidth = 2;
-    mapContext.beginPath();
-    mapContext.arc(centerX, centerY, Math.min(width, height) / 2 - 2, 0, Math.PI * 2);
-    mapContext.stroke();
+    context.save();
+    context.translate(centre, centre);
+    context.rotate(yaw - (pos.heading || 0));
+    context.beginPath();
+    context.moveTo(0, -9);
+    context.lineTo(6, 7);
+    context.lineTo(0, 4);
+    context.lineTo(-6, 7);
+    context.closePath();
+    context.fillStyle = '#fff9df';
+    context.fill();
+    context.strokeStyle = '#153d3e';
+    context.lineWidth = 2;
+    context.stroke();
+    context.restore();
+    context.beginPath();
+    context.arc(centre, centre, radius, 0, Math.PI * 2);
+    context.strokeStyle = '#eddfb2';
+    context.lineWidth = 2;
+    context.stroke();
   }
-
-  function setVisible(visible) {
-    if (hud.root) {
-      hud.root.style.display = visible ? '' : 'none';
-      hud.root.setAttribute('aria-hidden', String(!visible));
-    }
-  }
-
   return {
-    hud,
-    setHealth,
-    setMoney,
-    setCash: setMoney,
-    setWanted,
-    setSpeed,
-    setMission,
-    setObjective: setMission,
-    toast,
-    setDialogue,
-    setHint,
-    showMissionList,
-    hideMissionList,
-    toggleMissionList,
+    setHealth, setMoney, setCash: setMoney, setWanted, setSpeed, setObjective,
+    setMission: setObjective, setDialogue, setHint, toast, update, setVisible,
+    show: () => setVisible(true), hide: () => setVisible(false),
+    showMissionList, hideMissionList,
+    toggleMissionList(list, onSelect) { if (jobsOpen) hideMissionList(); else showMissionList(list, onSelect); },
     drawMinimap,
-    setVisible,
-    show() { setVisible(true); },
-    hide() { setVisible(false); },
+    get jobsOpen() { return jobsOpen; },
   };
 }
