@@ -502,9 +502,16 @@ export function createCity(random, reservedPlaces = []) {
   // Fictional rooftop neon. Two outward faces keep the lettering readable on BOTH approaches;
   // a single DoubleSide texture would show mirrored text from the back.
   const glowTexture = makeGlowTexture();
+  const neonTextures = new Map();
   const signFrameMaterial = new THREE.MeshLambertMaterial({ color: 0x302c40 });
-  function addNeonSign({ id, label, caption, color, x, z, y, width, height, baseY = 0.28 }) {
-    const texture = makeNeonTexture(label, color, caption);
+  function addNeonSign({ id, label, caption, color, x, z, y, width, height,
+    baseY = 0.28, supportHalfWidth = width * 0.34 }) {
+    const textureKey = `${label}:${color}:${caption}`;
+    let texture = neonTextures.get(textureKey);
+    if (!texture) {
+      texture = makeNeonTexture(label, color, caption);
+      if (texture) neonTextures.set(textureKey, texture);
+    }
     if (!texture) return null;
     const sign = new THREE.Group();
     sign.name = `neon:${id}`;
@@ -542,9 +549,14 @@ export function createCity(random, reservedPlaces = []) {
       const supportGeometry = new THREE.CylinderGeometry(0.22, 0.3, supportHeight, 6);
       for (const side of [-1, 1]) {
         const support = new THREE.Mesh(supportGeometry, signFrameMaterial);
-        support.position.set(side * width * 0.34, baseY + supportHeight / 2 - y, 0);
+        support.position.set(side * supportHalfWidth, baseY + supportHeight / 2 - y, 0);
         support.castShadow = true;
         sign.add(support);
+        if (baseY <= 0.3) {
+          const supportX = x + side * supportHalfWidth;
+          colliders.push({ minX: supportX - 0.3, maxX: supportX + 0.3,
+            minZ: z - 0.3, maxZ: z + 0.3, height: baseY + supportHeight });
+        }
       }
     }
     group.add(sign);
@@ -572,6 +584,15 @@ export function createCity(random, reservedPlaces = []) {
     color: 0xffa776, targetX: 108, targetZ: 324, width: 26, height: 6.5 });
   addRooftopNeon({ id: 'neon-drive', label: 'NEON DRIVE', caption: 'LATE NIGHTS / OPEN ROAD',
     color: 0xd16bff, targetX: 180, targetZ: 180, width: 24, height: 6 });
+
+  // The fixed play camera looks down: this low station marquee fits below its horizon and HUD.
+  // Its two pylons sit on the sidewalks, with 4.2 m clearance over the north/south road.
+  addNeonSign({ id: 'flamingo-fm-approach', label: 'FLAMINGO FM', caption: 'THE SOUND OF THE COAST',
+    color: 0xff2b99, x: 0, z: 338, y: 6.2, width: 24, height: 3.3, supportHalfWidth: 11.9 });
+  // The central rooftop hero is behind the existing title card. A matching station relay on
+  // the east roofline exposes the same identity beside the card without changing either camera.
+  addRooftopNeon({ id: 'flamingo-fm-relay', label: 'FLAMINGO FM', caption: 'THE SOUND OF THE COAST',
+    color: 0xff2b99, targetX: 216, targetZ: 324, width: 46, height: 11.5 });
 
   // Beach and ocean on the south edge.
   const beachDepth = CITY.beachEnd - CITY.beachStart;
@@ -635,7 +656,10 @@ export function createCity(random, reservedPlaces = []) {
         for (const station of [17, 36, 55]) {
           const x = blockX + station + random.range(-0.9, 0.9);
           const z = avenueZ + side * boulevardOffset;
-          const scale = random.range(1.5, 1.85);
+          const matureScale = random.range(1.5, 1.85);
+          // Six younger approach palms keep their crowns in the fixed, downward play view.
+          const approachPalm = avenueZ === 288 && side > 0 && Math.abs(x) < 58;
+          const scale = matureScale * (approachPalm ? 0.5 : 1);
           if (pointIsClear(colliders, x, z, 0.75)) palmSpots.push({ x, z, scale });
         }
       }

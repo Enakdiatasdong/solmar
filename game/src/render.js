@@ -156,8 +156,9 @@ export function createRenderer(canvas) {
     hasPreviousFocus = true;
     if (shake > 0) {
       camera.position.copy(cameraState.pos);
-      camera.position.x += (Math.random() - 0.5) * shake * 0.18;
-      camera.position.y += (Math.random() - 0.5) * shake * 0.18;
+      // Impact noise follows the simulation's shake envelope, so even shaken shots repeat.
+      camera.position.x += Math.sin(shake * 83.1) * shake * 0.09;
+      camera.position.y += Math.sin(shake * 61.7 + 1.3) * shake * 0.09;
     } else {
       camera.position.copy(cameraState.pos);
     }
