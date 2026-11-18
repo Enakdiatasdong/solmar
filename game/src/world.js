@@ -332,6 +332,7 @@ export function createCity(random, reservedPlaces = []) {
   );
   asphalt.rotation.x = -Math.PI / 2;
   asphalt.position.set(0, 0, (CITY.nodeMin + CITY.nodeMax) / 2);
+  asphalt.receiveShadow = true;
   group.add(asphalt);
 
   const blockPitch = CITY.pitch;
@@ -340,6 +341,8 @@ export function createCity(random, reservedPlaces = []) {
   const sidewalkMesh = new THREE.InstancedMesh(sidewalkGeometry, sidewalkMaterial, CITY.grid * CITY.grid);
   const grassMaterial = new THREE.MeshLambertMaterial({ color: PALETTE.grass });
   const grassMesh = new THREE.InstancedMesh(sidewalkGeometry, grassMaterial, CITY.parkBlocks.length);
+  sidewalkMesh.receiveShadow = true;
+  grassMesh.receiveShadow = true;
   const matrix = new THREE.Matrix4();
   const parks = new Set(CITY.parkBlocks.map(([column, row]) => `${column}:${row}`));
   let sidewalkIndex = 0;
@@ -586,6 +589,7 @@ export function createCity(random, reservedPlaces = []) {
     new THREE.MeshLambertMaterial({ color: PALETTE.boardwalk }),
   );
   boardwalk.position.set(0, 0.17, CITY.beachStart + 8);
+  boardwalk.receiveShadow = true;
   group.add(boardwalk);
 
   const ocean = new THREE.Mesh(
@@ -620,6 +624,23 @@ export function createCity(random, reservedPlaces = []) {
       });
     }
   }
+  // Coral Strand and the spawn avenue: paired sidewalk rows, broken at each cross street.
+  // Block-local jitter keeps the rhythm planted while retaining a seeded, natural variation.
+  const boulevardAvenues = [288, 216];
+  const boulevardOffset = CITY.road / 2 + 2.5;
+  for (const avenueZ of boulevardAvenues) {
+    for (let block = 0; block < CITY.grid; block += 1) {
+      const blockX = CITY.nodeMin + block * blockPitch;
+      for (const side of [-1, 1]) {
+        for (const station of [17, 36, 55]) {
+          const x = blockX + station + random.range(-0.9, 0.9);
+          const z = avenueZ + side * boulevardOffset;
+          const scale = random.range(1.5, 1.85);
+          if (pointIsClear(colliders, x, z, 0.75)) palmSpots.push({ x, z, scale });
+        }
+      }
+    }
+  }
   const frondsPerPalm = 7;
   const trunkMesh = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.2, 0.36, 1, 6).translate(0, 0.5, 0),
@@ -631,6 +652,10 @@ export function createCity(random, reservedPlaces = []) {
     new THREE.MeshLambertMaterial({ color: PALETTE.leaf, flatShading: true }),
     palmSpots.length * frondsPerPalm,
   );
+  trunkMesh.name = 'palms:trunks';
+  frondMesh.name = 'palms:fronds';
+  trunkMesh.castShadow = true;
+  frondMesh.castShadow = true;
   const palmMatrix = new THREE.Matrix4();
   const palmQuat = new THREE.Quaternion();
   const palmScale = new THREE.Vector3();
@@ -678,6 +703,15 @@ export function createCity(random, reservedPlaces = []) {
       lampSpots.push({ x: x - 22, z: z + 11 });
     }
   }
+  for (const avenueZ of boulevardAvenues) {
+    for (let block = 0; block < CITY.grid; block += 1) {
+      for (const side of [-1, 1]) {
+        const x = CITY.nodeMin + block * blockPitch + (side < 0 ? 26 : 46) + random.range(-0.6, 0.6);
+        const z = avenueZ + side * boulevardOffset;
+        if (!isReserved(x, z) && pointIsClear(colliders, x, z, 0.65)) lampSpots.push({ x, z, glow: true });
+      }
+    }
+  }
   const poleMesh = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.11, 0.16, 6.4, 5).translate(0, 3.2, 0),
     new THREE.MeshLambertMaterial({ color: PALETTE.metal }),
@@ -685,15 +719,28 @@ export function createCity(random, reservedPlaces = []) {
   );
   const headMesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1.35, 0.3, 0.62),
-    new THREE.MeshLambertMaterial({ color: PALETTE.lamp, emissive: 0xffc46b, emissiveIntensity: 0.7 }),
+    new THREE.MeshLambertMaterial({ color: PALETTE.lamp, emissive: 0xffc46b, emissiveIntensity: 1.2, toneMapped: false }),
     lampSpots.length,
   );
+  poleMesh.name = 'streetlights:poles';
+  headMesh.name = 'streetlights:heads';
+  const lampGlowMaterial = new THREE.SpriteMaterial({
+    map: glowTexture, color: PALETTE.lamp, opacity: 0.65, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  });
   for (let lamp = 0; lamp < lampSpots.length; lamp += 1) {
     const spot = lampSpots[lamp];
     palmMatrix.makeTranslation(spot.x, 0.25, spot.z);
     poleMesh.setMatrixAt(lamp, palmMatrix);
     palmMatrix.makeTranslation(spot.x + 0.5, 6.5, spot.z);
     headMesh.setMatrixAt(lamp, palmMatrix);
+    if (spot.glow && glowTexture) {
+      const halo = new THREE.Sprite(lampGlowMaterial);
+      halo.name = 'streetlights:halo';
+      halo.position.set(spot.x + 0.5, 6.5, spot.z);
+      halo.scale.set(3.1, 3.1, 1);
+      group.add(halo);
+    }
     colliders.push({ minX: spot.x - 0.2, maxX: spot.x + 0.2, minZ: spot.z - 0.2, maxZ: spot.z + 0.2, height: 6.65 });
   }
   poleMesh.instanceMatrix.needsUpdate = true;
