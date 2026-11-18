@@ -53,7 +53,15 @@
   .cash-label { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
   #cash-value { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: var(--gold); font-variant-numeric: tabular-nums; }
   #speed-box { display: none; align-items: center; gap: 8px; }
+  #vehicle-name { font-size: 12px; color: var(--muted); }
+  #vehicle-name:empty { display: none; }
   #speed-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #jetpack-box:not([hidden]) { display: flex; align-items: center; gap: 8px; }
+  #jetpack-box > span:first-child { font-size: 10px; letter-spacing: 0.12em; color: var(--muted); }
+  #jetpack-box.active { border-color: var(--teal); }
+  #jetpack-bar { width: clamp(36px, 8vw, 72px); height: 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+  #jetpack-fill { width: 100%; height: 100%; border-radius: inherit; background: var(--teal); transition: width 100ms linear, background 160ms ease; }
+  #jetpack-text { min-width: 32px; text-align: right; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
   #rep-panel { width: 218px; }
   #rep-rank { color: var(--gold); font-size: 14px; font-weight: 750; }
@@ -195,12 +203,17 @@
         <span id="cash-value">$250</span>
       </div>
       <div class="hud-panel" id="speed-box">
+        <span id="vehicle-name"></span>
         <span id="speed-value">0 KM/H</span>
       </div>
       <div class="hud-panel" id="rep-panel" aria-label="Street reputation">
         <span id="rep-rank">Small Fry</span><span id="rep-points">0 REP</span>
         <div id="rep-track"><div id="rep-progress"></div></div>
         <div id="rep-next">150 TO CORNER RUNNER</div>
+      </div>
+      <div class="hud-panel" id="jetpack-box" hidden>
+        <span>JETPACK</span><div id="jetpack-bar"><div id="jetpack-fill"></div></div><span id="jetpack-text"></span>
+      </div>
       </div>
     </div>
   </div>
@@ -239,6 +252,8 @@
       <div><b>Click</b> pistol</div>
       <div><b>M</b> jobs menu</div>
       <div><b>P / Esc</b> pause</div>
+      <div><b>J</b> toggle jetpack</div>
+      <div><b>Space / C</b> thrust / descend</div>
     </div>
   </div>
 </div>

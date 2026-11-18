@@ -3,7 +3,7 @@
 // driving model is deliberately simple: accelerate, brake/reverse, steer with speed-scaled grip,
 // handbrake for a loose tail. Collision with buildings uses the city AABBs and the car's radius.
 import * as THREE from '../vendor/three.module.min.js';
-import { PALETTE, STARTER_CAR, VEHICLE } from './config.js';
+import { PALETTE, STARTER_CAR, VEHICLE, VEHICLE_TYPES } from './config.js';
 import { clampToWorld, resolveCollisions } from './world.js';
 
 const wheelGeometry = new THREE.CylinderGeometry(0.42, 0.42, 0.28, 10);
@@ -12,8 +12,188 @@ const wheelMaterial = new THREE.MeshLambertMaterial({ color: 0x1d1e21 });
 const glassMaterial = new THREE.MeshLambertMaterial({ color: 0x24323c });
 const lightMaterial = new THREE.MeshLambertMaterial({ color: 0xfff1c0, emissive: 0xffcf7a, emissiveIntensity: 0.6 });
 const brakeMaterial = new THREE.MeshLambertMaterial({ color: 0xa32f2a, emissive: 0x8c1f1c, emissiveIntensity: 0.5 });
+const trimMaterial = new THREE.MeshLambertMaterial({ color: 0x98a5a7 });
+const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
+const tubeGeometry = new THREE.CylinderGeometry(1, 1, 1, 8);
+const up = new THREE.Vector3(0, 1, 0);
+
+const EXPANSION_SPAWNS = [
+  {
+    id: 'bike-alley', landmark: 'downtown', clearance: 1.35,
+    spec: { body: 0x37a997, cabin: 0x273237, name: 'Alley Scooter', variant: 'bike', tuning: VEHICLE_TYPES.bike },
+    spots: [[0, -13, 0], [-13, 0, Math.PI / 2], [-28.8, 1, 0], [28.8, 1, 0], [1, -28.8, Math.PI / 2], [1, 28.8, Math.PI / 2]],
+  },
+  {
+    id: 'truck-harbor', landmark: 'harbor', clearance: 3.55,
+    spec: { body: 0xd08139, cabin: 0x354751, name: 'Harbor Hauler', variant: 'truck', tuning: VEHICLE_TYPES.truck },
+    spots: [[2, -13, 0], [3, -16, 0], [16, -13, 0], [-10, -13, 0]],
+  },
+  {
+    id: 'buggy-beach', landmark: 'beach', clearance: 2.45,
+    spec: { body: 0xe3b33b, cabin: 0x333b42, name: 'Dune Buggy', variant: 'buggy', tuning: VEHICLE_TYPES.buggy },
+    spots: [[8, 8, 0], [12, 12, 0], [-10, 8, 0]],
+  },
+  {
+    id: 'sport-showroom', landmark: 'coupe', clearance: 2.55,
+    spec: { body: 0xea5845, cabin: 0x262731, name: 'Solara Sport', variant: 'sport', tuning: VEHICLE_TYPES.sport },
+    spots: [[1.6, 13, Math.PI], [-9.6, -12, Math.PI], [1.6, -15, 0], [-9.6, 12, 0]],
+  },
+  {
+    id: 'van-garage', landmark: 'garage', clearance: 2.7,
+    spec: { body: 0x70a8c4, cabin: 0x2e3c48, name: 'Marina Mover', variant: 'cargovan', tuning: VEHICLE_TYPES.van },
+    spots: [[5.8, 15, 0], [-5.8, 15, 0], [5.8, -15, Math.PI], [-5.8, -15, Math.PI]],
+  },
+];
+
+function box(parent, material, width, height, depth, x, y, z) {
+  const mesh = new THREE.Mesh(boxGeometry, material);
+  mesh.scale.set(width, height, depth);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function tube(parent, material, radius, start, end) {
+  const from = new THREE.Vector3(...start);
+  const axis = new THREE.Vector3(...end).sub(from);
+  const mesh = new THREE.Mesh(tubeGeometry, material);
+  mesh.position.copy(from).addScaledVector(axis, 0.5);
+  mesh.scale.set(radius, axis.length(), radius);
+  mesh.quaternion.setFromUnitVectors(up, axis.normalize());
+  mesh.castShadow = true;
+  parent.add(mesh);
+}
+
+function buildExpansionMesh(spec) {
+  const group = new THREE.Group();
+  const body = new THREE.MeshLambertMaterial({ color: spec.body });
+  const trim = new THREE.MeshLambertMaterial({ color: spec.cabin });
+  const wheels = [];
+  function wheel(x, z, radius, width, steering = null) {
+    const mesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
+    mesh.scale.set(width / 0.28, radius / 0.42, radius / 0.42);
+    if (z > 0) {
+      steering ??= new THREE.Group();
+      steering.position.set(x, radius, z);
+      group.add(steering);
+      steering.add(mesh);
+    } else {
+      mesh.position.set(x, radius, z);
+      group.add(mesh);
+    }
+    mesh.castShadow = true;
+    for (const side of [-1, 1]) {
+      const hub = new THREE.Mesh(tubeGeometry, trimMaterial);
+      hub.rotation.z = Math.PI / 2;
+      hub.position.x = side * 0.14;
+      hub.scale.set(0.24, 0.045, 0.24);
+      mesh.add(hub);
+    }
+    wheels.push({ mesh, front: z > 0, steering });
+  }
+
+  function axle(z, x, radius, width) {
+    for (const side of [-1, 1]) wheel(side * x, z, radius, width);
+  }
+
+  function lamps(x, frontY, frontZ, rearY, rearZ) {
+    for (const side of [-1, 1]) {
+      box(group, lightMaterial, 0.35, 0.15, 0.08, side * x, frontY, frontZ);
+      box(group, brakeMaterial, 0.3, 0.16, 0.08, side * x, rearY, rearZ);
+    }
+  }
+
+  switch (spec.variant) {
+    case 'bike': {
+      const fork = new THREE.Group();
+      wheel(0, 0.83, 0.35, 0.17, fork);
+      wheel(0, -0.83, 0.35, 0.19);
+      box(group, body, 0.51, 0.2, 1.3, 0, 0.44, -0.14);
+      box(group, body, 0.5, 0.37, 0.68, 0, 0.68, -0.53);
+      box(group, trim, 0.4, 0.14, 0.64, 0, 0.92, -0.49);
+      box(group, brakeMaterial, 0.26, 0.1, 0.08, 0, 0.77, -0.88);
+      for (const x of [-0.14, 0.14]) tube(fork, trimMaterial, 0.045, [x, 0, 0], [x, 0.88, -0.12]);
+      box(fork, body, 0.49, 0.58, 0.22, 0, 0.48, -0.04).rotation.x = -0.14;
+      box(fork, lightMaterial, 0.31, 0.18, 0.11, 0, 0.71, 0.12);
+      tube(fork, trim, 0.044, [-0.38, 0.88, -0.12], [0.38, 0.88, -0.12]);
+      break;
+    }
+    case 'truck':
+      box(group, trim, 2.44, 0.35, 6.5, 0, 0.55, 0);
+      box(group, body, 2.45, 1.76, 2.17, 0, 1.4, 2.07);
+      box(group, glassMaterial, 2.05, 0.59, 0.08, 0, 1.88, 3.16);
+      box(group, trim, 1.22, 0.3, 0.1, 0, 1, 3.18);
+      box(group, trim, 2.73, 2.35, 4.03, 0, 1.96, -1.12);
+      box(group, trimMaterial, 2.65, 0.14, 3.96, 0, 3.15, -1.12);
+      for (const side of [-1, 1]) {
+        box(group, glassMaterial, 0.08, 0.52, 1.27, side * 1.23, 1.86, 2.18);
+        box(group, trim, 0.17, 0.23, 0.35, side * 1.31, 1.74, 2.87);
+        for (const z of [-2.74, -1.99, -1.24, -0.49, 0.26]) {
+          box(group, trimMaterial, 0.07, 2.22, 0.105, side * 1.37, 1.96, z);
+        }
+        box(group, trimMaterial, 0.08, 1.82, 0.06, side * 0.49, 1.96, -3.16);
+      }
+      lamps(0.94, 0.99, 3.18, 0.69, -3.24);
+      axle(2.08, 1.11, 0.48, 0.38);
+      axle(-1.28, 1.11, 0.48, 0.38);
+      axle(-2.27, 1.11, 0.48, 0.38);
+      break;
+    case 'buggy':
+      box(group, trim, 1.83, 0.25, 3.45, 0, 0.68, 0);
+      box(group, body, 1.55, 0.35, 1.07, 0, 0.9, 1);
+      box(group, body, 1.75, 0.24, 0.83, 0, 0.92, -1.24);
+      for (const side of [-1, 1]) {
+        const x = side * 0.81;
+        box(group, trim, 0.49, 0.16, 0.53, side * 0.38, 0.9, -0.12);
+        box(group, trim, 0.49, 0.65, 0.16, side * 0.38, 1.16, -0.46).rotation.x = 0.18;
+        tube(group, body, 0.062, [x, 0.8, 1.25], [x, 1.91, 0.35]);
+        tube(group, body, 0.062, [x, 1.91, 0.35], [x, 1.91, -0.63]);
+        tube(group, body, 0.062, [x, 1.91, -0.63], [x, 0.8, -1.55]);
+        tube(group, trimMaterial, 0.045, [x, 0.95, 0.89], [x, 0.95, -1.23]);
+      }
+      for (const z of [0.35, -0.63]) tube(group, body, 0.062, [-0.81, 1.91, z], [0.81, 1.91, z]);
+      lamps(0.64, 0.96, 1.55, 0.92, -1.68);
+      axle(1.24, 1.1, 0.55, 0.43);
+      axle(-1.21, 1.1, 0.55, 0.43);
+      break;
+    case 'sport':
+      box(group, trim, 2.29, 0.28, 4.38, 0, 0.36, 0);
+      box(group, body, 2.37, 0.49, 4.45, 0, 0.63, 0);
+      box(group, body, 2.2, 0.16, 1.18, 0, 0.79, 1.4).rotation.x = 0.085;
+      box(group, glassMaterial, 1.7, 0.36, 1.74, 0, 0.99, -0.26);
+      box(group, glassMaterial, 1.68, 0.08, 0.6, 0, 1.01, 0.75).rotation.x = 0.46;
+      box(group, body, 1.61, 0.11, 1.5, 0, 1.22, -0.38);
+      box(group, trim, 1.18, 0.1, 0.07, 0, 0.51, 2.24);
+      box(group, trim, 2.16, 0.12, 0.38, 0, 1.13, -1.98);
+      for (const x of [-0.68, 0.68]) box(group, trim, 0.12, 0.38, 0.16, x, 0.95, -1.98);
+      lamps(0.83, 0.7, 2.24, 0.73, -2.24);
+      axle(1.39, 1.08, 0.4, 0.33);
+      axle(-1.41, 1.08, 0.42, 0.39);
+      break;
+    case 'cargovan':
+      box(group, trim, 2.16, 0.31, 4.95, 0, 0.47, 0);
+      box(group, body, 2.29, 1.89, 3.26, 0, 1.46, -0.82);
+      box(group, body, 2.18, 1.47, 1.6, 0, 1.22, 1.56);
+      box(group, glassMaterial, 1.87, 0.64, 0.09, 0, 1.56, 2.37).rotation.x = 0.14;
+      box(group, trim, 2.26, 0.17, 0.15, 0, 0.61, 2.42);
+      box(group, trim, 0.035, 1.52, 0.05, 0, 1.45, -2.47);
+      for (const side of [-1, 1]) {
+        box(group, glassMaterial, 0.07, 0.53, 0.93, side * 1.11, 1.58, 1.66);
+        box(group, trim, 0.05, 0.11, 3.09, side * 1.15, 0.84, -0.82);
+        box(group, trim, 0.065, 0.07, 0.24, side * 1.15, 1.25, 0.41);
+        box(group, trim, 0.19, 0.06, 0.055, side * 0.17, 1.36, -2.47);
+      }
+      lamps(0.83, 0.85, 2.37, 1.12, -2.48);
+      axle(1.52, 1.02, 0.43, 0.28);
+      axle(-1.49, 1.02, 0.43, 0.28);
+      break;
+  }
+  return { group, wheels };
+}
 
 function buildCarMesh(spec) {
+  if (spec.tuning) return buildExpansionMesh(spec);
   const group = new THREE.Group();
   const bodyMaterial = new THREE.MeshLambertMaterial({ color: spec.body });
   const body = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.62, 4.4), bodyMaterial);
@@ -124,6 +304,7 @@ export function createVehicles(city, scene) {
       group,
       wheels: built.wheels,
       spec,
+      tuning: spec.tuning ?? VEHICLE,
       state: {
         x: position.x,
         z: position.z,
@@ -190,8 +371,24 @@ export function createVehicles(city, scene) {
     }
   }
 
-  function spawnPoliceCar(x, z, heading) {
-    return addCar(
+  /** Expansion rides: one of each new type at its landmark, first clear spot wins. */
+  function spawnExpansionVehicles() {
+    const landmarks = city?.landmarks ?? {};
+    for (const entry of EXPANSION_SPAWNS) {
+      const landmark = landmarks[entry.landmark];
+      if (!landmark) continue;
+      for (const [dx, dz, heading] of entry.spots) {
+        const x = landmark.x + dx;
+        const z = landmark.z + dz;
+        if (resolveCollisions(cityColliders, x, z, entry.clearance).hit) continue;
+        if (cars.some((car) => Math.hypot(car.state.x - x, car.state.z - z) < entry.clearance + 2)) continue;
+        addCar(entry.spec, { x, z }, heading, { id: entry.id, kind: 'parked' });
+        break;
+      }
+    }
+  }
+
+  function spawnPoliceCar(x, z, heading) {    return addCar(
       { body: PALETTE.police.body, cabin: PALETTE.police.cabin, stripe: PALETTE.police.stripe, light: PALETTE.police.light, lightAlt: PALETTE.police.lightAlt, police: true, name: 'SMPD cruiser', variant: 'sedan' },
       { x, z },
       heading,
@@ -237,6 +434,7 @@ export function createVehicles(city, scene) {
 
   function resolveCarCollisions(car) {
     const state = car.state ?? car;
+    const radius = car.tuning?.radius ?? VEHICLE.radius;
     for (const group of collisionGroups) {
       for (const other of group) {
         if (other === car) continue;
@@ -244,13 +442,14 @@ export function createVehicles(city, scene) {
         const dx = state.x - otherState.x;
         const dz = state.z - otherState.z;
         const distance = Math.hypot(dx, dz);
-        const separation = VEHICLE.radius * 2;
+        const otherRadius = other.tuning?.radius ?? VEHICLE.radius;
+        const separation = radius + otherRadius;
         if (distance >= separation) continue;
         const nx = distance > 0.001 ? dx / distance : Math.sin(state.heading);
         const nz = distance > 0.001 ? dz / distance : Math.cos(state.heading);
         const push = (separation - distance + 0.01) * 0.5;
-        const position = clampToWorld(resolveCollisions(cityColliders, state.x + nx * push, state.z + nz * push, VEHICLE.radius));
-        const otherPosition = clampToWorld(resolveCollisions(cityColliders, otherState.x - nx * push, otherState.z - nz * push, VEHICLE.radius));
+        const position = clampToWorld(resolveCollisions(cityColliders, state.x + nx * push, state.z + nz * push, radius));
+        const otherPosition = clampToWorld(resolveCollisions(cityColliders, otherState.x - nx * push, otherState.z - nz * push, otherRadius));
         state.x = position.x;
         state.z = position.z;
         otherState.x = otherPosition.x;
@@ -274,29 +473,31 @@ export function createVehicles(city, scene) {
 
   function stepCar(car, dt, controls, colliders = cityColliders) {
     const state = car.state;
+    // Expansion rides carry their own tuning; older cars and police fall back to VEHICLE.
+    const T = car.tuning ?? VEHICLE;
     if (state.wrecked) {
       state.speed *= Math.max(0, 1 - dt * 2.2);
     } else {
       const accelerating = Boolean(controls.accelerate);
       const braking = Boolean(controls.brake);
       if (accelerating && !braking) {
-        if (state.speed < 0) state.speed = Math.min(0, state.speed + VEHICLE.brake * dt);
-        else state.speed += VEHICLE.accel * dt;
+        if (state.speed < 0) state.speed = Math.min(0, state.speed + T.brake * dt);
+        else state.speed += T.accel * dt;
       } else if (braking && !accelerating) {
-        if (state.speed > 0) state.speed = Math.max(0, state.speed - VEHICLE.brake * dt);
-        else state.speed -= VEHICLE.reverseAccel * dt;
+        if (state.speed > 0) state.speed = Math.max(0, state.speed - T.brake * dt);
+        else state.speed -= T.reverseAccel * dt;
       } else if (!accelerating && !braking) {
-        const drag = state.speed < 0 ? VEHICLE.drag : VEHICLE.roll;
+        const drag = state.speed < 0 ? T.drag : T.roll;
         state.speed -= Math.sign(state.speed) * Math.min(Math.abs(state.speed), drag * dt);
       }
-      if (controls.handbrake) state.speed *= Math.max(0, 1 - VEHICLE.handbrakeDrag * dt);
-      state.speed = Math.max(-VEHICLE.maxReverse, Math.min(VEHICLE.maxSpeed, state.speed));
+      if (controls.handbrake) state.speed *= Math.max(0, 1 - T.handbrakeDrag * dt);
+      state.speed = Math.max(-T.maxReverse, Math.min(T.maxSpeed, state.speed));
     }
 
-    const speedRatio = Math.min(1, Math.abs(state.speed) / VEHICLE.maxSpeed);
+    const speedRatio = Math.min(1, Math.abs(state.speed) / T.maxSpeed);
     const steerInput = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
     const grip = controls.handbrake ? 0.55 : 1;
-    const turnRate = (controls.handbrake ? VEHICLE.handbrakeSteer : VEHICLE.steer) * (0.35 + speedRatio * 0.85);
+    const turnRate = (controls.handbrake ? T.handbrakeSteer : T.steer) * (0.35 + speedRatio * 0.85);
     if (state.speed !== 0 || controls.handbrake) {
       const direction = state.speed < 0 ? -1 : 1;
       state.heading += steerInput * turnRate * dt * direction * grip;
@@ -307,10 +508,10 @@ export function createVehicles(city, scene) {
     const cos = Math.cos(state.heading);
     let nextX = state.x + sin * state.speed * dt;
     let nextZ = state.z + cos * state.speed * dt;
-    const resolved = resolveCollisions(colliders, nextX, nextZ, VEHICLE.radius);
+    const resolved = resolveCollisions(colliders, nextX, nextZ, T.radius);
     if (resolved.hit) {
       const impact = Math.abs(state.speed);
-      if (impact > VEHICLE.crashSpeed) damage(car, impact * 0.9);
+      if (impact > T.crashSpeed) damage(car, impact * 0.9);
       state.speed *= 0.25;
       nextX = resolved.x;
       nextZ = resolved.z;
@@ -362,6 +563,7 @@ export function createVehicles(city, scene) {
     addCar,
     spawnStarter,
     spawnParked,
+    spawnExpansionVehicles,
     spawnPoliceCar,
     damage,
     repair,

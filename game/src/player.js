@@ -22,6 +22,7 @@ export function createPlayer(city) {
   const root = new THREE.Group();
   root.name = 'Jax';
   const body = new THREE.Group();
+  body.name = 'Jax body';
   root.add(body);
 
   const hips = new THREE.Group();
@@ -82,13 +83,16 @@ export function createPlayer(city) {
     const thigh = limb(0.19, 0.44, 0.22, SKIN.jeans);
     thigh.position.y = -0.2;
     pivot.add(thigh);
+    const knee = new THREE.Group();
+    knee.position.y = -0.4;
+    pivot.add(knee);
     const shin = limb(0.17, 0.42, 0.19, SKIN.jeans);
-    shin.position.y = -0.61;
-    pivot.add(shin);
+    shin.position.y = -0.21;
+    knee.add(shin);
     const shoe = limb(0.19, 0.12, 0.3, 0x26221f);
-    shoe.position.set(0, -0.87, 0.05);
-    pivot.add(shoe);
-    legs.push(pivot);
+    shoe.position.set(0, -0.47, 0.05);
+    knee.add(shoe);
+    legs.push({ pivot, knee });
   }
 
   const state = {
@@ -98,6 +102,7 @@ export function createPlayer(city) {
     heading: SPAWN.heading,
     vy: 0,
     grounded: true,
+    jetpackFlying: false,
     health: PLAYER.health,
     maxHealth: PLAYER.health,
     speed: 0,
@@ -124,6 +129,7 @@ export function createPlayer(city) {
     state.heading = SPAWN.heading;
     state.vy = 0;
     state.grounded = true;
+    state.jetpackFlying = false;
     state.health = PLAYER.health;
     state.speed = 0;
     state.moving = false;
@@ -154,15 +160,26 @@ export function createPlayer(city) {
     const moving = state.moving && state.grounded;
     if (moving) state.walkPhase += dt * (state.running ? 13 : 8);
     const swing = moving ? Math.sin(state.walkPhase) * (state.running ? 0.95 : 0.6) : 0;
-    legs[0].rotation.x = swing;
-    legs[1].rotation.x = -swing;
+    legs[0].pivot.rotation.x = swing;
+    legs[1].pivot.rotation.x = -swing;
+    legs[0].knee.rotation.x = 0;
+    legs[1].knee.rotation.x = 0;
     arms[0].rotation.x = -swing * 0.8;
     arms[1].rotation.x = swing * 0.8;
     if (!state.grounded) {
-      legs[0].rotation.x = -0.4;
-      legs[1].rotation.x = 0.25;
-      arms[0].rotation.x = -0.9;
-      arms[1].rotation.x = -0.9;
+      if (state.jetpackFlying) {
+        legs[0].pivot.rotation.x = -0.55;
+        legs[1].pivot.rotation.x = -0.38;
+        legs[0].knee.rotation.x = 1.2;
+        legs[1].knee.rotation.x = 1.03;
+        arms[0].rotation.x = -0.3;
+        arms[1].rotation.x = -0.3;
+      } else {
+        legs[0].pivot.rotation.x = -0.4;
+        legs[1].pivot.rotation.x = 0.25;
+        arms[0].rotation.x = -0.9;
+        arms[1].rotation.x = -0.9;
+      }
     }
     if (state.punchTimer > 0) {
       const progress = 1 - state.punchTimer / PLAYER.punchCooldown;
@@ -208,16 +225,20 @@ export function createPlayer(city) {
     const actualSpeed = moving ? (state.grounded ? maxSpeed : maxSpeed * 0.82) : 0;
     state.speed = actualSpeed;
 
-    if (intent.jump && state.grounded) {
-      state.vy = PLAYER.jumpSpeed;
-      state.grounded = false;
-    }
-    state.vy -= PLAYER.gravity * dt;
-    state.y += state.vy * dt;
-    if (state.y <= 0) {
-      state.y = 0;
-      state.vy = 0;
-      state.grounded = true;
+    // The jetpack integrates height after this step. Horizontal movement still uses
+    // the same intent and world colliders as walking.
+    if (!intent.jetpack) {
+      if (intent.jump && state.grounded) {
+        state.vy = PLAYER.jumpSpeed;
+        state.grounded = false;
+      }
+      state.vy -= PLAYER.gravity * dt;
+      state.y += state.vy * dt;
+      if (state.y <= 0) {
+        state.y = 0;
+        state.vy = 0;
+        state.grounded = true;
+      }
     }
 
     let nextX = state.x + moveX * actualSpeed * dt;
@@ -226,8 +247,10 @@ export function createPlayer(city) {
     const bounded = clampToWorld({ x: resolved.x, z: resolved.z });
     state.x = bounded.x;
     state.z = bounded.z;
-    syncMesh();
-    animate(dt);
+    if (!intent.jetpack) {
+      syncMesh();
+      animate(dt);
+    }
     return { moved: moving, jumped: state.vy > 0 };
   }
 
@@ -251,6 +274,7 @@ export function createPlayer(city) {
     state.heading = car.state.heading;
     state.speed = car.state.speed;
     state.moving = false;
+    state.jetpackFlying = false;
     root.visible = false;
     car.state.occupied = true;
   }
@@ -276,6 +300,7 @@ export function createPlayer(city) {
 
   return {
     group: root,
+    body,
     state,
     orbit,
     reset,

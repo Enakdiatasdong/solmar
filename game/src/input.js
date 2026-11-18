@@ -10,6 +10,7 @@ export const ACTION_FIRE = 16;
 export const ACTION_MENU = 32;
 export const ACTION_MUTE = 64;
 export const ACTION_RESTART = 128;
+export const ACTION_JETPACK = 256;
 
 const KEYMAP = {
   KeyW: 'up',
@@ -27,7 +28,7 @@ export function createInput(target) {
     document.body?.classList.add('touch');
     document.getElementById('touch')?.setAttribute('aria-hidden', 'false');
   }
-  const held = { up: false, down: false, left: false, right: false, jump: false };
+  const held = { up: false, down: false, left: false, right: false, jump: false, descend: false };
   const touchHeld = { up: false, down: false, left: false, right: false, run: false };
   const directionKeys = new Set();
   const runKeys = new Set();
@@ -74,6 +75,12 @@ export function createInput(target) {
       case 'KeyE':
         queue(ACTION_ENTER);
         break;
+      case 'KeyJ':
+        queue(ACTION_JETPACK);
+        break;
+      case 'KeyC':
+        held.descend = true;
+        break;
       case 'KeyF':
         queue(ACTION_PUNCH);
         break;
@@ -109,6 +116,7 @@ export function createInput(target) {
     }
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') runKeys.delete(event.code);
     if (event.code === 'Space') held.jump = false;
+    if (event.code === 'KeyC') held.descend = false;
   });
 
   function clearHeld() {
@@ -117,6 +125,7 @@ export function createInput(target) {
     held.left = false;
     held.right = false;
     held.jump = false;
+    held.descend = false;
     directionKeys.clear();
     runKeys.clear();
     touchHeld.up = false;
@@ -208,6 +217,7 @@ export function createInput(target) {
         right: held.right || touchHeld.right,
         run: runKeys.size > 0 || touchHeld.run,
         jump: held.jump,
+        descend: held.descend,
         brake: held.down,
       };
     },

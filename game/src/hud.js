@@ -23,6 +23,10 @@ export function createHud() {
     stars: element('wanted-stars'),
     speed: element('speed-value'),
     speedBox: element('speed-box'),
+    vehicleName: element('vehicle-name'),
+    jetpackBox: element('jetpack-box'),
+    jetpackFill: element('jetpack-fill'),
+    jetpackText: element('jetpack-text'),
     objective: element('objective-text'),
     objectiveBox: element('objective-box'),
     toasts: element('toasts'),
@@ -46,6 +50,8 @@ export function createHud() {
     stars: null,
     speed: null,
     inCar: null,
+    jetpackPercent: null,
+    jetpackColor: null,
     objective: null,
     dialogue: null,
     regions: null,
@@ -108,6 +114,31 @@ export function createHud() {
     cache.inCar = driving;
     if (hud.speedBox) hud.speedBox.style.display = driving ? 'flex' : 'none';
     setText(hud.speed, driving ? value + ' KM/H' : '');
+  }
+
+  function setVehicleName(name) {
+    setText(hud.vehicleName, name || '');
+  }
+
+  function setJetpack(fuel, maxFuel, owned, active) {
+    if (!hud.jetpackBox) return;
+    hud.jetpackBox.hidden = !owned;
+    hud.jetpackBox.classList.toggle('active', Boolean(active));
+    if (!owned) return;
+
+    const ratio = Number.isFinite(fuel) && Number.isFinite(maxFuel) && maxFuel > 0 ? fuel / maxFuel : 0;
+    const percent = Math.max(0, Math.min(100, ratio * 100));
+    const rounded = Math.round(percent);
+    const color = percent < 25 ? PALETTE.css.coral : percent <= 50 ? PALETTE.css.gold : PALETTE.css.teal;
+    if (rounded !== cache.jetpackPercent) {
+      cache.jetpackPercent = rounded;
+      setText(hud.jetpackText, rounded + '%');
+      if (hud.jetpackFill) hud.jetpackFill.style.width = rounded + '%';
+    }
+    if (color !== cache.jetpackColor) {
+      cache.jetpackColor = color;
+      if (hud.jetpackFill) hud.jetpackFill.style.background = color;
+    }
   }
 
   function setMission(mission, objective) {
@@ -354,6 +385,8 @@ export function createHud() {
     setCash: setMoney,
     setWanted,
     setSpeed,
+    setVehicleName,
+    setJetpack,
     setMission,
     setObjective: setMission,
     toast,
