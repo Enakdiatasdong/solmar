@@ -1,0 +1,360 @@
+// Wanted levels 0-5 drive a pursuit with SMPD cruisers and officers on foot.
+import * as THREE from '../vendor/three.module.js';
+import { CITY, POLICE, VEHICLE } from './config.js';
+import { resolveCollisions } from './world.js';
+
+function copMesh() {
+  const group = new THREE.Group();
+  const uniform = new THREE.MeshLambertMaterial({ color: 0x24344d });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.66, 0.32), uniform);
+  torso.position.y = 1.2;
+  group.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.32, 0.28), new THREE.MeshLambertMaterial({ color: 0xc58d68 }));
+  head.position.y = 1.7;
+  group.add(head);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.32), new THREE.MeshLambertMaterial({ color: 0x172236 }));
+  cap.position.y = 1.89;
+  group.add(cap);
+  const legs = [];
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.76, 0.19), new THREE.MeshLambertMaterial({ color: 0x1c2a3e }));
+    leg.position.set(side * 0.12, 0.42, 0);
+    group.add(leg);
+    legs.push(leg);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.55, 0.14), uniform);
+    arm.position.set(side * 0.32, 1.22, 0);
+    group.add(arm);
+  }
+  return { group, legs };
+}
+
+export function createPolice(city, scene, vehicles) {
+  const roadNetwork = city.roadNetwork ?? city.graph;
+  const colliders = city.colliders ?? [];
+  const laneOffset = Math.min(4.4, CITY.road / 2 - VEHICLE.radius);
+  const state = {
+    wanted: 0,
+    heat: 0,
+    decayTimer: 0,
+    arrestTimer: 0,
+    busted: false,
+    stars: 0,
+    cops: [],
+    copCars: [],
+    lineOfSight: false,
+    lastCrime: '',
+    lastCrimeAt: -999,
+    pulse: 0,
+    forcedDecay: false,
+  };
+  let worldTime = 0;
+  let spawnIndex = 0;
+
+  function targetFor(player) {
+    return player.state.inCar?.state ?? player.state;
+  }
+
+  function setWanted(level) {
+    const value = Number.isFinite(level) ? Math.round(level) : 0;
+    state.wanted = Math.max(0, Math.min(POLICE.maxWanted, value));
+    state.stars = state.wanted;
+    state.heat = state.wanted;
+    state.decayTimer = 0;
+    if (state.wanted === 0) state.arrestTimer = 0;
+  }
+
+  function addWanted(amount, reason) {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const previous = state.wanted;
+    setWanted(Math.min(POLICE.maxWanted, state.wanted + amount));
+    state.lastCrime = reason ?? '';
+    state.lastCrimeAt = worldTime;
+    if (state.wanted > previous) state.pulse = 1;
+  }
+
+  function removeCopCar(car) {
+    scene.remove(car.group);
+    const index = vehicles.cars.indexOf(car);
+    if (index >= 0) vehicles.cars.splice(index, 1);
+  }
+
+  function removeFootCop(cop) {
+    scene.remove(cop.group);
+  }
+
+  function clear() {
+    setWanted(0);
+    state.busted = false;
+    state.arrestTimer = 0;
+    state.forcedDecay = false;
+    state.lineOfSight = false;
+    for (const car of state.copCars) removeCopCar(car);
+    state.copCars.length = 0;
+    for (const cop of state.cops) removeFootCop(cop);
+    state.cops.length = 0;
+  }
+
+  function spawnCopCar(player) {
+    const target = targetFor(player);
+    const angle = (spawnIndex * 2.399963229728653 + state.wanted * 0.61803398875) % (Math.PI * 2);
+    spawnIndex += 1;
+    const distance = POLICE.sight + 40;
+    const edge = roadNetwork?.nearestEdge(
+      target.x + Math.cos(angle) * distance,
+      target.z + Math.sin(angle) * distance,
+    );
+    if (!edge) return false;
+    const x = edge.x;
+    const z = edge.z;
+    const heading = Math.atan2(target.x - x, target.z - z);
+    const car = vehicles.spawnPoliceCar(x, z, heading);
+    const listIndex = vehicles.cars.indexOf(car);
+    if (listIndex >= 0) vehicles.cars.splice(listIndex, 1);
+    car.ai = 'pursue';
+    car.state.speed = 6;
+    car.pursuit = {
+      node: roadNetwork.nearestNode(x, z),
+      next: null,
+      laneSide: spawnIndex % 2 === 0 ? 1 : -1,
+    };
+    state.copCars.push(car);
+    return true;
+  }
+
+  function spawnFootCop(player) {
+    const target = targetFor(player);
+    const angle = (spawnIndex * 2.399963229728653 + 1.1) % (Math.PI * 2);
+    const distance = 22 + (spawnIndex % 7) * 1.7;
+    spawnIndex += 1;
+    const around = {
+      x: target.x + Math.cos(angle) * distance,
+      z: target.z + Math.sin(angle) * distance,
+    };
+    const edge = roadNetwork?.nearestEdge(around.x, around.z);
+    if (!edge) return false;
+    const dx = edge.edge.dx;
+    const dz = edge.edge.dz;
+    const length = edge.edge.length || 1;
+    const side = spawnIndex % 2 === 0 ? 1 : -1;
+    const candidateX = edge.x + (dz / length) * side * (CITY.road / 2 + 3);
+    const candidateZ = edge.z - (dx / length) * side * (CITY.road / 2 + 3);
+    const position = resolveCollisions(colliders, candidateX, candidateZ, 0.4);
+    const built = copMesh();
+    built.group.position.set(position.x, 0.28, position.z);
+    scene.add(built.group);
+    state.cops.push({
+      group: built.group,
+      legs: built.legs,
+      x: position.x,
+      z: position.z,
+      heading: Math.atan2(target.x - position.x, target.z - position.z),
+      shootTimer: 0,
+      walk: 0,
+    });
+    return true;
+  }
+
+  function removeExcessCars(wantedCount) {
+    while (state.copCars.length > wantedCount) {
+      removeCopCar(state.copCars.pop());
+    }
+  }
+
+  function removeExcessCops(wantedCount) {
+    while (state.cops.length > wantedCount) {
+      removeFootCop(state.cops.pop());
+    }
+  }
+
+  function roadWaypoint(car, target) {
+    if (!roadNetwork) return target;
+    const edgePoint = roadNetwork.nearestEdge(target.x, target.z);
+    if (!edgePoint) return target;
+    const goal = roadNetwork.nearestNode(edgePoint.x, edgePoint.z);
+    const pursuit = car.pursuit;
+    if (!pursuit.node) pursuit.node = roadNetwork.nearestNode(car.state.x, car.state.z);
+
+    if (pursuit.next && Math.hypot(car.state.x - pursuit.next.other.x, car.state.z - pursuit.next.other.z) < 5) {
+      pursuit.node = pursuit.next.other;
+      pursuit.next = null;
+    }
+    const distanceToGoal = (node) => Math.hypot(node.x - goal.x, node.z - goal.z);
+    if (pursuit.next && distanceToGoal(pursuit.next.other) >= distanceToGoal(pursuit.node)) {
+      pursuit.next = null;
+    }
+    if (!pursuit.next && distanceToGoal(pursuit.node) > 0.5) {
+      let best = Infinity;
+      for (const neighbor of pursuit.node.neighbors) {
+        const score = distanceToGoal(neighbor.other);
+        if (score < best) {
+          best = score;
+          pursuit.next = neighbor;
+        }
+      }
+    }
+
+    if (pursuit.next) {
+      const from = pursuit.node;
+      const to = pursuit.next.other;
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const length = Math.hypot(dx, dz) || 1;
+      return {
+        x: to.x + (dz / length) * pursuit.laneSide * laneOffset,
+        z: to.z - (dx / length) * pursuit.laneSide * laneOffset,
+      };
+    }
+
+    const dx = edgePoint.edge.dx;
+    const dz = edgePoint.edge.dz;
+    const length = edgePoint.edge.length || 1;
+    const side = pursuit.laneSide;
+    return {
+      x: edgePoint.x + (dz / length) * side * laneOffset,
+      z: edgePoint.z - (dx / length) * side * laneOffset,
+    };
+  }
+
+  function updateCopCar(car, dt, player) {
+    if (car.state.wrecked) {
+      removeCopCar(car);
+      state.copCars.splice(state.copCars.indexOf(car), 1);
+      return;
+    }
+    const target = targetFor(player);
+    const distance = Math.hypot(car.state.x - target.x, car.state.z - target.z);
+    const waypoint = roadWaypoint(car, target);
+    const desiredHeading = Math.atan2(waypoint.x - car.state.x, waypoint.z - car.state.z);
+    let delta = desiredHeading - car.state.heading;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    const steer = delta > 0.04 ? 'left' : delta < -0.04 ? 'right' : null;
+    const targetSpeed = POLICE.copCarSpeed * (0.55 + 0.09 * state.wanted);
+    const nextSpeed = Math.min(targetSpeed, car.state.speed + POLICE.copCarAccel * dt);
+    const coast = Math.max(0.01, 1 - VEHICLE.roll * dt);
+    car.state.speed = Math.min(VEHICLE.maxSpeed, nextSpeed / coast);
+    vehicles.stepCar(car, dt, {
+      accelerate: false,
+      brake: false,
+      left: steer === 'left',
+      right: steer === 'right',
+      handbrake: false,
+    }, colliders);
+    if (distance < 3.6 && player.state.inCar) {
+      vehicles.damage(player.state.inCar, POLICE.copHit * dt * 9);
+      vehicles.damage(car, 10 * dt);
+    }
+  }
+
+  function updateCop(cop, dt, player, combat) {
+    const dx = player.state.x - cop.x;
+    const dz = player.state.z - cop.z;
+    const distance = Math.hypot(dx, dz);
+    const targetHeading = Math.atan2(dx, dz);
+    let delta = targetHeading - cop.heading;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    cop.heading += delta * Math.min(1, dt * 6);
+    if (distance > POLICE.arrestRange) {
+      const speed = distance > 12 ? POLICE.footCopSpeed * 1.35 : POLICE.footCopSpeed;
+      const nx = cop.x + Math.sin(cop.heading) * speed * dt;
+      const nz = cop.z + Math.cos(cop.heading) * speed * dt;
+      const resolved = resolveCollisions(colliders, nx, nz, 0.4);
+      cop.x = Math.max(-CITY.half - 4, Math.min(CITY.half + 4, resolved.x));
+      cop.z = Math.max(-CITY.half - 4, Math.min(CITY.beachEnd - 8, resolved.z));
+      cop.walk += dt * speed * 4;
+      cop.legs[0].rotation.x = Math.sin(cop.walk) * 0.6;
+      cop.legs[1].rotation.x = -cop.legs[0].rotation.x;
+    }
+    cop.group.position.set(cop.x, 0.28, cop.z);
+    cop.group.rotation.y = cop.heading;
+    cop.shootTimer -= dt;
+    if (cop.shootTimer <= 0 && distance < 30 && distance > 5 && state.wanted >= 3) {
+      cop.shootTimer = 2.2;
+      combat?.shootAtPlayer?.(cop, player);
+    }
+    return !player.state.inCar && distance <= POLICE.arrestRange;
+  }
+
+  function update(dt, player, combat) {
+    worldTime += dt;
+    state.pulse = Math.max(0, state.pulse - dt * 2);
+    if (state.wanted === 0) {
+      removeExcessCars(0);
+      removeExcessCops(0);
+      state.lineOfSight = false;
+      return;
+    }
+
+    const target = targetFor(player);
+    const outOfSight = state.copCars.every((car) => (
+      Math.hypot(car.state.x - target.x, car.state.z - target.z) > POLICE.sight * 0.9
+    ));
+    state.lineOfSight = !outOfSight;
+    const canDecay = state.wanted <= 2 || state.forcedDecay;
+    if (outOfSight && canDecay) {
+      state.decayTimer += dt;
+      if (state.decayTimer > POLICE.decayDelay) {
+        state.heat = Math.max(0, state.heat - dt / POLICE.decayEvery);
+        state.wanted = Math.ceil(state.heat);
+        state.stars = state.wanted;
+        if (state.wanted === 0) {
+          state.heat = 0;
+          state.decayTimer = 0;
+          state.forcedDecay = false;
+          return;
+        }
+      }
+    } else {
+      state.decayTimer = 0;
+    }
+
+    const wantedCount = Math.min(POLICE.maxWanted, state.wanted);
+    while (state.copCars.length < wantedCount) {
+      if (!spawnCopCar(player)) break;
+    }
+    removeExcessCars(wantedCount);
+    const copCount = player.state.inCar ? 0 : wantedCount;
+    while (state.cops.length < copCount) {
+      if (!spawnFootCop(player)) break;
+    }
+    removeExcessCops(copCount);
+
+    let nearbyOfficer = false;
+    for (let index = state.copCars.length - 1; index >= 0; index -= 1) {
+      const car = state.copCars[index];
+      if (Math.hypot(car.state.x - target.x, car.state.z - target.z) > POLICE.sight * 2.4 && state.wanted < 4) {
+        removeCopCar(car);
+        state.copCars.splice(index, 1);
+        continue;
+      }
+      updateCopCar(car, dt, player);
+    }
+    for (const cop of state.cops) {
+      if (updateCop(cop, dt, player, combat)) nearbyOfficer = true;
+    }
+
+    if (nearbyOfficer) state.arrestTimer += dt;
+    else if (state.arrestTimer > 0) state.arrestTimer = Math.max(0, state.arrestTimer - dt * 2);
+    if (state.arrestTimer >= POLICE.arrestTime && !player.state.inCar) state.busted = true;
+  }
+
+  function distanceToNearest(x, z) {
+    let best = Infinity;
+    for (const car of state.copCars) best = Math.min(best, Math.hypot(car.state.x - x, car.state.z - z));
+    for (const cop of state.cops) best = Math.min(best, Math.hypot(cop.x - x, cop.z - z));
+    return best;
+  }
+
+  return {
+    state,
+    addWanted,
+    setWanted,
+    clear,
+    update,
+    spawnCopCar,
+    distanceToNearest,
+    resolveCircle: (colliderList, x, z, radius) => resolveCollisions(colliderList, x, z, radius),
+    reset: clear,
+  };
+}
