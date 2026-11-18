@@ -1,6 +1,7 @@
 // Keyboard, mouse and a cheap touch layer. Held controls are read as state; one-shot presses are
 // queued as bit flags and taken exactly once by the loop. Mouse drag orbits the camera, a click
-// without a drag fires the pistol, and the wheel zooms. The touch buttons in the HTML map to the
+// without a drag fires. Wheel switches weapons on foot; Ctrl-wheel and driving wheel zoom.
+// The touch buttons in the HTML map to the
 // same action flags, so the game is playable without a keyboard.
 export const ACTION_CONFIRM = 1;
 export const ACTION_PAUSE = 2;
@@ -11,6 +12,9 @@ export const ACTION_MENU = 32;
 export const ACTION_MUTE = 64;
 export const ACTION_RESTART = 128;
 export const ACTION_JETPACK = 256;
+export const ACTION_HORN = 512;
+export const ACTION_BUY_AMMO = 1024;
+
 
 const KEYMAP = {
   KeyW: 'up',
@@ -23,7 +27,7 @@ const KEYMAP = {
   ArrowRight: 'right',
 };
 
-export function createInput(target) {
+export function createInput(target, canCycleWeapon = () => false) {
   if ('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches) {
     document.body?.classList.add('touch');
     document.getElementById('touch')?.setAttribute('aria-hidden', 'false');
@@ -36,6 +40,8 @@ export function createInput(target) {
   let dragX = 0;
   let dragY = 0;
   let wheel = 0;
+  let weaponWheel = 0;
+  let weapon = null;
   let dragging = false;
   let pointerId = null;
   let lastX = 0;
@@ -56,6 +62,11 @@ export function createInput(target) {
     if (direction) {
       directionKeys.add(event.code);
       held[direction] = true;
+      event.preventDefault();
+      return;
+    }
+    if (/^Digit[1-5]$/.test(event.code)) {
+      weapon = Number(event.code.slice(-1)) - 1;
       event.preventDefault();
       return;
     }
@@ -83,6 +94,12 @@ export function createInput(target) {
         break;
       case 'KeyF':
         queue(ACTION_PUNCH);
+        break;
+      case 'KeyB':
+        queue(ACTION_BUY_AMMO);
+        break;
+      case 'KeyH':
+        queue(ACTION_HORN);
         break;
       case 'KeyM':
         if (event.shiftKey) queue(ACTION_MUTE);
@@ -138,6 +155,8 @@ export function createInput(target) {
     dragX = 0;
     dragY = 0;
     wheel = 0;
+    weaponWheel = 0;
+    weapon = null;
   }
   window.addEventListener('blur', clearHeld);
   document.addEventListener('visibilitychange', () => {
@@ -179,7 +198,8 @@ export function createInput(target) {
       pointerId = null;
     });
     target.addEventListener('wheel', (event) => {
-      wheel += Math.sign(event.deltaY);
+      if (!dragging && !event.ctrlKey && canCycleWeapon()) weaponWheel += Math.sign(event.deltaY);
+      else wheel += Math.sign(event.deltaY);
       event.preventDefault();
     }, { passive: false });
   }
@@ -235,6 +255,16 @@ export function createInput(target) {
     takeWheel() {
       const value = wheel;
       wheel = 0;
+      return value;
+    },
+    takeWeaponWheel() {
+      const value = weaponWheel;
+      weaponWheel = 0;
+      return value;
+    },
+    takeWeapon() {
+      const value = weapon;
+      weapon = null;
       return value;
     },
     isDragging() {

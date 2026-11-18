@@ -19,6 +19,7 @@ import { createHud } from './hud.js';
 import { createMissions } from './missions.js';
 
 
+
 import { createRegions } from './regions.js';
 import { createRep } from './rep.js';
 
@@ -30,10 +31,11 @@ import { SAFEHOUSES, createSafehouses } from './safehouses.js';
 import { createGangs } from './gangs.js';
 import { createStats } from './stats.js';
 
+import { createVehicleJobs } from './vehicle-jobs.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
-  ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_JETPACK, ACTION_MENU, ACTION_MUTE,
+  ACTION_BUY_AMMO, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_HORN, ACTION_JETPACK, ACTION_MENU, ACTION_MUTE,
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RESTART, createInput,
 } from './input.js';
 import { stageShot } from './shots.js';
@@ -46,6 +48,7 @@ const DOM_IDS = [
   // Keep this inventory aligned with hud.js; every element is optional.
 
 
+
   'hud', 'health-fill', 'health-text', 'cash-value', 'income-value', 'wanted-stars', 'speed-value',
   'speed-box', 'vehicle-name', 'jetpack-box', 'jetpack-bar', 'jetpack-fill', 'jetpack-text',
   'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
@@ -54,6 +57,8 @@ const DOM_IDS = [
 
   'gangs-panel', 'btn-gangs', 'btn-gangs-hud', 'btn-gangs-close',
   'stats-panel', 'btn-stats', 'btn-stats-title', 'btn-stats-close',
+
+  'weapon-box', 'weapon-text',
 
 ];
 const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
@@ -101,15 +106,29 @@ function makeGame(seedValue, shotName = null) {
     knockPed: traffic.knockPed,
     resolvePlayerCollision: (x, z, radius) => resolveCollisions(city.colliders, x, z, radius),
   };
+
   const combat = createCombat(renderer.scene, () => player, () => combatCity, seedValue ^ 0xc05);
   const audio = createAudio();
   const hud = createHud();
   const landmarks = createLandmarks({ scene: renderer.scene, city, districts, hud });
+  let storyObjective = '';
+  let vehicleObjective = '';
+  function setStoryObjective(text) {
+    storyObjective = text;
+    hud.setObjective(vehicleObjective || storyObjective);
+  }
+  function setVehicleObjective(text) {
+    vehicleObjective = text;
+    hud.setObjective(vehicleObjective || storyObjective);
+  }
+
   const missions = createMissions({
-    scene: renderer.scene, city, player, vehicles, police, combat, hud,
+    scene: renderer.scene, city, player, vehicles, police, combat,
+    hud: { ...hud, setObjective: setStoryObjective },
     // missions.js asks for a one-shot siren cue; audio.js exposes a wanted-level updater.
     audio: { ...audio, siren: () => audio.updateSiren(police.state.wanted) },
   });
+
 
 
   const regions = createRegions({ scene: renderer.scene, missions });
@@ -135,8 +154,15 @@ function makeGame(seedValue, shotName = null) {
   const gangs = createGangs({ scene: renderer.scene, city, player, combat, hud, seed: seedValue, awardCash });
   const stats = createStats(() => gangs.state.districts);
 
+
+  const vehicleJobs = createVehicleJobs({
+    scene: renderer.scene, city, player, vehicles,
+    hud: { ...hud, setObjective: setVehicleObjective },
+    onComplete: completeVehicleJob,
+  });
+
   const orbit = player.orbit;
-  const input = createInput(canvas);
+  const input = createInput(canvas, () => state.screen === 'playing' && !player.state.inCar);
   const clock = { accumulator: 0, last: null };
   const state = {
     screen: 'menu', cash: MISSIONS.startCash, completed: [], missionBest: {},
@@ -167,6 +193,8 @@ function makeGame(seedValue, shotName = null) {
     input.takeActions();
     input.takeOrbit();
     input.takeWheel();
+    input.takeWeapon();
+    input.takeWeaponWheel();
   }
 
   function syncRider() {
@@ -247,6 +275,7 @@ function makeGame(seedValue, shotName = null) {
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
 
 
+
     hud.setVehicleName(player.state.inCar?.spec?.name);
     const { fuel, maxFuel, owned, active } = jetpack.state;
     hud.setJetpack(fuel, maxFuel, owned, active);
@@ -266,6 +295,9 @@ function makeGame(seedValue, shotName = null) {
     const landmarkBlips = landmarks.getBlips();
     blips.push(...landmarkBlips);
     blips.push(...assets.getBlips(), ...restaurants.getBlips(), ...safehouses.getBlips());
+
+    hud.setWeapon(combat.state.weapon);
+    blips.push(...vehicleJobs.getBlips());
 
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
@@ -288,6 +320,7 @@ function makeGame(seedValue, shotName = null) {
     player.state.speed = 0;
     player.state.vy = 0;
     player.state.grounded = true;
+    vehicleJobs.fail('You left the vehicle.');
   }
 
   function cleanPoliceCars() {
@@ -320,7 +353,11 @@ function makeGame(seedValue, shotName = null) {
     rep.reset(save?.rep ?? 0);
     leaveCar();
     missions.reset();
+
     regions.reset();
+
+    vehicleJobs.reset();
+
     police.clear();
     combat.reset();
     // Restore the original fleet instead of retaining mission/cruiser objects from an old run.
@@ -378,7 +415,8 @@ function makeGame(seedValue, shotName = null) {
     setScreen('playing');
     hud.setDialogue('', '');
     hud.setHint(jetpack.state.owned ? 'J — jetpack' : '');
-    hud.setObjective('Explore Solmar. Find a gold beacon for a job, or press M.');
+    setStoryObjective('Explore Solmar. Find a gold beacon for a job, or press M.');
+
     hud.toast(save ? 'Welcome back to Solmar.' : 'Solmar. The coast is yours, Jax.', 'mission', 4);
     renderer.updateCamera(1, player, orbit, 0);
     refreshHud();
@@ -417,15 +455,29 @@ function makeGame(seedValue, shotName = null) {
     announce('Playing SOLMAR.');
   }
 
+
   function awardCash(amount) {
     state.cash += amount;
     stats.recordMoneyEarned(amount);
+  }
+
+  function awardReward(reward) {
+    state.cash += reward;
+    audio.chime();
+  }
+
+  function completeVehicleJob(event) {
+    awardReward(event.reward);
+    refreshHud();
+    saveNow();
+
   }
 
   function completeMission(event) {
     const mission = missions.list.find((item) => item.id === event?.mission?.id);
     if (!mission || state.completed.includes(mission.id)) return false;
     state.completed.push(mission.id);
+
     awardCash(mission.reward);
     rep.addPoints(REP.mission, 'Mission complete');
     if (mission.id === JETPACK_REWARD_JOB && !jetpack.state.owned) {
@@ -433,6 +485,7 @@ function makeGame(seedValue, shotName = null) {
       hud.toast('Jetpack unlocked. Press J to use it.', 'mission', 4);
     }
     stats.recordMissionComplete();
+
 
     const elapsed = Number.isFinite(event.elapsed) && event.elapsed >= 0 ? event.elapsed : null;
     if (elapsed !== null) {
@@ -451,7 +504,6 @@ function makeGame(seedValue, shotName = null) {
     if (player.state.inCar && !vehicles.cars.includes(player.state.inCar)) leaveCar();
     cleanPoliceCars();
     setScreen('mission-complete');
-    audio.chime();
     refreshHud();
     saveNow();
     announce(`Mission complete: ${mission.title}. Earned $${mission.reward}.`);
@@ -470,8 +522,12 @@ function makeGame(seedValue, shotName = null) {
     if (state.screen !== 'playing') return;
     state.bustedFine = Math.min(state.cash, Math.round(POLICE.fine * (1 + police.state.wanted * 0.2)));
     state.cash -= state.bustedFine;
+
     stats.recordMoneySpent(state.bustedFine);
     stats.recordBusted();
+
+    vehicleJobs.fail('Busted.');
+
     leaveCar();
     jetpack.deactivate();
     missions.fail('Busted.');
@@ -489,9 +545,13 @@ function makeGame(seedValue, shotName = null) {
   function gameOver() {
     if (state.screen !== 'playing') return;
 
+
     jetpack.deactivate();
 
     stats.recordDeath();
+
+
+    vehicleJobs.fail('Jax went down.');
 
     missions.fail('Jax went down.');
     state.finalMission = null;
@@ -515,7 +575,7 @@ function makeGame(seedValue, shotName = null) {
     }
     missions.takeEvents();
     setScreen('playing');
-    hud.setObjective('Back in Solmar. Follow a gold beacon or press M for jobs.');
+    setStoryObjective('Back in Solmar. Follow a gold beacon or press M for jobs.');
     refreshHud();
     announce('Released. Back to work.');
   }
@@ -525,11 +585,21 @@ function makeGame(seedValue, shotName = null) {
     state.finalMission = null;
     setScreen('playing');
     const allDone = missions.completedCount() === missions.list.length;
-    hud.setObjective(allDone ? 'All jobs complete. The coast is yours to explore.' : 'Next job marked on the map. Press M to pick one.');
+    setStoryObjective(allDone ? 'All story jobs complete. The coast is yours to explore.' : 'Next job marked on the map. Press M to pick one.');
     announce(allDone ? 'Story complete. Explore Solmar.' : 'Playing SOLMAR. A new job is available.');
   }
 
   const missionList = hud.hud?.missionList || nodes['mission-list'];
+  let vehicleJobRows = [];
+  function syncVehicleJobRows(entries = vehicleJobs.getEntries()) {
+    vehicleJobRows.forEach(({ row, label }, index) => {
+      const entry = entries[index];
+      if (!entry) return;
+      if (label && label.textContent !== entry.title) label.textContent = entry.title;
+      row.classList.toggle('active', entry.active);
+    });
+  }
+
   function showJobs(toggle = false) {
     if (state.screen !== 'playing' && state.screen !== 'paused') return;
 
@@ -541,23 +611,32 @@ function makeGame(seedValue, shotName = null) {
       hud.hideMissionList();
       return;
     }
+
     const rank = rep.rankInfo();
     const progress = `${regions.unlockedCount()} / ${regions.state.regions.length} districts open`;
     const needed = rank.nextAt === null ? 'Max rank' : `${(rank.nextAt - rank.points).toLocaleString('en-US')} points to ${rank.nextName}`;
     hud.showMissionList(missions.list, missions.list.findIndex((mission) => mission.active), {
       rank: rank.name, points: rep.state.points, next: needed, districts: progress,
     });
+
+    const entries = vehicleJobs.getEntries();
+    const jobs = [...missions.list, ...entries];
+    hud.showMissionList(jobs, jobs.findIndex((mission) => mission.active));
+
     // hud.js creates rows at show time without data attributes. Bind through their container.
     const rows = missionList?.querySelectorAll('.mission-row') ?? [];
+    vehicleJobRows = [];
     rows.forEach((row, index) => {
-      const mission = missions.list[index];
+      const mission = jobs[index];
       if (!mission) return;
       row.setAttribute('data-mission', mission.id);
       row.setAttribute('role', 'button');
       row.setAttribute('tabindex', state.screen === 'paused' ? '-1' : '0');
       row.setAttribute('aria-disabled', String(state.screen === 'paused' || mission.locked || mission.completed));
       row.classList.toggle('locked', mission.locked);
+      if (index >= missions.list.length) vehicleJobRows.push({ row, label: row.querySelector('.mission-name') });
     });
+    syncVehicleJobRows(entries);
     if (!missionList) hud.toast('Find the gold job beacon and press E.', 'info', 3);
   }
 
@@ -597,6 +676,12 @@ function makeGame(seedValue, shotName = null) {
 
   function chooseJob(id) {
     if (state.screen !== 'playing') return false;
+    const vehicleJob = vehicleJobs.getEntries().find((item) => item.id === id);
+    if (vehicleJob) {
+      if (!vehicleJob.active && vehicleJob.hint) hud.toast(vehicleJob.hint, 'info', 4);
+      hud.hideMissionList();
+      return false;
+    }
     const mission = missions.list.find((item) => item.id === id);
     if (!mission || !missions.start(id)) {
       hud.toast('That job is not available yet.', 'info', 2);
@@ -735,6 +820,7 @@ function makeGame(seedValue, shotName = null) {
     announce('Driving. Space is the handbrake; E exits.');
   }
 
+
   function useJetpack() {
     if (player.state.inCar) {
       hud.toast('Exit the car first', 'info', 2);
@@ -752,6 +838,32 @@ function makeGame(seedValue, shotName = null) {
       hud.toast('You need $1500 to buy a jetpack.', 'info', 2.6);
     }
     refreshHud();
+  }
+
+  function selectWeapon(index) {
+    if (state.screen !== 'playing' || player.state.inCar || !combat.selectWeapon(index)) return false;
+    hud.setWeapon(combat.state.weapon);
+    hud.toast(combat.state.weapon.name, 'info', 1.2);
+    return true;
+  }
+
+  function buyAmmo() {
+    if (state.screen !== 'playing' || player.state.inCar) return false;
+    const weapon = combat.state.weapon;
+    const result = combat.buyAmmo(weapon.id, weapon.shopAmount, weapon.shopCost, (cost) => {
+      if (state.cash < cost) return false;
+      state.cash -= cost;
+      return true;
+    });
+    if (!result.ok) {
+      hud.toast(result.reason === 'cash' ? 'Not enough cash' : 'Ammo is full', 'info', 2);
+      return false;
+    }
+    hud.toast(`${weapon.name}: ${weapon.ammo} ammo · $${state.cash} remaining`, 'info', 2.4);
+    refreshHud();
+    saveNow();
+    return true;
+
   }
 
   function handleActions(actions) {
@@ -786,10 +898,21 @@ function makeGame(seedValue, shotName = null) {
       return;
     }
     if (actions & ACTION_PAUSE) { pause(); return; }
+    const weaponIndex = input.takeWeapon();
+    const weaponWheel = input.takeWeaponWheel();
+    if (weaponIndex !== null) selectWeapon(weaponIndex);
+    if (weaponWheel && !player.state.inCar && !input.isDragging()) {
+      selectWeapon((combat.state.weaponIndex + Math.sign(weaponWheel) + combat.state.weapons.length) % combat.state.weapons.length);
+    }
     if (actions & ACTION_MENU) showJobs(true);
     if (actions & ACTION_ENTER) enterOrExit();
     if (hud.isPlaceMenuOpen()) return;
     if (actions & ACTION_JETPACK) useJetpack();
+    if (actions & ACTION_BUY_AMMO) buyAmmo();
+    if (actions & ACTION_HORN) {
+      const position = player.state.inCar?.state ?? player.state;
+      traffic.horn(position.x, position.z);
+    }
 
     if (actions & ACTION_PUNCH) {
       const hit = combat.punch();
@@ -799,17 +922,18 @@ function makeGame(seedValue, shotName = null) {
         police.addWanted(1, 'Assault');
       }
     }
-
     if (actions & ACTION_FIRE) {
       const hits = combat.state.hits;
       if (combat.shoot()) {
         state.shotsFired += 1;
         stats.recordShot(combat.state.hits - hits);
+        traffic.onGunshot(player.state.x, player.state.z);
         audio.gunshot();
         if (police.distanceToNearest(player.state.x, player.state.z) < POLICE.hear) {
           rep.addPoints(REP.fireNearCop, 'Shots fired near a cop');
           police.addWanted(POLICE.gunNearCop, 'Shots fired');
         }
+        hud.setWeapon(combat.state.weapon);
         hud.toast(`Pistol ammo: ${combat.state.ammo}`, 'info', 1.2);
       }
 
@@ -888,7 +1012,12 @@ function makeGame(seedValue, shotName = null) {
     gangs.update(dt);
     const active = missions.active;
     missions.update(dt);
+
     rep.noteWanted(police.state.wanted, { awardEscape: false });
+
+    vehicleJobs.update(dt);
+    if (missionList?.classList.contains('open')) syncVehicleJobRows();
+
     cleanPoliceCars();
     for (const event of missions.takeEvents()) {
       if (event.type === 'complete' && completeMission(event)) return;
@@ -900,6 +1029,7 @@ function makeGame(seedValue, shotName = null) {
     // If a removed mission car was being driven when a mission failed, disembark it safely.
     if (active && !missions.active && player.state.inCar && !vehicles.cars.includes(player.state.inCar)) leaveCar();
     const car = player.state.inCar;
+
     const onGround = !car && player.state.grounded;
     const job = onGround && missions.nearestStart(player.state.x, player.state.z);
     const nearestCar = onGround && vehicles.nearest(player.state.x, player.state.z, 4.6);
@@ -911,6 +1041,7 @@ function makeGame(seedValue, shotName = null) {
     const placeHint = safehouse ? `E — ${safehouse.name}` : restaurant ? `E — Eat at ${restaurant.name}` : asset ? (assets.state.owned.has(asset.id) ? `E — ${asset.name} ($${asset.income}/min)` : `E — Buy ${asset.name} ($${asset.price.toLocaleString('en-US')})`) : '';
     announceRankUps();
     hud.setHint(regions.state.hint || placeHint || (car ? 'E — exit car' : [interactHint, jetpackHint].filter(Boolean).join(' · ')));
+
 
     refreshHud();
     if (state.elapsed - state.lastSave >= 15) { saveNow(); state.lastSave = state.elapsed; }
@@ -1045,10 +1176,10 @@ function makeGame(seedValue, shotName = null) {
   const game = {
 
     seed: seedValue, city, districts, landmarks, renderer, player, jetpack, vehicles, traffic, police, combat, audio,
-    hud, missions, regions, rep, assets, restaurants, safehouses, gangs, stats, input, state, orbit, setScreen, startRun, restart, pause, resume,
+    hud, missions, regions, rep, assets, restaurants, safehouses, gangs, stats, vehicleJobs, input, state, orbit, setScreen, startRun, restart, pause, resume,
 
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
-    leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,
+    leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, selectWeapon, buyAmmo, step,
     missingElements: DOM_IDS.filter((id) => !nodes[id]),
   };
   return game;

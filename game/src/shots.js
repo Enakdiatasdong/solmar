@@ -9,7 +9,7 @@ function setReady(value) {
 }
 
 function prepareFreshRun(game) {
-  const { player, vehicles, police, combat, missions, state, orbit } = game;
+  const { player, vehicles, police, combat, missions, vehicleJobs, state, orbit } = game;
   player.reset();
   missions.reset();
   missions.setProgress([]);
@@ -17,10 +17,14 @@ function prepareFreshRun(game) {
   game.rep?.reset(0);
   police.clear();
   combat.reset();
+
   game.assets.reset();
   game.restaurants.reset();
   game.safehouses.reset();
   state.respawn = { x: SPAWN.x, z: SPAWN.z };
+
+  vehicleJobs.reset();
+
 
   for (let index = vehicles.cars.length - 1; index >= 0; index -= 1) {
     const car = vehicles.cars[index];

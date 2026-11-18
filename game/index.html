@@ -57,6 +57,7 @@
   #vehicle-name { font-size: 12px; color: var(--muted); }
   #vehicle-name:empty { display: none; }
   #speed-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
   #jetpack-box:not([hidden]) { display: flex; align-items: center; gap: 8px; }
   #jetpack-box > span:first-child { font-size: 10px; letter-spacing: 0.12em; color: var(--muted); }
   #jetpack-box.active { border-color: var(--teal); }
@@ -72,6 +73,10 @@
   #rep-next { color: var(--muted); font-size: 9px; letter-spacing: 0.08em; }
   #mission-list .mission-stats { white-space: pre-line; padding: 10px 12px; margin-bottom: 8px; border-radius: 9px; background: rgba(255, 200, 87, 0.08); color: var(--muted); font-size: 11px; line-height: 1.65; }
   #mission-list .mission-stats:first-line { color: var(--gold); font-weight: 700; }
+
+  #weapon-box { max-width: 230px; padding: 8px 12px; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #weapon-text { color: var(--ink); }
+
 
   #objective-box { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); max-width: min(560px, 62vw); display: none; text-align: center; }
   #objective-text { font-size: 14px; font-weight: 650; letter-spacing: 0.01em; color: var(--ink); }
@@ -252,6 +257,7 @@
         <span id="vehicle-name"></span>
         <span id="speed-value">0 KM/H</span>
       </div>
+
       <div class="hud-panel" id="rep-panel" aria-label="Street reputation">
         <span id="rep-rank">Small Fry</span><span id="rep-points">0 REP</span>
         <div id="rep-track"><div id="rep-progress"></div></div>
@@ -260,7 +266,10 @@
       <div class="hud-panel" id="jetpack-box" hidden>
         <span>JETPACK</span><div id="jetpack-bar"><div id="jetpack-fill"></div></div><span id="jetpack-text"></span>
       </div>
-      </div>
+
+      <div class="hud-panel" id="weapon-box"><span id="weapon-text">Pistol 24/60</span></div>
+</div>
+
     </div>
   </div>
   <section class="hud-panel" id="region-panel" aria-label="District access">
@@ -325,8 +334,12 @@
       <div><b>Space</b> jump / handbrake</div>
       <div><b>E</b> enter / exit car</div>
       <div><b>F</b> punch</div>
-      <div><b>Click</b> pistol</div>
+      <div><b>Click</b> fire / throw</div>
+      <div><b>1–5 / Wheel</b> weapon (on foot)</div>
+      <div><b>B</b> buy current ammo</div>
+      <div><b>Ctrl-wheel</b> camera zoom</div>
       <div><b>M</b> jobs menu</div>
+      <div><b>H</b> horn / clear the street</div>
       <div><b>P / Esc</b> pause</div>
       <div><b>J</b> toggle jetpack</div>
       <div><b>Space / C</b> thrust / descend</div>
@@ -400,7 +413,7 @@
   <div class="touch-actions">
     <button type="button" data-touch="run" aria-label="sprint">RUN</button>
     <button type="button" data-touch="enter" aria-label="enter car">CAR</button>
-    <button type="button" data-touch="fire" aria-label="pistol">●</button>
+    <button type="button" data-touch="fire" aria-label="fire weapon">●</button>
     <button type="button" data-touch="punch" aria-label="punch">✊</button>
     <button type="button" data-touch="menu" aria-label="jobs">JOBS</button>
   </div>
