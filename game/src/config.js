@@ -30,7 +30,7 @@ export const CITY = {
   oceanWestStart: -540,
   oceanWidth: 4000,
   airfield: { minX: -360, maxX: 360, minZ: 372, maxZ: 540 },
-  freeway: { minX: -288, maxX: 288, minZ: -288, maxZ: 288, width: 18 },
+  freeway: { minX: -288, maxX: 288, minZ: -288, maxZ: 288, width: 24 },
   parkBlocks: [
     [3, 3],
     [7, 4],

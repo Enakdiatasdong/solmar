@@ -11,6 +11,13 @@ const FLOOR_HEIGHT = 2.85;
 const DECO_PASTELS = [0xe9b6ae, 0xb0d0c1, 0xeed0a7, 0xa9c8d7, 0xd5bbd7];
 const CANAL = { startX: -540, endX: -372, z: 0, width: 16 };
 
+function inFreewayCorridor(x, z, padding = 0) {
+  const { minX, maxX, minZ, maxZ, width } = CITY.freeway;
+  const half = width / 2 + padding;
+  return (z >= minZ - half && z <= maxZ + half && Math.min(Math.abs(x - minX), Math.abs(x - maxX)) <= half)
+    || (x >= minX - half && x <= maxX + half && Math.min(Math.abs(z - minZ), Math.abs(z - maxZ)) <= half);
+}
+
 function facadeGrid(variant) {
   return {
     columns: variant.tower ? 12 : variant.glass ? 7 : variant.office ? 6 : variant.deco ? 3 : 4,
@@ -552,39 +559,133 @@ function addAirport(parent, colliders) {
   lamps.material.toneMapped = false;
 }
 
-function addFreeway(parent) {
+function addFreeway(parent, colliders) {
   const freeway = new THREE.Group();
   freeway.name = 'Solmar Freeway Loop';
   parent.add(freeway);
-  const road = new THREE.MeshLambertMaterial({ color: 0x30363d });
-  const paint = new THREE.MeshBasicMaterial({ color: 0xe7dbb9 });
-  for (const z of [CITY.freeway.minZ, CITY.freeway.maxZ]) {
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(CITY.freeway.maxX - CITY.freeway.minX + CITY.freeway.width, CITY.freeway.width), road);
+  const road = new THREE.MeshLambertMaterial({ color: 0x272d34 });
+  const cube = new THREE.BoxGeometry(1, 1, 1);
+  const { minX, maxX, minZ, maxZ, width } = CITY.freeway;
+  for (const z of [minZ, maxZ]) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX + width, width), road);
     strip.rotation.x = -Math.PI / 2;
     strip.position.set(0, 0.045, z);
     freeway.add(strip);
   }
-  for (const x of [CITY.freeway.minX, CITY.freeway.maxX]) {
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(CITY.freeway.width, CITY.freeway.maxZ - CITY.freeway.minZ + CITY.freeway.width), road);
+  for (const x of [minX, maxX]) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(width, maxZ - minZ + width), road);
     strip.rotation.x = -Math.PI / 2;
     strip.position.set(x, 0.046, 0);
     freeway.add(strip);
   }
-  const dashes = [];
-  for (let coordinate = CITY.freeway.minX + 20; coordinate < CITY.freeway.maxX - 10; coordinate += 24) {
-    dashes.push([coordinate, CITY.freeway.minZ], [coordinate, CITY.freeway.maxZ]);
-    dashes.push([CITY.freeway.minX, coordinate], [CITY.freeway.maxX, coordinate]);
+  const white = [];
+  const yellow = [];
+  const barriers = [];
+  const rails = [];
+  const posts = [];
+  const solid = (items, x, z, w, height, depth, y = height / 2 + 0.06) => {
+    items.push({ x, y, z, width: w, height, depth });
+    colliders.push({ minX: x - w / 2, maxX: x + w / 2,
+      minZ: z - depth / 2, maxZ: z + depth / 2, height: y + height / 2 });
+  };
+  // Four lanes, separated from city streets by a divided median and broad shoulders.
+  // Every grid junction keeps a 32 m gap for existing roads, missions and AI turns.
+  for (const vertical of [false, true]) {
+    for (const line of vertical ? [minX, maxX] : [minZ, maxZ]) {
+      const lower = vertical ? minZ : minX;
+      const upper = vertical ? maxZ : maxX;
+      const at = (along, across, y, w, h, d, yaw = 0) => ({
+        x: vertical ? line + across : along, y, z: vertical ? along : line + across,
+        width: vertical ? d : w, height: h, depth: vertical ? w : d, yaw,
+      });
+      for (let start = lower; start < upper; start += CITY.pitch) {
+        const center = start + CITY.pitch / 2;
+        const length = CITY.pitch - 32;
+        const midpoint = at(center, 0, 0.46, length, 0.8, 0.66);
+        solid(barriers, midpoint.x, midpoint.z, midpoint.width, midpoint.height, midpoint.depth);
+        for (const side of [-1, 1]) {
+          yellow.push(at(center, side * 0.8, 0.085, length, 0.018, 0.2));
+          white.push(at(center, side * (width / 2 - 1), 0.085, length, 0.018, 0.25));
+          const rail = at(center, side * (width / 2 - 0.25), 0.9, length, 0.24, 0.22);
+          rails.push(rail);
+          colliders.push({ minX: rail.x - rail.width / 2, maxX: rail.x + rail.width / 2,
+            minZ: rail.z - rail.depth / 2, maxZ: rail.z + rail.depth / 2, height: 1.02 });
+          for (let offset = -16; offset <= 16; offset += 8) {
+            posts.push(at(center + offset, side * (width / 2 - 0.25), 0.49, 0.2, 0.86, 0.2));
+          }
+          for (const offset of [-15, 0, 15]) {
+            white.push(at(center + offset, side * 5.5, 0.085, 8, 0.018, 0.28));
+          }
+        }
+      }
+    }
   }
-  const marks = new THREE.InstancedMesh(new THREE.BoxGeometry(7, 0.02, 0.3), paint, dashes.length);
-  const matrix = new THREE.Matrix4();
-  dashes.forEach(([x, z], index) => {
-    const vertical = (x === CITY.freeway.minX || x === CITY.freeway.maxX) && Math.abs(z) !== Math.abs(CITY.freeway.minZ);
-    matrix.makeRotationY(vertical ? Math.PI / 2 : 0).setPosition(x, 0.095, z);
-    marks.setMatrixAt(index, matrix);
-  });
-  marks.name = 'freeway:lane-dashes';
-  marks.instanceMatrix.needsUpdate = true;
-  freeway.add(marks);
+  const whitePaint = addWaterfrontInstances(freeway, 'freeway:four-lane-markings', cube, 0xf1f1e5, white);
+  whitePaint.material.dispose();
+  whitePaint.material = new THREE.MeshBasicMaterial({ color: 0xf1f1e5, toneMapped: false });
+  const yellowPaint = addWaterfrontInstances(freeway, 'freeway:median-edge-lines', cube, 0xf2c84e, yellow);
+  yellowPaint.material.dispose();
+  yellowPaint.material = new THREE.MeshBasicMaterial({ color: 0xf2c84e, toneMapped: false });
+  addWaterfrontInstances(freeway, 'freeway:concrete-median', cube, 0xa8aaa6, barriers).castShadow = true;
+  addWaterfrontInstances(freeway, 'freeway:guardrails', cube, 0xc3cbd0, rails);
+  addWaterfrontInstances(freeway, 'freeway:guardrail-posts', cube, 0x6f7e87, posts);
+
+  // Flat exit-gore paint identifies the existing cross-street accesses as slip lanes.
+  const chevrons = [];
+  for (const { x, z, yaw } of [
+    { x: minX + 9.4, z: 0, yaw: 0 }, { x: maxX - 9.4, z: 0, yaw: 0 },
+    { x: 0, z: minZ + 9.4, yaw: Math.PI / 2 }, { x: 0, z: maxZ - 9.4, yaw: Math.PI / 2 },
+  ]) {
+    for (const side of [-1, 1]) {
+      for (let step = 0; step < 3; step += 1) {
+        const along = side * (10 + step * 4);
+        chevrons.push({ x: x + Math.sin(yaw) * along, y: 0.09, z: z + Math.cos(yaw) * along,
+          width: 2.8, height: 0.02, depth: 0.3, yaw: yaw + side * 0.65 });
+      }
+    }
+  }
+  const exitPaint = addWaterfrontInstances(freeway, 'freeway:access-chevrons', cube, 0xf1f1e5, chevrons);
+  exitPaint.material.dispose();
+  exitPaint.material = whitePaint.material;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 256;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  context.fillStyle = '#135344';
+  context.fillRect(0, 0, 1024, 256);
+  context.strokeStyle = '#e8f0d9';
+  context.lineWidth = 8;
+  context.strokeRect(8, 8, 1008, 240);
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillStyle = '#f1f6e9';
+  context.font = 'bold 76px sans-serif';
+  context.fillText('S-1  SOLMAR LOOP', 512, 86, 930);
+  context.font = 'bold 48px sans-serif';
+  context.fillText('AIRFIELD  ↓    WEST SHORE  ↗', 512, 182, 930);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const faceMaterial = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false });
+  const signSupports = [];
+  for (const { x, z, yaw } of [
+    { x: minX, z: -108, yaw: 0 }, { x: maxX, z: 108, yaw: 0 },
+    { x: -108, z: minZ, yaw: Math.PI / 2 }, { x: 108, z: maxZ, yaw: Math.PI / 2 },
+  ]) {
+    for (const side of [-1, 1]) {
+      const poleX = x + Math.cos(yaw) * side * 13.1;
+      const poleZ = z - Math.sin(yaw) * side * 13.1;
+      solid(signSupports, poleX, poleZ, 0.4, 11.2, 0.4);
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(20, 5), faceMaterial);
+      face.name = 'freeway:S-1-direction-sign';
+      face.position.set(x + Math.sin(yaw) * side * 0.12, 8.8, z + Math.cos(yaw) * side * 0.12);
+      face.rotation.y = yaw + (side < 0 ? Math.PI : 0);
+      freeway.add(face);
+    }
+    signSupports.push({ x, y: 11.4, z, width: 27, height: 0.35, depth: 0.4, yaw });
+  }
+  addWaterfrontInstances(freeway, 'freeway:sign-gantries', cube, 0x9ba9ae, signSupports).castShadow = true;
 }
 
 function validateCityConfig() {
@@ -671,7 +772,7 @@ function buildRoadGraph() {
       && Math.min(a.z, b.z) >= CITY.freeway.minZ && Math.max(a.z, b.z) <= CITY.freeway.maxZ)
       || (a.z === b.z && Math.abs(a.z) === Math.abs(CITY.freeway.minZ)
         && Math.min(a.x, b.x) >= CITY.freeway.minX && Math.max(a.x, b.x) <= CITY.freeway.maxX);
-    const edge = { a, b, dx, dz, length: Math.hypot(dx, dz), freeway, width, zone: a.zone ?? b.zone ?? (freeway ? 'freeway' : 'city') };
+    const edge = { a, b, dx, dz, length: Math.hypot(dx, dz), freeway, width: freeway ? CITY.freeway.width : width, zone: a.zone ?? b.zone ?? (freeway ? 'freeway' : 'city') };
     edges.push(edge);
     a.neighbors.push({ edge, other: b, direction: { x: Math.sign(dx), z: Math.sign(dz) } });
     b.neighbors.push({ edge, other: a, direction: { x: -Math.sign(dx), z: -Math.sign(dz) } });
@@ -860,7 +961,31 @@ export function createCity(random, reservedPlaces = []) {
       const x = CITY.nodeMin + (column + 0.5) * blockPitch;
       const z = CITY.nodeMin + (row + 0.5) * blockPitch;
       const isPark = parks.has(`${column}:${row}`);
-      matrix.makeTranslation(x, 0.13, z);
+      // Trim only the tile edge facing the wider freeway; keep road/vehicle ground height.
+      const tileSize = blockPitch - CITY.road + 2;
+      const trim = CITY.freeway.width / 2 + 1.5 - (blockPitch - tileSize) / 2;
+      let left = 0;
+      let right = 0;
+      let north = 0;
+      let south = 0;
+      for (const line of [CITY.freeway.minX, CITY.freeway.maxX]) {
+        if (Math.abs(x - line) === blockPitch / 2
+          && z + tileSize / 2 >= CITY.freeway.minZ - CITY.freeway.width / 2
+          && z - tileSize / 2 <= CITY.freeway.maxZ + CITY.freeway.width / 2) {
+          if (x > line) left = trim; else right = trim;
+        }
+      }
+      for (const line of [CITY.freeway.minZ, CITY.freeway.maxZ]) {
+        if (Math.abs(z - line) === blockPitch / 2
+          && x + tileSize / 2 >= CITY.freeway.minX - CITY.freeway.width / 2
+          && x - tileSize / 2 <= CITY.freeway.maxX + CITY.freeway.width / 2) {
+          if (z > line) north = trim; else south = trim;
+        }
+      }
+      const pavement = { x: x + (left - right) / 2, z: z + (north - south) / 2,
+        width: tileSize - left - right, depth: tileSize - north - south };
+      matrix.makeScale(pavement.width / tileSize, 1, pavement.depth / tileSize);
+      matrix.setPosition(pavement.x, 0.13, pavement.z);
       if (isPark) {
         if (grassIndex < grassMesh.count) grassMesh.setMatrixAt(grassIndex, matrix);
         grassIndex += 1;
@@ -868,7 +993,7 @@ export function createCity(random, reservedPlaces = []) {
         sidewalkMesh.setMatrixAt(sidewalkIndex, matrix);
         sidewalkIndex += 1;
       }
-      lotCenters.push({ x, z, column, row, isPark, beachfront: row === CITY.grid - 1 });
+      lotCenters.push({ x, z, column, row, isPark, pavement, beachfront: row === CITY.grid - 1 });
     }
   }
   sidewalkMesh.count = sidewalkIndex;
@@ -920,11 +1045,11 @@ export function createCity(random, reservedPlaces = []) {
       const baseX = CITY.nodeMin + cell * blockPitch;
       for (let dash = 0; dash < 4; dash += 1) {
         const offset = 15 + dash * 11;
-        if (!inDowntown(lineX, baseZ + offset)) {
+        if (!inDowntown(lineX, baseZ + offset) && !inFreewayCorridor(lineX, baseZ + offset)) {
           dashPosition.makeTranslation(lineX, 0.035, baseZ + offset);
           dashesNS.setMatrixAt(dashNS++, dashPosition);
         }
-        if (!inDowntown(baseX + offset, lineZ)) {
+        if (!inDowntown(baseX + offset, lineZ) && !inFreewayCorridor(baseX + offset, lineZ)) {
           dashRotation.makeRotationY(Math.PI / 2);
           dashPosition.makeTranslation(baseX + offset, 0.035, lineZ).multiply(dashRotation);
           dashesEW.setMatrixAt(dashEW++, dashPosition);
@@ -952,6 +1077,7 @@ export function createCity(random, reservedPlaces = []) {
   for (const avenueZ of [216, 288]) {
     for (let cell = 0; cell < CITY.grid; cell += 1) {
       const centerX = CITY.nodeMin + cell * blockPitch + blockPitch / 2;
+      if (inFreewayCorridor(centerX, avenueZ)) continue;
       for (const offset of [-0.22, 0.22]) {
         markingMatrix.makeTranslation(centerX, 0.055, avenueZ + offset);
         yellowLines.setMatrixAt(yellowIndex, markingMatrix);
@@ -980,12 +1106,14 @@ export function createCity(random, reservedPlaces = []) {
     for (let cell = 0; cell < CITY.grid; cell += 1) {
       const center = CITY.nodeMin + cell * blockPitch + blockPitch / 2;
       for (const offset of [-8.35, 8.35]) {
-        markingMatrix.makeTranslation(lineCoord + offset, 0.055, center);
-        edgeNSLines.setMatrixAt(edgeNSIndex, markingMatrix);
-        edgeNSIndex += 1;
-        markingMatrix.makeTranslation(center, 0.055, lineCoord + offset);
-        edgeEWLines.setMatrixAt(edgeEWIndex, markingMatrix);
-        edgeEWIndex += 1;
+        if (!inFreewayCorridor(lineCoord + offset, center)) {
+          markingMatrix.makeTranslation(lineCoord + offset, 0.055, center);
+          edgeNSLines.setMatrixAt(edgeNSIndex++, markingMatrix);
+        }
+        if (!inFreewayCorridor(center, lineCoord + offset)) {
+          markingMatrix.makeTranslation(center, 0.055, lineCoord + offset);
+          edgeEWLines.setMatrixAt(edgeEWIndex++, markingMatrix);
+        }
       }
     }
   }
@@ -1011,6 +1139,7 @@ export function createCity(random, reservedPlaces = []) {
     for (let column = 0; column <= CITY.grid; column += 1) {
       const nodeX = CITY.nodeMin + column * blockPitch;
       const downtown = inDowntown(nodeX, nodeZ);
+      if (inFreewayCorridor(nodeX, nodeZ)) continue;
       const stripes = downtown ? 10 : 7;
       const step = downtown ? 1.64 : 2.4;
       const approach = downtown ? 10.5 : 10;
@@ -1046,12 +1175,19 @@ export function createCity(random, reservedPlaces = []) {
   for (const center of lotCenters) {
     if (center.isPark) continue;
     for (let joint = 1; joint <= 7; joint += 1) {
-      markingMatrix.makeTranslation(center.x - 25 + joint * 6.25, 0.269, center.z);
-      jointNS.setMatrixAt(jointNSIndex, markingMatrix);
-      jointNSIndex += 1;
-      markingMatrix.makeTranslation(center.x, 0.269, center.z - 25 + joint * 6.25);
-      jointEW.setMatrixAt(jointEWIndex, markingMatrix);
-      jointEWIndex += 1;
+      const pavement = center.pavement;
+      const x = center.x - 25 + joint * 6.25;
+      const z = center.z - 25 + joint * 6.25;
+      if (x > pavement.x - pavement.width / 2 + 0.5 && x < pavement.x + pavement.width / 2 - 0.5) {
+        markingMatrix.makeScale(1, 1, Math.min(50, pavement.depth - 1) / 50);
+        markingMatrix.setPosition(x, 0.269, pavement.z);
+        jointNS.setMatrixAt(jointNSIndex++, markingMatrix);
+      }
+      if (z > pavement.z - pavement.depth / 2 + 0.5 && z < pavement.z + pavement.depth / 2 - 0.5) {
+        markingMatrix.makeScale(Math.min(50, pavement.width - 1) / 50, 1, 1);
+        markingMatrix.setPosition(pavement.x, 0.269, z);
+        jointEW.setMatrixAt(jointEWIndex++, markingMatrix);
+      }
     }
   }
   jointNS.count = jointNSIndex;
@@ -1421,7 +1557,6 @@ export function createCity(random, reservedPlaces = []) {
   group.add(ocean);
   addCanal(group, water, colliders);
   addAirport(group, colliders);
-  addFreeway(group);
 
   // Seed the fleet separately so the original lot, prop and spawn sequences stay intact.
   const fleetRandom = createRandom(0x50a1a2);
@@ -1531,7 +1666,8 @@ export function createCity(random, reservedPlaces = []) {
   for (let palm = 0; palm < palmSpots.length; palm += 1) {
     const spot = palmSpots[palm];
     const palmRandom = palm >= firstDowntownPalm ? downtownRandom : random;
-    const hidden = isReserved(spot.x, spot.z) || inCanal(spot.x, spot.z, 2.4);
+    const hidden = isReserved(spot.x, spot.z) || inCanal(spot.x, spot.z, 2.4)
+      || inFreewayCorridor(spot.x, spot.z, 1.5);
     const height = 7.2 * spot.scale;
     palmPosition.set(spot.x, 0.2, spot.z);
     palmScale.set(spot.scale, height, spot.scale);
@@ -1578,6 +1714,10 @@ export function createCity(random, reservedPlaces = []) {
         if (!isReserved(x, z) && pointIsClear(colliders, x, z, 0.65)) lampSpots.push({ x, z, glow: true });
       }
     }
+  }
+  // Retain the downtown prefix used by its pavement-glow indices; filtering consumes no RNG.
+  for (let lamp = lampSpots.length - 1; lamp >= downtownStreetLamps.length; lamp -= 1) {
+    if (inFreewayCorridor(lampSpots[lamp].x, lampSpots[lamp].z, 1.2)) lampSpots.splice(lamp, 1);
   }
   const poleMesh = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.11, 0.16, 6.4, 5).translate(0, 3.2, 0),
@@ -1822,11 +1962,14 @@ export function createCity(random, reservedPlaces = []) {
     );
     crate.position.set(x, 0.3 + size / 2, z);
     crate.rotation.y = random.range(0, Math.PI);
-    if (isReserved(x, z)) continue;
+    if (isReserved(x, z) || inFreewayCorridor(x, z, size)) continue;
     group.add(crate);
     const extent = (size * (Math.abs(Math.cos(crate.rotation.y)) + Math.abs(Math.sin(crate.rotation.y)))) / 2;
     colliders.push({ minX: x - extent, maxX: x + extent, minZ: z - extent, maxZ: z + extent, height: size + 0.3 });
   }
+
+  // Add solid freeway furniture after seeded city dressing, so no RNG decisions shift.
+  addFreeway(group, colliders);
 
   const graph = buildRoadGraph();
   const spawnPlayer = { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading ?? 0 };
