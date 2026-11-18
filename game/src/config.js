@@ -430,7 +430,9 @@ export const SAVE_VERSION = 3;
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
 /** The title vista and the spawn point. */
-export const TITLE_CAMERA = { x: 160, y: 42, z: 500, lookX: -150, lookY: 12, lookZ: 820 };
+// Look northwest along the actual west coast: causeway at z=84, yachts near (-760,80).
+// Both landmarks sit to the right of the title menu instead of beyond the empty south edge.
+export const TITLE_CAMERA = { x: -400, y: 38, z: 290, lookX: -690, lookY: 4, lookZ: 85 };
 export const SPAWN = { x: -360, z: 180, heading: 0 };
 export const STARTER_CAR = { x: -360, z: 192, heading: 0 };
 
