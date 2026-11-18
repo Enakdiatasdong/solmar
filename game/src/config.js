@@ -77,6 +77,15 @@ export const VEHICLE = {
   step: 1 / 60,
 };
 
+/** Expansion rides share the arcade model with their own power, grip and dimensions. */
+export const VEHICLE_TYPES = {
+  bike: { ...VEHICLE, maxSpeed: 27, accel: 20, brake: 29, reverseAccel: 4, maxReverse: 4, steer: 2.9, radius: 0.56 },
+  truck: { ...VEHICLE, maxSpeed: 24, accel: 9, brake: 18, reverseAccel: 5, maxReverse: 6, steer: 1.5, radius: 1.4 },
+  buggy: { ...VEHICLE, maxSpeed: 30, accel: 14, brake: 24, reverseAccel: 8, maxReverse: 8, steer: 2.6, radius: 1.24 },
+  sport: { ...VEHICLE, maxSpeed: 40, accel: 19, brake: 32, reverseAccel: 10, maxReverse: 10, steer: 2.3, radius: 1.24 },
+  van: { ...VEHICLE, maxSpeed: 26.5, accel: 11, brake: 22, reverseAccel: 7, maxReverse: 7, steer: 1.9, radius: 1.25 },
+};
+
 export const TRAFFIC = {
   cars: 12,
   pedestrians: 18,

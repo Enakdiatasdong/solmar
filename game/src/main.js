@@ -29,7 +29,7 @@ const DOM_IDS = [
   'complete-time', 'btn-resume', 'btn-restart-pause',
   // Keep this inventory aligned with hud.js; every element is optional.
   'hud', 'health-fill', 'health-text', 'cash-value', 'wanted-stars', 'speed-value',
-  'speed-box', 'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
+  'speed-box', 'vehicle-name', 'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
   'dialogue', 'dialogue-text', 'subtitle', 'hint',
 ];
 const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
@@ -61,6 +61,7 @@ function makeGame(seedValue, shotName = null) {
   const vehicles = createVehicles(city, renderer.scene);
   vehicles.spawnStarter();
   vehicles.spawnParked(random);
+  vehicles.spawnExpansionVehicles(random);
   const parked = vehicles.cars.map((car) => ({ car, ...car.state }));
   const traffic = createTraffic(city, renderer.scene, createRandom(seedValue ^ 0x51a7));
   const police = createPolice(city, renderer.scene, vehicles);
@@ -177,6 +178,7 @@ function makeGame(seedValue, shotName = null) {
     hud.setCash(state.cash);
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
+    hud.setVehicleName(player.state.inCar?.spec?.name);
     const blips = missions.getBlips();
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
@@ -564,7 +566,7 @@ function makeGame(seedValue, shotName = null) {
       if (steps === MAX_STEPS) clock.accumulator %= STEP;
       renderer.updateCamera(delta, player, orbit, 0);
       const car = player.state.inCar;
-      const speed = Math.abs(car?.state.speed ?? 0) / VEHICLE.maxSpeed;
+      const speed = Math.abs(car?.state.speed ?? 0) / (car?.tuning?.maxSpeed ?? VEHICLE.maxSpeed);
       const playing = state.screen === 'playing';
       audio.updateEngine(speed, Boolean(playing && car && input.state().jump && speed > 0.2), Boolean(playing && car));
       audio.updateSiren(playing ? police.state.wanted : 0);

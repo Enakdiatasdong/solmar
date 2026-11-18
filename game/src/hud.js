@@ -23,6 +23,7 @@ export function createHud() {
     stars: element('wanted-stars'),
     speed: element('speed-value'),
     speedBox: element('speed-box'),
+    vehicleName: element('vehicle-name'),
     objective: element('objective-text'),
     objectiveBox: element('objective-box'),
     toasts: element('toasts'),
@@ -100,6 +101,10 @@ export function createHud() {
     cache.inCar = driving;
     if (hud.speedBox) hud.speedBox.style.display = driving ? 'flex' : 'none';
     setText(hud.speed, driving ? value + ' KM/H' : '');
+  }
+
+  function setVehicleName(name) {
+    setText(hud.vehicleName, name || '');
   }
 
   function setMission(mission, objective) {
@@ -296,6 +301,7 @@ export function createHud() {
     setCash: setMoney,
     setWanted,
     setSpeed,
+    setVehicleName,
     setMission,
     setObjective: setMission,
     toast,
