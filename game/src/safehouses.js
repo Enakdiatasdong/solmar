@@ -4,15 +4,15 @@ import { createPlaceMarker, nearestPlace } from './places.js';
 
 const RING = '#b48ce0';
 const GARAGE = {
-  id: 'garage-flat', name: 'Moreno Garage Flat', x: -36, z: 108,
+  id: 'garage-flat', name: 'Moreno Garage Flat', x: -216, z: 108,
   color: 0xcb9a70, roof: 0x76594c, width: 8, depth: 6,
 };
 const LOFT = {
-  id: 'marina-loft', name: 'Marina Loft', x: 252, z: -108, price: 5000,
+  id: 'marina-loft', name: 'Marina Loft', x: -360, z: -108, price: 5000,
   color: 0x8db5bb, roof: 0x3c5674, width: 7, depth: 8,
 };
 const HILLTOP = {
-  id: 'hilltop-house', name: 'Hilltop House', x: -252, z: 108, mission: 'beach-run',
+  id: 'hilltop-house', name: 'Hilltop House', x: -288, z: -540, mission: 'beach-run',
   color: 0xe0c8a0, roof: 0x94534e, width: 10, depth: 7,
 };
 

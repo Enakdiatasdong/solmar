@@ -24,6 +24,10 @@ function prepareFreshRun(game) {
   state.respawn = { x: SPAWN.x, z: SPAWN.z };
 
   vehicleJobs.reset();
+  game.races?.reset();
+  game.radio?.reset();
+  game.respray?.reset();
+  game.collectibles?.reset();
 
 
   for (let index = vehicles.cars.length - 1; index >= 0; index -= 1) {
@@ -49,14 +53,11 @@ function prepareFreshRun(game) {
   state.elapsed = 0;
   state.day = 1;
   state.clockMinutes = 18 * 60 + 52;
-  state.radioStationIndex = 0;
-  state.radioTrackIndex = 0;
-  state.radioTrackElapsed = 0;
   state.started = true;
   orbit.yaw = 0;
   orbit.pitch = CAMERA.pitch;
   orbit.distance = CAMERA.distance;
-  player.state.x = 7.4;
+  player.state.x = SPAWN.x + 7.4;
   player.state.z = STARTER_CAR.z;
   player.state.heading = 0;
   player.syncMesh();
@@ -124,13 +125,13 @@ export function stageShot(name, game) {
   }
 
   if (shot === 'play') {
-    player.state.x = 0;
-    player.state.z = 236;
+    player.state.x = -360;
+    player.state.z = 180;
     player.syncMesh();
     missions.start('first-fare');
     const starter = vehicles.cars.find((car) => car.id === 'starter');
     if (starter) {
-      vehicles.setCarPosition(starter, 0, 250, 0);
+      vehicles.setCarPosition(starter, -360, 192, 0);
       player.enterCar(starter);
     }
     orbit.yaw = 0.35;
@@ -165,6 +166,8 @@ export function stageShot(name, game) {
       vehicles.setCarPosition(vespera, 144, 78, 0);
       player.enterCar(vespera);
     }
+    game.traffic.reset();
+    game.traffic.spawnAll(player.state.x, player.state.z);
     missions.start('paper-moon');
     state.cash = 38420;
     state.day = 1;
@@ -183,7 +186,7 @@ export function stageShot(name, game) {
   const starter = vehicles.cars.find((car) => car.id === 'starter');
   missions.start('first-fare');
   if (starter) {
-    vehicles.setCarPosition(starter, 288, 268, Math.PI / 2);
+    vehicles.setCarPosition(starter, -360, 216, 0);
     player.enterCar(starter);
     player.state.x = starter.state.x;
     player.state.z = starter.state.z;

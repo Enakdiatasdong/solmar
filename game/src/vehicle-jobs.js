@@ -1,6 +1,7 @@
 // Repeatable service work. Routes use the city's checked road spawn points and one reusable
 // beacon; only main.js handles the cash award. Leaving a service vehicle ends its current run.
 import * as THREE from '../vendor/three.module.min.js';
+import { CITY } from './config.js';
 import { resolveCollisions } from './world.js';
 
 const JOBS = [
@@ -59,7 +60,13 @@ export function createVehicleJobs(ctx) {
     const points = city?.spawnPoints?.roadVehicles ?? city?.spawnPoints?.vehicles ?? [];
     let best = null;
     let distance = Infinity;
-    for (const point of points) {
+    for (const spawn of points) {
+      // Traffic spawns include a lane offset. Service stops use the road centreline.
+      const x = Math.max(CITY.nodeMin, Math.min(CITY.nodeMax, spawn.x));
+      const z = Math.max(CITY.nodeMin, Math.min(CITY.nodeMax, spawn.z));
+      const roadX = CITY.nodeMin + Math.round((x - CITY.nodeMin) / CITY.pitch) * CITY.pitch;
+      const roadZ = CITY.nodeMin + Math.round((z - CITY.nodeMin) / CITY.pitch) * CITY.pitch;
+      const point = Math.abs(x - roadX) <= Math.abs(z - roadZ) ? { x: roadX, z } : { x, z: roadZ };
       if (used.some((other) => Math.hypot(other.x - point.x, other.z - point.z) < 25)) continue;
       if (vehicles.cars.some((car) => Math.hypot(car.state.x - point.x, car.state.z - point.z) < 5)) continue;
       if (resolveCollisions(city.colliders ?? [], point.x, point.z, 2).hit) continue;
@@ -73,11 +80,11 @@ export function createVehicleJobs(ctx) {
 
   function makeRoute(job) {
     const landmarks = city.landmarks ?? {};
-    const hotel = landmarks.client ?? { x: 80, z: 152 };
-    const downtown = landmarks.downtown ?? { x: 108, z: 108 };
-    const garage = landmarks.garage ?? { x: -216, z: 216 };
-    const coast = landmarks.raceStart ?? { x: 300, z: 360 };
-    const showroom = landmarks.coupe ?? { x: 148, z: -18 };
+    const hotel = landmarks.client ?? { x: -288, z: 144 };
+    const downtown = landmarks.downtown ?? { x: 72, z: 72 };
+    const garage = landmarks.garage ?? { x: -216, z: 144 };
+    const coast = landmarks.raceStart ?? { x: -360, z: 288 };
+    const showroom = landmarks.coupe ?? { x: 144, z: -72 };
     // Reverse the taxi's stops on alternating fares to keep repeat work from being identical.
     const alternate = state.completed % 2 === 1;
     const stops = job.id === 'taxi'

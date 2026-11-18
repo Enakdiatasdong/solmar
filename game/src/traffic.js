@@ -63,6 +63,10 @@ export function createTraffic(city, scene, random) {
   const carSpawnPoints = city.spawnPoints?.trafficCars ?? [];
   const pedSpawnPoints = city.spawnPoints?.sidewalkPedestrians ?? [];
   const bucketSize = CITY.pitch / 2;
+  const graphBounds = roadNetwork.nodes.reduce((bounds, node) => ({
+    minX: Math.min(bounds.minX, node.x), maxX: Math.max(bounds.maxX, node.x),
+    minZ: Math.min(bounds.minZ, node.z), maxZ: Math.max(bounds.maxZ, node.z),
+  }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity });
 
   function bucketKey(x, z) { return x + z * 4096; }
 
@@ -99,14 +103,19 @@ export function createTraffic(city, scene, random) {
   }
 
   function pickDirection(node, previousNode) {
-    const options = node?.neighbors?.filter((neighbor) => (
-      neighbor.other.x >= CITY.nodeMin
-      && neighbor.other.x <= CITY.nodeMax
-      && neighbor.other.z >= CITY.nodeMin
-      && neighbor.other.z <= CITY.nodeMax
-    )) ?? [];
+    const options = node?.neighbors ?? [];
     const onward = options.filter((neighbor) => neighbor.other !== previousNode);
     return random.pick(onward.length ? onward : options) ?? null;
+  }
+
+  function isWalkablePosition(position) {
+    const nearest = roadNetwork.nearestEdge(position.x, position.z);
+    const margin = (nearest?.edge.width ?? CITY.road) / 2 + 9;
+    return position.x >= Math.min(graphBounds.minX - SIDEWALK_OFFSET, CITY.beachWestStart - 8)
+      && position.x <= graphBounds.maxX + SIDEWALK_OFFSET
+      && position.z >= graphBounds.minZ - SIDEWALK_OFFSET
+      && position.z <= graphBounds.maxZ + SIDEWALK_OFFSET
+      && nearest?.distance <= margin;
   }
 
   function lanePoint(from, to, laneOffset) {
@@ -122,11 +131,12 @@ export function createTraffic(city, scene, random) {
     const dx = towardB ? edge.dx : -edge.dx;
     const dz = towardB ? edge.dz : -edge.dz;
     const length = edge.length || 1;
+    car.laneOffset = car.laneTarget = Math.min(TRAFFIC.laneOffset + car.laneBias, (edge.width ?? CITY.road) / 2 - VEHICLE.radius - 0.3);
     car.x = edge.a.x + edge.dx * t + (dz / length) * car.laneOffset;
     car.z = edge.a.z + edge.dz * t - (dx / length) * car.laneOffset;
     car.heading = Math.atan2(dx, dz);
     car.node = from;
-    car.next = { other: to };
+    car.next = { edge, other: to };
   }
 
   function spawnPointNear(points, x, z, minRadius, maxRadius, occupied, minSpacing, preferCenter = false) {
@@ -156,14 +166,14 @@ export function createTraffic(city, scene, random) {
   }
 
   function routeCarAt(car, point) {
-    const nearest = roadNetwork.nearestEdge(point.x, point.z);
+    const nearest = point.edge ? { edge: point.edge, x: point.x, z: point.z } : roadNetwork.nearestEdge(point.x, point.z);
     if (!nearest) return;
     const edge = nearest.edge;
     const dx = edge.b.x - edge.a.x;
     const dz = edge.b.z - edge.a.z;
-    const t = Math.max(0, Math.min(1, Math.abs(dx) >= Math.abs(dz)
+    const t = Math.max(0, Math.min(1, point.t ?? (Math.abs(dx) >= Math.abs(dz)
       ? (nearest.x - edge.a.x) / (dx || 1)
-      : (nearest.z - edge.a.z) / (dz || 1)));
+      : (nearest.z - edge.a.z) / (dz || 1))));
     const towardB = Math.sin(point.heading) * dx + Math.cos(point.heading) * dz >= 0;
     setRouteOnEdge(car, edge, t, towardB);
   }
@@ -275,12 +285,11 @@ export function createTraffic(city, scene, random) {
       const length = edge.length || 1;
       const along = random.range(-8, 8);
       const side = random.chance(0.5) ? -1 : 1;
-      const x = nearest.x + (dx / length) * along + side * (dz / length) * (CITY.road / 2 + 3);
-      const z = nearest.z + (dz / length) * along - side * (dx / length) * (CITY.road / 2 + 3);
+      const sidewalkOffset = (edge.width ?? CITY.road) / 2 + 3;
+      const x = nearest.x + (dx / length) * along + side * (dz / length) * sidewalkOffset;
+      const z = nearest.z + (dz / length) * along - side * (dx / length) * sidewalkOffset;
       const resolved = resolveAmbientPosition(x, z, 0.28);
-      const inWalkableBounds = Math.abs(resolved.x) <= CITY.half + 8
-        && resolved.z >= -CITY.half - 8
-        && resolved.z <= CITY.beachStart + 8;
+      const inWalkableBounds = isWalkablePosition(resolved);
       if (!resolved.hit && inWalkableBounds) position = { x, z };
     }
     if (!position) return;
@@ -331,6 +340,7 @@ export function createTraffic(city, scene, random) {
     let desiredSpeed = car.hornTimer > 0 ? car.targetSpeed * 0.2 : car.targetSpeed;
     let nearestAhead = Infinity;
     let blocked = false;
+    const laneLimit = (car.next?.edge?.width ?? CITY.road) / 2 - VEHICLE.radius - 0.3;
     const consider = (other, width = 2.6) => {
       const dx = other.x - car.x;
       const dz = other.z - car.z;
@@ -350,17 +360,18 @@ export function createTraffic(city, scene, random) {
     if (player) consider(playerPosition(player), player.state.inCar ? 2.7 : 3.1);
 
     if (blocked && car.laneCooldown === 0) {
-      const base = TRAFFIC.laneOffset + car.laneBias;
+      const base = Math.min(TRAFFIC.laneOffset + car.laneBias, laneLimit);
       const firstSide = random.chance(0.5) ? -1 : 1;
       for (const side of [firstSide, -firstSide]) {
         const alternate = base + side * LANE_SHIFT;
+        if (Math.abs(alternate) > laneLimit) continue;
         if (Math.abs(alternate - car.laneTarget) < 0.5 || !laneIsClear(car, alternate, vehicles, player)) continue;
         car.laneTarget = alternate;
         break;
       }
       car.laneCooldown = random.range(3, 6);
     } else if (!blocked && car.laneCooldown === 0) {
-      const base = TRAFFIC.laneOffset + car.laneBias;
+      const base = Math.min(TRAFFIC.laneOffset + car.laneBias, laneLimit);
       if (laneIsClear(car, base, vehicles, player)) car.laneTarget = base;
       car.laneCooldown = 2;
     }
@@ -422,21 +433,23 @@ export function createTraffic(city, scene, random) {
     const edge = nearest.edge;
     const ux = edge.dx / edge.length;
     const uz = edge.dz / edge.length;
+    const sidewalkOffset = (edge.width ?? CITY.road) / 2 + 3;
+    const crossingOffset = Math.min(CROSSING_OFFSET, edge.length / 3);
     const side = (ped.x - nearest.x) * uz - (ped.z - nearest.z) * ux >= 0 ? 1 : -1;
     const along = (ped.x - edge.a.x) * ux + (ped.z - edge.a.z) * uz;
-    const endAlong = along < edge.length / 2 ? CROSSING_OFFSET : edge.length - CROSSING_OFFSET;
+    const endAlong = along < edge.length / 2 ? crossingOffset : edge.length - crossingOffset;
     // Cross just beyond the intersection, from one curb to the opposite curb.
     if (ped.crossingCooldown <= 0 && random.chance(0.45)) {
-      ped.crossingStart = { x: edge.a.x + ux * endAlong + uz * side * SIDEWALK_OFFSET,
-        z: edge.a.z + uz * endAlong - ux * side * SIDEWALK_OFFSET };
-      ped.crossingEnd = { x: edge.a.x + ux * endAlong - uz * side * SIDEWALK_OFFSET,
-        z: edge.a.z + uz * endAlong + ux * side * SIDEWALK_OFFSET };
+      ped.crossingStart = { x: edge.a.x + ux * endAlong + uz * side * sidewalkOffset,
+        z: edge.a.z + uz * endAlong - ux * side * sidewalkOffset };
+      ped.crossingEnd = { x: edge.a.x + ux * endAlong - uz * side * sidewalkOffset,
+        z: edge.a.z + uz * endAlong + ux * side * sidewalkOffset };
       ped.routeTarget = ped.crossingStart;
       ped.routeStage = 'approach';
     } else {
-      const destination = along < edge.length / 2 ? edge.length - CROSSING_OFFSET : CROSSING_OFFSET;
-      ped.routeTarget = { x: edge.a.x + ux * destination + uz * side * SIDEWALK_OFFSET,
-        z: edge.a.z + uz * destination - ux * side * SIDEWALK_OFFSET };
+      const destination = along < edge.length / 2 ? edge.length - crossingOffset : crossingOffset;
+      ped.routeTarget = { x: edge.a.x + ux * destination + uz * side * sidewalkOffset,
+        z: edge.a.z + uz * destination - ux * side * sidewalkOffset };
       ped.routeStage = 'sidewalk';
     }
   }
@@ -547,9 +560,7 @@ export function createTraffic(city, scene, random) {
     const nx = ped.x + Math.sin(ped.heading) * ped.speed * dt;
     const nz = ped.z + Math.cos(ped.heading) * ped.speed * dt;
     const resolved = resolveAmbientPosition(nx, nz, 0.28);
-    const inWalkableBounds = Math.abs(resolved.x) <= CITY.half + 8
-      && resolved.z >= -CITY.half - 8
-      && resolved.z <= CITY.beachStart + 8;
+    const inWalkableBounds = isWalkablePosition(resolved);
     if (inWalkableBounds) {
       ped.x = resolved.x;
       ped.z = resolved.z;

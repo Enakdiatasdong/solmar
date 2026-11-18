@@ -2,8 +2,9 @@
 // ?seed=N selects the city; ?shot=start|play|end stages a frozen, reproducible scene.
 import * as THREE from '../vendor/three.module.min.js';
 import {
-  CAMERA, MAX_FRAME, MISSIONS, PLAYER, POLICE, RADIO, REP, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
+  CAMERA, DIFFICULTY, MAX_FRAME, MISSIONS, PLAYER, POLICE, RADIO, REP, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
 } from './config.js';
+import { currentDifficulty, setDifficulty } from './difficulty.js';
 import { createRandom, parseSeed } from './random.js';
 import { clampToWorld, createCity, resolveCollisions } from './world.js';
 import { createDistricts } from './districts.js';
@@ -13,10 +14,13 @@ import { createJetpack, JETPACK_PRICE } from './jetpack.js';
 import { createVehicles, exitSpot } from './vehicles.js';
 import { createTraffic } from './traffic.js';
 import { createPolice } from './police.js';
+import { createRespray } from './respray.js';
 import { createCombat } from './combat.js';
 import { createAudio } from './audio.js';
 import { createHud } from './hud.js';
+import { createRadio } from './radio.js';
 import { createMissions } from './missions.js';
+import { createCollectibles } from './collectibles.js';
 
 
 
@@ -32,11 +36,12 @@ import { createGangs } from './gangs.js';
 import { createStats } from './stats.js';
 
 import { createVehicleJobs } from './vehicle-jobs.js';
+import { createRaces } from './races.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
   ACTION_BUY_AMMO, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_HORN, ACTION_JETPACK, ACTION_MENU, ACTION_MUTE,
-  ACTION_PAUSE, ACTION_PUNCH, ACTION_RESTART, createInput,
+  ACTION_PAUSE, ACTION_PUNCH, ACTION_RADIO, ACTION_RESTART, createInput,
 } from './input.js';
 import { stageShot } from './shots.js';
 import { cameraPositionAtDistance, findRoadRoute, safeCameraDistance } from './camera.js';
@@ -78,16 +83,6 @@ export function advanceClockAndRadio(state, dt) {
   while (state.clockMinutes >= 1440) {
     state.clockMinutes -= 1440;
     state.day += 1;
-  }
-  state.radioTrackElapsed += dt;
-  while (state.radioTrackElapsed >= 45) {
-    state.radioTrackElapsed -= 45;
-    const station = RADIO.stations[state.radioStationIndex] ?? RADIO.stations[0];
-    state.radioTrackIndex += 1;
-    if (state.radioTrackIndex >= station.tracks.length) {
-      state.radioTrackIndex = 0;
-      state.radioStationIndex = (state.radioStationIndex + 1) % RADIO.stations.length;
-    }
   }
 }
 
@@ -133,13 +128,18 @@ function makeGame(seedValue, shotName = null) {
   const landmarks = createLandmarks({ scene: renderer.scene, city, districts, hud });
   let storyObjective = '';
   let vehicleObjective = '';
+  let raceObjective = '';
   function setStoryObjective(text) {
     storyObjective = text;
-    hud.setObjective(vehicleObjective || storyObjective);
+    hud.setObjective(raceObjective || vehicleObjective || storyObjective);
   }
   function setVehicleObjective(text) {
     vehicleObjective = text;
-    hud.setObjective(vehicleObjective || storyObjective);
+    hud.setObjective(raceObjective || vehicleObjective || storyObjective);
+  }
+  function setRaceObjective(text) {
+    raceObjective = text;
+    hud.setObjective(raceObjective || vehicleObjective || storyObjective);
   }
 
   const missions = createMissions({
@@ -185,12 +185,35 @@ function makeGame(seedValue, shotName = null) {
   const input = createInput(canvas, () => state.screen === 'playing' && !player.state.inCar);
   const clock = { accumulator: 0, last: null };
   const state = {
-    screen: 'menu', cash: MISSIONS.startCash, completed: [], missionBest: {},
+    screen: 'menu', cash: MISSIONS.startCash, completed: [], missionBest: {}, difficulty: 'normal',
     muted: Boolean(readSave()?.muted), started: false, elapsed: 0, lastSave: 0,
     pauseReason: '', bustedFine: 0, finalMission: null, pedHitCooldown: 0,
     shotsFired: 0, shot: shotName, respawn: { x: SPAWN.x, z: SPAWN.z },
-    day: 1, clockMinutes: 18 * 60 + 52, radioStationIndex: 0, radioTrackIndex: 0, radioTrackElapsed: 0,
+    day: 1, clockMinutes: 18 * 60 + 52,
   };
+  const radio = createRadio({ audio, hud, stations: RADIO.stations });
+  const collectibles = createCollectibles({ scene: renderer.scene, city, hud, audio, onPickup: () => saveNow() });
+  const races = createRaces({
+    scene: renderer.scene, city, player, vehicles,
+    hud: { ...hud, setObjective: setRaceObjective },
+    isUnlocked: (race) => missions.completedCount() >= (race.regionRequired ?? 0),
+    onComplete(event) {
+      event.prize = Math.round(event.prize * currentDifficulty().payout);
+      awardReward(event.prize);
+      refreshHud();
+      saveNow();
+    },
+  });
+  const respray = createRespray({
+    scene: renderer.scene, city, hud, audio, police, player, stats,
+    getCash: () => state.cash,
+    setCash(amount) { state.cash = amount; hud.setCash(amount); },
+    onPaid() {
+      rep.noteWanted(0, { awardEscape: false });
+      refreshHud();
+      saveNow();
+    },
+  });
   let shotMode = Boolean(shotName);
   let frameId = null;
   let shotFrameId = null;
@@ -202,6 +225,17 @@ function makeGame(seedValue, shotName = null) {
 
   function announce(message) {
     if (nodes.status) nodes.status.textContent = message;
+  }
+
+  function selectDifficulty(id) {
+    const selected = setDifficulty(id);
+    state.difficulty = selected.id;
+    for (const button of nodes['title-screen']?.querySelectorAll('[data-difficulty]') ?? []) {
+      const active = button.dataset.difficulty === selected.id;
+      button.classList.toggle('selected', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+    return selected;
   }
 
   function resetClock() {
@@ -306,8 +340,7 @@ function makeGame(seedValue, shotName = null) {
     hud.setRegions(regionSnapshot);
     hud.setRep(rep.rankInfo());
     hud.setWeaponSlots(combat.state.weapons, combat.state.weaponIndex);
-    const radioStation = RADIO.stations[state.radioStationIndex] ?? RADIO.stations[0];
-    hud.setRadio(radioStation, radioStation.tracks[state.radioTrackIndex % radioStation.tracks.length]);
+    radio.refreshHud();
     hud.setPoliceUnits(police.getChaseStatus(player, Boolean(missions.active?.id === 'paper-moon')), police.state.wanted);
     const paperMoon = missions.active?.id === 'paper-moon';
     hud.setMissionCard(paperMoon ? {
@@ -321,6 +354,7 @@ function makeGame(seedValue, shotName = null) {
     const surface = districts.surfaceAt(x, z);
     const zone = district === 'rural' ? `Desa Utara — ${surface === 'dirt' ? 'Jalan Tanah' : 'Padang Rumput'}`
       : district === 'beach' ? 'Pantai Solmar'
+        : district === 'airfield' ? 'Solmar Airfield'
         : district === 'downtown' ? 'Downtown — Kota' : 'Kota Solmar';
     hud.setZone(`${zone} · Tempat ${landmarks.state.count}/${landmarks.state.total}`);
 
@@ -328,6 +362,7 @@ function makeGame(seedValue, shotName = null) {
     const landmarkBlips = landmarks.getBlips();
     blips.push(...landmarkBlips);
     blips.push(...assets.getBlips(), ...restaurants.getBlips(), ...safehouses.getBlips());
+    blips.push(...collectibles.getBlips(), ...races.getBlips());
 
     hud.setWeapon(combat.state.weapon);
     blips.push(...vehicleJobs.getBlips());
@@ -348,7 +383,7 @@ function makeGame(seedValue, shotName = null) {
     hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw, regionSnapshot, {
       rural: districts.bounds, dirtRoads: districts.state.dirtRoads, landmarks: landmarkBlips,
       searchZone: paperMoon ? { x: player.state.x, z: player.state.z, radius: 120 } : null,
-      route,
+      route: races.getRoute() ?? route,
       storyMarker,
     }, gangs.getMinimapZones());
     if (openPanel === 'gangs' && state.elapsed - gangsPanelUpdatedAt >= 0.25) renderGangsPanel();
@@ -396,6 +431,7 @@ function makeGame(seedValue, shotName = null) {
     player.state.speed = 0;
     player.state.vy = 0;
     player.state.grounded = true;
+    races.fail('You left the car.');
     vehicleJobs.fail('You left the vehicle.');
   }
 
@@ -419,6 +455,7 @@ function makeGame(seedValue, shotName = null) {
       mealsEaten: restaurants.state.mealsEaten,
       safehouses: safehouses.serialize(),
 
+      difficulty: currentDifficulty().id, station: radio.serialize(), collectedReels: collectibles.state.collected,
       districts: gangs.serialize(), stats: stats.serialize(),
 
     });
@@ -426,6 +463,8 @@ function makeGame(seedValue, shotName = null) {
 
   function startRun(continueSave = false) {
     const save = continueSave ? readSave() : null;
+    setDifficulty(shotMode ? 'normal' : save?.difficulty ?? state.difficulty ?? 'normal');
+    state.difficulty = currentDifficulty().id;
     rep.reset(save?.rep ?? 0);
     leaveCar();
     missions.reset();
@@ -433,6 +472,11 @@ function makeGame(seedValue, shotName = null) {
     regions.reset();
 
     vehicleJobs.reset();
+    races.reset();
+    radio.reset();
+    if (save) radio.restore(save.station);
+    collectibles.restore(save?.collectedReels);
+    respray.reset();
 
     police.clear();
     combat.reset();
@@ -481,7 +525,7 @@ function makeGame(seedValue, shotName = null) {
     Object.assign(state, {
       started: true, elapsed: 0, lastSave: 0, finalMission: null, bustedFine: 0,
       pedHitCooldown: 0, shotsFired: 0, pauseReason: '',
-      day: 1, clockMinutes: 18 * 60 + 52, radioStationIndex: 0, radioTrackIndex: 0, radioTrackElapsed: 0,
+      day: 1, clockMinutes: 18 * 60 + 52,
     });
     stats.reset();
     if (save) stats.restore(save.stats);
@@ -544,6 +588,7 @@ function makeGame(seedValue, shotName = null) {
   }
 
   function completeVehicleJob(event) {
+    event.reward = Math.round(event.reward * currentDifficulty().payout);
     awardReward(event.reward);
     refreshHud();
     saveNow();
@@ -555,7 +600,8 @@ function makeGame(seedValue, shotName = null) {
     if (!mission || state.completed.includes(mission.id)) return false;
     state.completed.push(mission.id);
 
-    awardCash(mission.reward);
+    const reward = Math.round(mission.reward * currentDifficulty().payout);
+    awardCash(reward);
     rep.addPoints(REP.mission, 'Mission complete');
     if (mission.id === JETPACK_REWARD_JOB && !jetpack.state.owned) {
       jetpack.unlock();
@@ -572,7 +618,7 @@ function makeGame(seedValue, shotName = null) {
     state.finalMission = { ...event, mission, elapsed };
     const values = {
       'complete-title': mission.title,
-      'complete-cash': `+$${mission.reward.toLocaleString('en-US')}`,
+      'complete-cash': `+$${reward.toLocaleString('en-US')}`,
       'complete-time': elapsed === null ? '—' : `${elapsed.toFixed(1)}s`,
       'complete-extra': `${missions.completedCount()} of ${missions.list.length} jobs complete.`,
     };
@@ -583,7 +629,7 @@ function makeGame(seedValue, shotName = null) {
     setScreen('mission-complete');
     refreshHud();
     saveNow();
-    announce(`Mission complete: ${mission.title}. Earned $${mission.reward}.`);
+    announce(`Mission complete: ${mission.title}. Earned $${reward}.`);
     announceRankUps();
     return true;
   }
@@ -604,6 +650,7 @@ function makeGame(seedValue, shotName = null) {
     stats.recordBusted();
 
     vehicleJobs.fail('Busted.');
+    races.fail('Busted.');
 
     leaveCar();
     jetpack.deactivate();
@@ -629,6 +676,7 @@ function makeGame(seedValue, shotName = null) {
 
 
     vehicleJobs.fail('Jax went down.');
+    races.fail(player.state.inCar?.state.wrecked ? 'Car wrecked.' : 'Racer went down.');
 
     missions.fail('Jax went down.');
     state.finalMission = null;
@@ -668,7 +716,10 @@ function makeGame(seedValue, shotName = null) {
 
   const missionList = hud.hud?.missionList || nodes['mission-list'];
   let vehicleJobRows = [];
-  function syncVehicleJobRows(entries = vehicleJobs.getEntries()) {
+  function repeatableEntries() {
+    return [...vehicleJobs.getEntries(), ...races.getEntries()];
+  }
+  function syncVehicleJobRows(entries = repeatableEntries()) {
     vehicleJobRows.forEach(({ row, label }, index) => {
       const entry = entries[index];
       if (!entry) return;
@@ -692,13 +743,12 @@ function makeGame(seedValue, shotName = null) {
     const rank = rep.rankInfo();
     const progress = `${regions.unlockedCount()} / ${regions.state.regions.length} districts open`;
     const needed = rank.nextAt === null ? 'Max rank' : `${(rank.nextAt - rank.points).toLocaleString('en-US')} points to ${rank.nextName}`;
-    hud.showMissionList(missions.list, missions.list.findIndex((mission) => mission.active), {
-      rank: rank.name, points: rep.state.points, next: needed, districts: progress,
-    });
-
-    const entries = vehicleJobs.getEntries();
+    const entries = repeatableEntries();
     const jobs = [...missions.list, ...entries];
-    hud.showMissionList(jobs, jobs.findIndex((mission) => mission.active));
+    hud.showMissionList(jobs, jobs.findIndex((mission) => mission.active), {
+      rank: rank.name, points: rep.state.points, next: needed, districts: progress,
+      difficulty: currentDifficulty().label,
+    });
 
     // hud.js creates rows at show time without data attributes. Bind through their container.
     const rows = missionList?.querySelectorAll('.mission-row') ?? [];
@@ -753,9 +803,9 @@ function makeGame(seedValue, shotName = null) {
 
   function chooseJob(id) {
     if (state.screen !== 'playing') return false;
-    const vehicleJob = vehicleJobs.getEntries().find((item) => item.id === id);
-    if (vehicleJob) {
-      if (!vehicleJob.active && vehicleJob.hint) hud.toast(vehicleJob.hint, 'info', 4);
+    const repeatableJob = repeatableEntries().find((item) => item.id === id);
+    if (repeatableJob) {
+      if (!repeatableJob.active && repeatableJob.hint) hud.toast(repeatableJob.hint, 'info', 4);
       hud.hideMissionList();
       return false;
     }
@@ -817,6 +867,7 @@ function makeGame(seedValue, shotName = null) {
       clearInput();
       return;
     }
+    if (races.startAt(player.state)) return;
     if (player.state.inCar) {
       leaveCar();
       announce('On foot.');
@@ -981,6 +1032,10 @@ function makeGame(seedValue, shotName = null) {
       return;
     }
     if (actions & ACTION_PAUSE) { pause(); return; }
+    if (state.screen === 'playing' && (actions & ACTION_RADIO)) {
+      radio.cycle();
+      saveNow();
+    }
     const weaponIndex = input.takeWeapon();
     const weaponWheel = input.takeWeaponWheel();
     if (weaponIndex !== null) selectWeapon(weaponIndex);
@@ -1034,11 +1089,13 @@ function makeGame(seedValue, shotName = null) {
 
     state.elapsed += dt;
     advanceClockAndRadio(state, dt);
+    radio.update(dt);
     districts.update(dt);
     state.pedHitCooldown = Math.max(0, state.pedHitCooldown - dt);
     if (player.state.inCar) {
       const car = player.state.inCar;
       if (car.state.wrecked) {
+        races.fail('Car wrecked.');
         leaveCar();
         hud.toast('The car is wrecked.', 'danger', 2.4);
       } else {
@@ -1075,11 +1132,13 @@ function makeGame(seedValue, shotName = null) {
     traffic.update(dt, player, vehicles);
     combat.update(dt, player);
     police.update(dt, player, combat);
-    rep.update(dt, police.state.wanted, { awardEscape: !police.state.busted });
+    const resprayResult = respray.update(dt, player);
+    rep.update(dt, police.state.wanted, { awardEscape: !police.state.busted && !resprayResult?.ok });
     regions.update(dt, player, vehicles, police, hud);
     rep.noteWanted(police.state.wanted, { awardEscape: false });
     syncRider();
     landmarks.update(dt, player);
+    collectibles.update(dt, player);
     const position = player.state;
     stats.addDistance(Math.hypot(position.x - x, position.z - z), Boolean(position.inCar));
     for (const place of landmarks.list) {
@@ -1100,6 +1159,7 @@ function makeGame(seedValue, shotName = null) {
     rep.noteWanted(police.state.wanted, { awardEscape: false });
 
     vehicleJobs.update(dt);
+    races.update(dt);
     if (missionList?.classList.contains('open')) syncVehicleJobRows();
 
     cleanPoliceCars();
@@ -1264,8 +1324,8 @@ function makeGame(seedValue, shotName = null) {
 
   const game = {
 
-    seed: seedValue, city, districts, landmarks, renderer, player, jetpack, vehicles, traffic, police, combat, audio,
-    hud, missions, regions, rep, assets, restaurants, safehouses, gangs, stats, vehicleJobs, input, state, orbit, setScreen, startRun, restart, pause, resume,
+    seed: seedValue, city, districts, landmarks, collectibles, renderer, player, jetpack, vehicles, traffic, police, combat, audio, respray,
+    hud, missions, regions, rep, assets, restaurants, safehouses, gangs, stats, vehicleJobs, races, radio, input, state, orbit, setScreen, startRun, restart, pause, resume,
 
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
     leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, selectWeapon, buyAmmo, step,

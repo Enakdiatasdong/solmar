@@ -3,15 +3,15 @@ import * as THREE from '../vendor/three.module.min.js';
 import { resolveCollisions } from './world.js';
 
 const LANDMARKS = [
-  ['menara-solmar', 'Menara Solmar', 'menara', -108, -108],
-  ['alun-alun-kota', 'Alun-alun Kota', 'plaza', 108, 108],
-  ['pasar-solmar', 'Pasar Solmar', 'pasar', 36, 72],
-  ['stasiun-solmar', 'Stasiun Solmar', 'stasiun', -288, 144],
-  ['stadion-teluk', 'Stadion Teluk', 'stadion', -180, 180],
+  ['menara-solmar', 'Menara Solmar', 'menara', 0, -36],
+  ['alun-alun-kota', 'Alun-alun Kota', 'plaza', 72, 72],
+  ['pasar-solmar', 'Pasar Solmar', 'pasar', 36, 144],
+  ['stasiun-solmar', 'Stasiun Solmar', 'stasiun', 288, 144],
+  ['stadion-teluk', 'Stadion Teluk', 'stadion', 288, -144],
   ['danau-cermin', 'Danau Cermin', 'danau', -420, -720],
-  ['mercusuar-pantai', 'Mercusuar Pantai', 'mercusuar', -330, 470],
-  ['pelabuhan-solmar', 'Pelabuhan Solmar', 'pelabuhan', -302, 430],
-  ['pantai-solmar', 'Pantai Solmar', 'pantai', 120, 440],
+  ['mercusuar-pantai', 'Mercusuar Pantai', 'mercusuar', -504, 288],
+  ['pelabuhan-solmar', 'Pelabuhan Solmar', 'pelabuhan', -468, -144],
+  ['pantai-solmar', 'Pantai Solmar', 'pantai', -468, 72],
   ['peternakan-bukit-hijau', 'Peternakan Bukit Hijau', 'peternakan', 312, -780],
   ['kebun-utara', 'Kebun Utara', 'kebun', -450, -620],
   ['bukit-senja', 'Bukit Senja', 'bukit', 60, -860],

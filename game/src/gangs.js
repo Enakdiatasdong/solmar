@@ -1,5 +1,5 @@
 // Seeded district control, hostile patrols, capture rewards and passive turf income.
-import { COMBAT, GANGS, SPAWN } from './config.js';
+import { COMBAT, GANGS, REGIONS, SPAWN, STARTER_CAR } from './config.js';
 import { createRandom } from './random.js';
 import { resolveCollisions } from './world.js';
 
@@ -15,6 +15,7 @@ export function createGangs({ city, combat, hud, seed = 1, awardCash }) {
   const counted = new Set();
   const lastKillAt = new Map();
   const lastSpawnAt = new Map();
+  const spawnGuards = [SPAWN, STARTER_CAR, REGIONS.firstPickup, ...Object.values(city.landmarks ?? {})];
   let random;
   let elapsed = 0;
   let incomeElapsed = 0;
@@ -53,6 +54,10 @@ export function createGangs({ city, combat, hud, seed = 1, awardCash }) {
         random.range(district.rect.minX + 2, district.rect.maxX - 2),
         random.range(district.rect.minZ + 2, district.rect.maxZ - 2), radius);
       if (!contains(district.rect, point.x, point.z, radius)) continue;
+      // Keep patrols on the new playable footprint and away from arrival/service anchors,
+      // including when a continued save restores hostile ownership near the fresh spawn.
+      if (!REGIONS.list.some((region) => region.rectangles.some((rect) => contains(rect, point.x, point.z, radius)))) continue;
+      if (spawnGuards.some((guard) => Math.hypot(point.x - guard.x, point.z - guard.z) < 24)) continue;
       const blocked = colliders.some((box) => {
         const dx = point.x - Math.max(box.minX, Math.min(box.maxX, point.x));
         const dz = point.z - Math.max(box.minZ, Math.min(box.maxZ, point.z));

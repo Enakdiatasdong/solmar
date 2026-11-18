@@ -2,9 +2,7 @@ import * as THREE from '../vendor/three.module.min.js';
 import { CITY, RURAL, PALETTE } from './config.js';
 import { isOnSand } from './world.js';
 
-// Supplemental spaces outside the original city are generated here so the city
-// graph and its traffic data remain unchanged. Every placement uses the seeded
-// random function supplied by the caller.
+// Supplemental northern terrain and downtown details use the caller's seeded RNG.
 export function createDistricts({ scene, city, random }) {
   const group = new THREE.Group();
   group.name = 'Solmar districts';
@@ -16,8 +14,12 @@ export function createDistricts({ scene, city, random }) {
   scene.add(group);
   const dirtRoads = [
     { minX: -650, maxX: 650, minZ: -565, maxZ: -555 },
-    { minX: -305, maxX: -295, minZ: -900, maxZ: -380 },
-    { minX: 295, maxX: 305, minZ: -900, maxZ: -380 },
+    { minX: -305, maxX: -295, minZ: -900, maxZ: -360 },
+    { minX: 295, maxX: 305, minZ: -900, maxZ: -360 },
+    // Footpaths keep the preserved lake, orchard and viewpoint anchors accessible.
+    { minX: -420, maxX: -300, minZ: -722, maxZ: -718 },
+    { minX: -450, maxX: -300, minZ: -622, maxZ: -618 },
+    { minX: 60, maxX: 300, minZ: -862, maxZ: -858 },
   ];
   const state = { dirtRoads, rural: { ...RURAL }, landmarks: [], animatables: [] };
   const dirtTexture = new THREE.MeshLambertMaterial({ color: 0x986b43 });
@@ -156,7 +158,8 @@ export function createDistricts({ scene, city, random }) {
   ruralGroup.add(barnRoof);
   cylinder(ruralGroup, 395, 0, -780, 6, 17, new THREE.MeshLambertMaterial({ color: 0xb6bdad }), true, 14);
   const fenceMaterial = new THREE.MeshLambertMaterial({ color: 0x9b7043 });
-  [[330, -820, 70, 0.8], [395, -820, 70, 0.8], [325, -780, 0.8, 70], [400, -780, 0.8, 70]].forEach(([x, z, w, d]) => box(ruralGroup, x, 0, z, w, 1.4, d, fenceMaterial, true));
+  // Leave the x=300 track open past the farm for the northern race route.
+  [[340, -820, 50, 0.8], [395, -820, 70, 0.8], [325, -780, 0.8, 70], [400, -780, 0.8, 70]].forEach(([x, z, w, d]) => box(ruralGroup, x, 0, z, w, 1.4, d, fenceMaterial, true));
   const hayMaterial = new THREE.MeshLambertMaterial({ color: 0xd4aa4d });
   [[335, -748], [348, -748], [410, -750]].forEach(([x, z]) => {
     const hay = cylinder(ruralGroup, x, 0.4, z, 2.2, 2.1, hayMaterial, true, 10);
@@ -209,7 +212,8 @@ export function createDistricts({ scene, city, random }) {
   const ruralBounds = RURAL;
   function districtAt(x, z) {
     if (x >= ruralBounds.minX && x <= ruralBounds.maxX && z >= ruralBounds.minZ && z <= ruralBounds.maxZ) return 'rural';
-    if (isOnSand(x, z) || z >= CITY.beachStart) return 'beach';
+    if (isOnSand(x, z) || (x <= CITY.beachWestStart && Math.abs(z) <= CITY.half + 20)) return 'beach';
+    if (x >= CITY.airfield.minX && x <= CITY.airfield.maxX && z >= CITY.airfield.minZ && z <= CITY.airfield.maxZ) return 'airfield';
     const col = Math.floor((x - CITY.nodeMin) / CITY.pitch);
     const row = Math.floor((z - CITY.nodeMin) / CITY.pitch);
     if (col >= 3 && col <= 6 && row >= 3 && row <= 6) return 'downtown';

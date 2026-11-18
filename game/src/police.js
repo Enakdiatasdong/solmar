@@ -1,7 +1,7 @@
 // Wanted levels 0-5 drive a pursuit with SMPD cruisers and officers on foot.
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY, POLICE, VEHICLE } from './config.js';
-import { resolveCollisions } from './world.js';
+import { clampToWorld, resolveCollisions } from './world.js';
 
 const CALLSIGNS = ['IBIS-43', 'TARPON-10', 'HERON-17', 'KESTREL-31', 'MARLIN-24', 'OSPREY-08', 'PELICAN-62'];
 
@@ -273,7 +273,7 @@ export function createPolice(city, scene, vehicles) {
     const side = spawnIndex % 2 === 0 ? 1 : -1;
     const candidateX = edge.x + (dz / length) * side * (CITY.road / 2 + 3);
     const candidateZ = edge.z - (dx / length) * side * (CITY.road / 2 + 3);
-    const position = resolveCollisions(colliders, candidateX, candidateZ, 0.4);
+    const position = clampToWorld(resolveCollisions(colliders, candidateX, candidateZ, 0.4));
     const built = copMesh();
     built.group.position.set(position.x, 0.28, position.z);
     scene.add(built.group);
@@ -409,9 +409,9 @@ export function createPolice(city, scene, vehicles) {
       const speed = distance > 12 ? POLICE.footCopSpeed * 1.35 : POLICE.footCopSpeed;
       const nx = cop.x + Math.sin(cop.heading) * speed * dt;
       const nz = cop.z + Math.cos(cop.heading) * speed * dt;
-      const resolved = resolveCollisions(colliders, nx, nz, 0.4);
-      cop.x = Math.max(-CITY.half - 4, Math.min(CITY.half + 4, resolved.x));
-      cop.z = Math.max(-CITY.half - 4, Math.min(CITY.beachEnd - 8, resolved.z));
+      const resolved = clampToWorld(resolveCollisions(colliders, nx, nz, 0.4));
+      cop.x = resolved.x;
+      cop.z = resolved.z;
       cop.walk += dt * speed * 4;
       cop.legs[0].rotation.x = Math.sin(cop.walk) * 0.6;
       cop.legs[1].rotation.x = -cop.legs[0].rotation.x;

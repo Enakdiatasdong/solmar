@@ -1,5 +1,5 @@
 // Procedural Solmar: a 10x10 block street grid with a road graph, varied buildings whose window
-// textures are drawn on canvases (no image files), a beach and ocean along the south edge, palms,
+// textures are drawn on canvases (no image files), a west beach, south airfield, palms,
 // streetlights and props. Exports building/container collision AABBs and the road graph the AI and
 // missions navigate by. Everything is generated from the seeded RNG, so a seed rebuilds the city.
 import * as THREE from '../vendor/three.module.min.js';
@@ -9,7 +9,7 @@ import { createRandom } from './random.js';
 const WINDOW_BAY = 2.65;
 const FLOOR_HEIGHT = 2.85;
 const DECO_PASTELS = [0xe9b6ae, 0xb0d0c1, 0xeed0a7, 0xa9c8d7, 0xd5bbd7];
-const CANAL = { x: -241, width: 16, inlandZ: 469, bridgeZ: 502 };
+const CANAL = { startX: -540, endX: -372, z: 0, width: 16 };
 
 function facadeGrid(variant) {
   return {
@@ -292,13 +292,13 @@ function addBoats(parent, name, boats) {
 
 function addCauseway(parent, colliders) {
   const causeway = new THREE.Group();
-  causeway.name = 'Marea Causeway';
+  causeway.name = 'West Shore Causeway';
   parent.add(causeway);
   const cube = new THREE.BoxGeometry(1, 1, 1);
-  const z = 728;
-  const width = 14;
-  const breaks = [-442, -374, -306, -238, -170, -102, -34, 34, 102];
-  const height = [4.5, 6.3, 9.2, 12, 12, 9.2, 6.3, 4.5, 4.5];
+  const z = 84;
+  const width = 18;
+  const breaks = [-648, -600, -552, -504, -456, -408, -360];
+  const height = [0.4, 1.1, 1.6, 1.8, 1.6, 1.1, 0.4];
   const pillars = [];
   const railPosts = [];
   const deckMaterial = new THREE.MeshLambertMaterial({ color: 0x8c8586 });
@@ -311,8 +311,8 @@ function addCauseway(parent, colliders) {
     const center = breaks[span] + run / 2;
     const y = height[span] + rise / 2;
     const deck = new THREE.Mesh(cube, deckMaterial);
-    deck.position.set(center, y, z);
-    deck.scale.set(length + 0.3, 1.35, width);
+      deck.position.set(center, y, z);
+      deck.scale.set(length + 0.3, 1.05, width);
     deck.rotation.z = pitch;
     causeway.add(deck);
     for (const side of [-1, 1]) {
@@ -324,7 +324,7 @@ function addCauseway(parent, colliders) {
       causeway.add(rail);
       for (let step = 0; step < 8; step += 1) {
         const fraction = step / 8;
-        railPosts.push({ x: breaks[span] + run * fraction, y: height[span] + rise * fraction + 1.2,
+        railPosts.push({ x: breaks[span] + run * fraction, y: height[span] + rise * fraction + 1.05,
           z: railZ, width: 0.33, height: 1.28, depth: 0.39 });
       }
     }
@@ -342,8 +342,8 @@ function addCauseway(parent, colliders) {
   addWaterfrontInstances(causeway, 'guardrail posts', cube, 0xd8c3b3, railPosts);
   const island = new THREE.CylinderGeometry(0.78, 1, 1, 9);
   addWaterfrontInstances(causeway, 'approach islets', island, 0xb79b7e, [
-    { x: breaks[0] - 24, y: 0.45, z, width: 36, height: 6.5, depth: 25, yaw: 0.13 },
-    { x: breaks.at(-1) + 19, y: 0.45, z, width: 30, height: 6.5, depth: 23, yaw: -0.24 },
+    { x: breaks[0] - 5, y: 0.45, z, width: 15, height: 1.2, depth: 22, yaw: 0.13 },
+    { x: breaks.at(-1) + 5, y: 0.45, z, width: 15, height: 1.2, depth: 22, yaw: -0.24 },
   ]);
 }
 
@@ -358,24 +358,24 @@ function addMarina(parent, random) {
   const cleatStems = [];
   const ropes = [];
   const boats = [];
-  for (const z of [563, 592, 621]) {
-    fingers.push({ x: -333, y: 0.88, z, width: 54, height: 0.44, depth: 4.4 });
-    for (const x of [-357, -344, -331, -318]) {
+  for (const z of [-120, -60, 60]) {
+    fingers.push({ x: -556, y: 0.88, z, width: 54, height: 0.44, depth: 4.4 });
+    for (const x of [-580, -567, -554, -541]) {
       for (const side of [-1, 1]) {
         pilings.push({ x, y: 0.25, z: z + side * 1.66, width: 0.46, height: 3.7, depth: 0.46 });
       }
     }
     for (const side of [-1, 1]) {
-      const x = (side < 0 ? -343 : -323) + random.range(-2, 2);
+      const boatX = -556 + random.range(-2, 2);
       const boatZ = z + side * 5.7;
       const length = random.range(10, 15);
-      boats.push({ x, z: boatZ, length, width: random.range(3.3, 4.6), yaw: Math.PI * side / 2 });
+      boats.push({ x: boatX, z: boatZ, length, width: random.range(3.3, 4.6), yaw: Math.PI / 2 });
       for (const end of [-1, 1]) {
-        const cleatX = x + end * length * 0.39;
+        const cleatX = boatX + end * length * 0.39;
         const cleatZ = z + side * 1.9;
         cleatStems.push({ x: cleatX, y: 1.17, z: cleatZ, width: 0.12, height: 0.17, depth: 0.16 });
         cleats.push({ x: cleatX, y: 1.26, z: cleatZ, width: 0.44, height: 0.11, depth: 0.19 });
-        ropes.push(cleatX, 1.25, cleatZ, x + end * length * 0.46, 0.67, boatZ);
+        ropes.push(cleatX, 1.25, cleatZ, boatX + end * length * 0.46, 0.67, boatZ);
       }
     }
   }
@@ -392,38 +392,98 @@ function addCanal(parent, waterMaterial, colliders) {
   const group = new THREE.Group();
   group.name = 'Lucero Inlet';
   parent.add(group);
-  const depth = CITY.oceanStart - CANAL.inlandZ;
-  const centerZ = CANAL.inlandZ + depth / 2;
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(CANAL.width, depth), waterMaterial);
+  const length = CANAL.endX - CANAL.startX;
+  const centerX = (CANAL.startX + CANAL.endX) / 2;
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(length, CANAL.width), waterMaterial);
   water.rotation.x = -Math.PI / 2;
-  water.position.set(CANAL.x, -0.12, centerZ);
+  water.position.set(centerX, -0.12, CANAL.z);
   group.add(water);
 
   const cube = new THREE.BoxGeometry(1, 1, 1);
-  const banks = [{ x: CANAL.x, y: -0.04, z: CANAL.inlandZ, width: CANAL.width, height: 0.17, depth: 0.55 }];
-  const handrails = [];
-  const posts = [];
+  const banks = [];
   for (const side of [-1, 1]) {
-    const edgeX = CANAL.x + side * CANAL.width / 2;
-    banks.push({ x: edgeX, y: -0.04, z: centerZ, width: 0.72, height: 0.17, depth });
-    // Leave the bridge crossing and both ends of the channel open in the ground collision map.
-    for (const [minZ, maxZ] of [[CANAL.inlandZ + 5, CANAL.bridgeZ - 6], [CANAL.bridgeZ + 6, CITY.oceanStart - 13]]) {
-      colliders.push({ minX: edgeX - 0.22, maxX: edgeX + 0.22, minZ, maxZ, height: 0.23 });
-    }
-    const railZ = CANAL.bridgeZ + side * 2.8;
-    handrails.push({ x: CANAL.x, y: 1.02, z: railZ, width: CANAL.width + 4, height: 0.16, depth: 0.18 });
-    for (const offset of [-9.5, -5.7, -1.9, 1.9, 5.7, 9.5]) {
-      posts.push({ x: CANAL.x + offset, y: 0.65, z: railZ, width: 0.18, height: 0.77, depth: 0.18 });
-    }
+    const edgeZ = CANAL.z + side * CANAL.width / 2;
+    banks.push({ x: centerX, y: -0.04, z: edgeZ, width: length, height: 0.17, depth: 0.72 });
+    colliders.push({ minX: CANAL.startX + 5, maxX: CANAL.endX - 5,
+      minZ: edgeZ - 0.22, maxZ: edgeZ + 0.22, height: 0.23 });
   }
   addWaterfrontInstances(group, 'limestone coping', cube, 0xd2baa0, banks);
-  addWaterfrontInstances(group, 'footbridge deck', cube, 0x9f7960,
-    [{ x: CANAL.x, y: 0.14, z: CANAL.bridgeZ, width: CANAL.width + 4, height: 0.3, depth: 6.3 }]);
-  addWaterfrontInstances(group, 'footbridge rails', cube, 0xe1c9af, [...handrails, ...posts]);
+  const bridges = [-504, -432].map((x) => ({
+    x, y: 0.14, z: CANAL.z,
+    width: CITY.road + 2, height: 0.3, depth: CANAL.width + 4,
+  }));
+  addWaterfrontInstances(group, 'footbridge deck', cube, 0x9f7960, bridges);
+  addCauseway(group, colliders);
+}
+
+function addAirport(parent, colliders) {
+  const airport = new THREE.Group();
+  airport.name = 'Solmar Airfield';
+  parent.add(airport);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(720, 168), new THREE.MeshLambertMaterial({ color: 0x858b79 }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(0, 0.025, 456);
+  airport.add(ground);
+  const asphalt = new THREE.MeshLambertMaterial({ color: 0x30343a });
+  const runway = new THREE.Mesh(new THREE.PlaneGeometry(560, 34), asphalt);
+  runway.rotation.x = -Math.PI / 2;
+  runway.position.set(0, 0.045, 472);
+  airport.add(runway);
+  const taxiway = new THREE.Mesh(new THREE.PlaneGeometry(520, 10), asphalt);
+  taxiway.rotation.x = -Math.PI / 2;
+  taxiway.position.set(0, 0.05, 502);
+  airport.add(taxiway);
+  const paint = new THREE.MeshBasicMaterial({ color: 0xf2eee3 });
+  for (let x = -250; x <= 250; x += 28) {
+    const stripe = new THREE.Mesh(new THREE.PlaneGeometry(12, 0.7), paint);
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(x, 0.065, 472);
+    airport.add(stripe);
+  }
+  const terminal = new THREE.Mesh(new THREE.BoxGeometry(112, 8, 24), new THREE.MeshLambertMaterial({ color: 0xdacdb3 }));
+  terminal.position.set(38, 4.05, 519);
+  terminal.castShadow = true;
+  airport.add(terminal);
+  colliders.push({ minX: -18, maxX: 94, minZ: 507, maxZ: 531, height: 8.1 });
+}
+
+function addFreeway(parent) {
+  const freeway = new THREE.Group();
+  freeway.name = 'Solmar Freeway Loop';
+  parent.add(freeway);
+  const road = new THREE.MeshLambertMaterial({ color: 0x30363d });
+  const paint = new THREE.MeshBasicMaterial({ color: 0xe7dbb9 });
+  for (const z of [CITY.freeway.minZ, CITY.freeway.maxZ]) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(CITY.freeway.maxX - CITY.freeway.minX + CITY.freeway.width, CITY.freeway.width), road);
+    strip.rotation.x = -Math.PI / 2;
+    strip.position.set(0, 0.045, z);
+    freeway.add(strip);
+  }
+  for (const x of [CITY.freeway.minX, CITY.freeway.maxX]) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(CITY.freeway.width, CITY.freeway.maxZ - CITY.freeway.minZ + CITY.freeway.width), road);
+    strip.rotation.x = -Math.PI / 2;
+    strip.position.set(x, 0.046, 0);
+    freeway.add(strip);
+  }
+  const dashes = [];
+  for (let coordinate = CITY.freeway.minX + 20; coordinate < CITY.freeway.maxX - 10; coordinate += 24) {
+    dashes.push([coordinate, CITY.freeway.minZ], [coordinate, CITY.freeway.maxZ]);
+    dashes.push([CITY.freeway.minX, coordinate], [CITY.freeway.maxX, coordinate]);
+  }
+  const marks = new THREE.InstancedMesh(new THREE.BoxGeometry(7, 0.02, 0.3), paint, dashes.length);
+  const matrix = new THREE.Matrix4();
+  dashes.forEach(([x, z], index) => {
+    const vertical = (x === CITY.freeway.minX || x === CITY.freeway.maxX) && Math.abs(z) !== Math.abs(CITY.freeway.minZ);
+    matrix.makeRotationY(vertical ? Math.PI / 2 : 0).setPosition(x, 0.095, z);
+    marks.setMatrixAt(index, matrix);
+  });
+  marks.name = 'freeway:lane-dashes';
+  marks.instanceMatrix.needsUpdate = true;
+  freeway.add(marks);
 }
 
 function validateCityConfig() {
-  const dimensions = ['grid', 'block', 'road', 'pitch', 'nodeMin', 'nodeMax', 'half', 'edge', 'beachStart', 'beachEnd', 'oceanStart', 'oceanWidth'];
+  const dimensions = ['grid', 'block', 'road', 'pitch', 'nodeMin', 'nodeMax', 'half', 'edge', 'beachWestStart', 'beachWestEnd', 'oceanWestStart', 'oceanWidth'];
   if (!dimensions.every((key) => Number.isFinite(CITY[key]))) throw new TypeError('City dimensions must be finite numbers.');
   if (!Number.isInteger(CITY.grid) || CITY.grid < 1 || CITY.pitch <= 0 || CITY.road <= 0 || CITY.road >= CITY.pitch) {
     throw new RangeError('City grid and road dimensions are invalid.');
@@ -431,8 +491,12 @@ function validateCityConfig() {
   if (Math.abs(CITY.block + CITY.road - CITY.pitch) > 1e-6 || Math.abs(CITY.nodeMin + CITY.grid * CITY.pitch - CITY.nodeMax) > 1e-6) {
     throw new RangeError('City block and road grid dimensions do not align.');
   }
-  if (CITY.edge < Math.max(Math.abs(CITY.nodeMin), Math.abs(CITY.nodeMax)) + CITY.road / 2 || CITY.beachStart <= CITY.edge || CITY.beachEnd <= CITY.beachStart || CITY.oceanStart < CITY.beachEnd || CITY.oceanWidth <= CITY.edge * 2) {
-    throw new RangeError('City boundaries, beach, and ocean dimensions do not align.');
+  if (CITY.edge < Math.max(Math.abs(CITY.nodeMin), Math.abs(CITY.nodeMax)) + CITY.road / 2
+    || CITY.beachWestStart >= -CITY.edge || CITY.beachWestEnd >= CITY.beachWestStart
+    || CITY.oceanWestStart > CITY.beachWestEnd || CITY.oceanWidth <= CITY.edge * 2
+    || CITY.airfield.minZ <= CITY.edge || CITY.airfield.maxZ <= CITY.airfield.minZ
+    || CITY.freeway.minX !== -CITY.freeway.maxX || CITY.freeway.minZ !== -CITY.freeway.maxZ) {
+    throw new RangeError('City boundaries, coast, airfield, and freeway dimensions do not align.');
   }
   if (!Array.isArray(CITY.parkBlocks) || CITY.parkBlocks.some(([column, row]) => !Number.isInteger(column) || !Number.isInteger(row) || column < 0 || row < 0 || column >= CITY.grid || row >= CITY.grid)) {
     throw new RangeError('Park blocks must be within the city grid.');
@@ -495,10 +559,14 @@ function buildRoadGraph() {
     }
   }
   const edges = [];
-  function connect(a, b) {
+  function connect(a, b, width = CITY.road) {
     const dx = b.x - a.x;
     const dz = b.z - a.z;
-    const edge = { a, b, dx, dz, length: Math.hypot(dx, dz) };
+    const freeway = (a.x === b.x && Math.abs(a.x) === Math.abs(CITY.freeway.minX)
+      && Math.min(a.z, b.z) >= CITY.freeway.minZ && Math.max(a.z, b.z) <= CITY.freeway.maxZ)
+      || (a.z === b.z && Math.abs(a.z) === Math.abs(CITY.freeway.minZ)
+        && Math.min(a.x, b.x) >= CITY.freeway.minX && Math.max(a.x, b.x) <= CITY.freeway.maxX);
+    const edge = { a, b, dx, dz, length: Math.hypot(dx, dz), freeway, width, zone: a.zone ?? b.zone ?? (freeway ? 'freeway' : 'city') };
     edges.push(edge);
     a.neighbors.push({ edge, other: b, direction: { x: Math.sign(dx), z: Math.sign(dz) } });
     b.neighbors.push({ edge, other: a, direction: { x: -Math.sign(dx), z: -Math.sign(dz) } });
@@ -508,6 +576,39 @@ function buildRoadGraph() {
       const node = nodes[row * size + column];
       if (column + 1 < size) connect(node, nodes[row * size + column + 1]);
       if (row + 1 < size) connect(node, nodes[(row + 1) * size + column]);
+    }
+  }
+  const airportRoad = [];
+  // End at the taxiway; the terminal occupies x=0 beyond z=507.
+  for (const z of [432, 504]) {
+    const node = { id: nodes.length, column: null, row: null, x: 0, z, zone: 'airport', neighbors: [] };
+    nodes.push(node);
+    airportRoad.push(node);
+  }
+  connect(nodes[10 * size + 5], airportRoad[0]);
+  connect(airportRoad[0], airportRoad[1]);
+  const addRuralNode = (x, z) => {
+    const node = { id: nodes.length, column: null, row: null, x, z, zone: 'hills', neighbors: [] };
+    nodes.push(node);
+    return node;
+  };
+  // Follow the existing z=-560 cross-country road and x=±300 tracks. Keeping
+  // these in the shared graph gives northern traffic and race checkpoints real roads.
+  const crossroad = new Map();
+  let previous = null;
+  for (const x of [-648, -576, -504, -432, -360, -300, -288, -216, -144, -72, 0, 72, 144, 216, 288, 300, 360, 432, 504, 576, 648]) {
+    const node = addRuralNode(x, -560);
+    crossroad.set(x, node);
+    if (previous) connect(previous, node, 10);
+    previous = node;
+  }
+  for (const x of [-300, 300]) {
+    previous = nodes[x < 0 ? 1 : 9];
+    // The slopes start just north of -888; leave room to turn at the track end.
+    for (const z of [-360, -380, -452, -524, -560, -632, -704, -776, -840, -880]) {
+      const node = z === -560 ? crossroad.get(x) : addRuralNode(x, z);
+      connect(previous, node, 10);
+      previous = node;
     }
   }
   const graph = {
@@ -520,9 +621,13 @@ function buildRoadGraph() {
     },
     nearestNode(x, z) {
       if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-      const column = Math.max(0, Math.min(size - 1, Math.round((x - CITY.nodeMin) / CITY.pitch)));
-      const row = Math.max(0, Math.min(size - 1, Math.round((z - CITY.nodeMin) / CITY.pitch)));
-      return nodes[row * size + column];
+      let best = null;
+      let bestDistance = Infinity;
+      for (const node of nodes) {
+        const distance = (node.x - x) ** 2 + (node.z - z) ** 2;
+        if (distance < bestDistance) { best = node; bestDistance = distance; }
+      }
+      return best;
     },
     nearestEdge(x, z) {
       if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
@@ -617,6 +722,11 @@ export function createCity(random, reservedPlaces = []) {
   asphalt.position.set(0, 0, (CITY.nodeMin + CITY.nodeMax) / 2);
   asphalt.receiveShadow = true;
   group.add(asphalt);
+  const outerGround = new THREE.Mesh(new THREE.PlaneGeometry(1500, 1760), new THREE.MeshLambertMaterial({ color: 0x536249 }));
+  outerGround.rotation.x = -Math.PI / 2;
+  outerGround.position.set(0, -0.22, -170);
+  outerGround.receiveShadow = true;
+  group.add(outerGround);
 
   const blockPitch = CITY.pitch;
   const sidewalkGeometry = new THREE.BoxGeometry(blockPitch - CITY.road + 2, 0.26, blockPitch - CITY.road + 2);
@@ -797,7 +907,8 @@ export function createCity(random, reservedPlaces = []) {
     const variant = options.variant ?? random.int(0, facadeVariants.length - 1);
     const color = options.color ?? random.pick(PALETTE.buildings);
     // Consume the usual random choices before leaving room for a place marker.
-    if (isReserved(cx, cz)) return null;
+    if (isReserved(cx, cz)
+      || (cz - depth / 2 < CANAL.width / 2 + 1.5 && cz + depth / 2 > -CANAL.width / 2 - 1.5)) return null;
     const geometry = new THREE.BoxGeometry(width, height, depth);
     const facadeVariant = tower ? towerPattern : facadePatterns[variant];
     scaleFacadeUVs(geometry, width, height, depth, facadeVariant);
@@ -1050,16 +1161,11 @@ export function createCity(random, reservedPlaces = []) {
   addRooftopNeon({ id: 'peach-lantern', label: 'PEACH LANTERN', caption: 'DINER / SUNSET TO LATE',
     color: 0xff83aa, targetX: 298, targetZ: 334, width: 22, height: 5.5 });
 
-  // Beach and ocean on the south edge.
-  const halfCoast = CITY.oceanWidth / 2;
-  const leftBank = CANAL.x - CANAL.width / 2;
-  const rightBank = CANAL.x + CANAL.width / 2;
+  // West beach and ocean: the canal mouth interrupts the shore and joins the city grid.
   const sand = new THREE.MeshLambertMaterial({ color: PALETTE.sand });
-  for (const [minX, maxX, minZ, maxZ] of [
-    [-halfCoast, halfCoast, CITY.beachStart, CANAL.inlandZ],
-    [-halfCoast, leftBank, CANAL.inlandZ, CITY.beachEnd],
-    [rightBank, halfCoast, CANAL.inlandZ, CITY.beachEnd],
-  ]) {
+  for (const [minZ, maxZ] of [[-380, CANAL.z - CANAL.width / 2], [CANAL.z + CANAL.width / 2, 380]]) {
+    const minX = CITY.beachWestEnd;
+    const maxX = CITY.beachWestStart;
     const beach = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX, maxZ - minZ), sand);
     beach.rotation.x = -Math.PI / 2;
     beach.position.set((minX + maxX) / 2, 0.04, (minZ + maxZ) / 2);
@@ -1068,49 +1174,51 @@ export function createCity(random, reservedPlaces = []) {
   }
 
   const boardwalk = new THREE.Mesh(
-    new THREE.BoxGeometry(CITY.edge * 2 + 6, 0.34, 12),
+    new THREE.BoxGeometry(12, 0.34, CITY.edge * 2 + 6),
     new THREE.MeshLambertMaterial({ color: PALETTE.boardwalk }),
   );
-  boardwalk.position.set(0, 0.17, CITY.beachStart + 8);
+  boardwalk.position.set(CITY.beachWestStart - 8, 0.17, 0);
   boardwalk.receiveShadow = true;
   group.add(boardwalk);
 
   const water = new THREE.MeshPhongMaterial({ color: PALETTE.ocean, shininess: 70, specular: 0x88a9b0 });
-  const ocean = new THREE.Mesh(new THREE.PlaneGeometry(CITY.oceanWidth, 2400), water);
+  const ocean = new THREE.Mesh(new THREE.PlaneGeometry(2400, CITY.oceanWidth), water);
   ocean.rotation.x = -Math.PI / 2;
-  ocean.position.set(0, -0.12, CITY.oceanStart + 1200);
+  ocean.position.set(CITY.oceanWestStart - 1200, -0.12, 0);
   group.add(ocean);
   addCanal(group, water, colliders);
+  addAirport(group, colliders);
+  addFreeway(group);
 
   // Seed the fleet separately so the original lot, prop and spawn sequences stay intact.
   const fleetRandom = createRandom(0x50a1a2);
-  addCauseway(group, colliders);
   addBoats(group, 'Offshore yachts', [
-    { x: -130, z: 643, width: 8, length: 27, yaw: -0.68 },
-    { x: -360, z: 830, width: 8.5, length: 30, yaw: 0.8 },
-    { x: -105, z: 849, width: 7, length: 24, yaw: -0.32 },
+    { x: -660, z: -230, width: 8, length: 27, yaw: -0.68 },
+    { x: -760, z: 80, width: 8.5, length: 30, yaw: 0.8 },
+    { x: -680, z: 260, width: 7, length: 24, yaw: -0.32 },
   ].map((boat) => ({
     ...boat, x: boat.x + fleetRandom.range(-4, 4), z: boat.z + fleetRandom.range(-6, 6),
     yaw: boat.yaw + fleetRandom.range(-0.18, 0.18),
   })));
+  addMarina(group, fleetRandom);
 
   const foamMaterial = new THREE.MeshBasicMaterial({ color: PALETTE.foam, transparent: true, opacity: 0.8 });
   for (let wave = 0; wave < 5; wave += 1) {
-    // Break the shoreline's foam at the inlet mouth.
-    for (const [minX, maxX] of wave === 0 ? [[-halfCoast, leftBank], [rightBank, halfCoast]] : [[-halfCoast, halfCoast]]) {
-      const strip = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX, 1.6 + wave * 0.9), foamMaterial);
+    for (const [minZ, maxZ] of [[-380, CANAL.z - CANAL.width / 2], [CANAL.z + CANAL.width / 2, 380]]) {
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(1.6 + wave * 0.9, maxZ - minZ), foamMaterial);
       strip.rotation.x = -Math.PI / 2;
-      strip.position.set((minX + maxX) / 2, 0.02, CITY.oceanStart + wave * 7);
+      strip.position.set(CITY.oceanWestStart + wave * 7, 0.02, (minZ + maxZ) / 2);
       group.add(strip);
     }
   }
-  const inCanal = (x, z, margin = 0) => z >= CANAL.inlandZ - margin && Math.abs(x - CANAL.x) <= CANAL.width / 2 + margin;
+  const inCanal = (x, z, margin = 0) => x >= CANAL.startX - margin && x <= CANAL.endX + margin
+    && Math.abs(z - CANAL.z) <= CANAL.width / 2 + margin;
 
   // Palms: instanced trunks and fronds, along the beach, the parks and a few sidewalks.
   const palmSpots = [];
-  for (let x = -330; x <= 330; x += random.range(17, 27)) {
-    palmSpots.push({ x: x + random.range(-3, 3), z: random.range(392, 428), scale: random.range(0.9, 1.3) });
-    if (random.chance(0.45)) palmSpots.push({ x: x + random.range(-8, 8), z: random.range(436, 468), scale: random.range(0.85, 1.15) });
+  for (let z = -330; z <= 330; z += random.range(17, 27)) {
+    palmSpots.push({ x: random.range(-410, -392), z: z + random.range(-3, 3), scale: random.range(0.9, 1.3) });
+    if (random.chance(0.45)) palmSpots.push({ x: random.range(-490, -464), z: z + random.range(-8, 8), scale: random.range(0.85, 1.15) });
   }
   for (const center of lotCenters) {
     if (!center.isPark || (center.column === 6 && center.row === 6)) continue;
@@ -1331,9 +1439,8 @@ export function createCity(random, reservedPlaces = []) {
     umbrellaCount,
   );
   for (let umbrella = 0; umbrella < umbrellaCount; umbrella += 1) {
-    const x = -320 + umbrella * 41 + random.range(-6, 6);
-    const startZ = random.range(392, 470);
-    const z = inCanal(x, startZ, 2.3) ? CANAL.inlandZ - 3 : startZ;
+    const x = random.range(-520, -450);
+    const z = -320 + umbrella * 41 + random.range(-6, 6);
     palmMatrix.makeTranslation(x, 0.1, z);
     umbrellaPole.setMatrixAt(umbrella, palmMatrix);
     umbrellaTop.setMatrixAt(umbrella, palmMatrix);
@@ -1345,27 +1452,26 @@ export function createCity(random, reservedPlaces = []) {
   if (umbrellaTop.instanceColor) umbrellaTop.instanceColor.needsUpdate = true;
   group.add(umbrellaPole, umbrellaTop);
 
-  const benchGeometry = new THREE.BoxGeometry(2.6, 0.16, 0.7);
+  const benchGeometry = new THREE.BoxGeometry(0.7, 0.16, 2.6);
   const benchMesh = new THREE.InstancedMesh(benchGeometry, new THREE.MeshLambertMaterial({ color: 0x8a5f3d }), 18);
   for (let bench = 0; bench < 18; bench += 1) {
-    const x = -300 + bench * 35;
-    const z = CITY.beachStart + 6 + (bench % 2) * 4;
+    const x = CITY.beachWestStart - 5 - (bench % 2) * 4;
+    const z = -306 + bench * 35;
     palmMatrix.makeTranslation(x, 0.72, z);
     benchMesh.setMatrixAt(bench, palmMatrix);
-    colliders.push({ minX: x - 1.3, maxX: x + 1.3, minZ: z - 0.35, maxZ: z + 0.35, height: 0.8 });
+    colliders.push({ minX: x - 0.35, maxX: x + 0.35, minZ: z - 1.3, maxZ: z + 1.3, height: 0.8 });
   }
   benchMesh.instanceMatrix.needsUpdate = true;
   group.add(benchMesh);
 
   const towelMesh = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(2.2, 0.03, 1.2),
+    new THREE.BoxGeometry(1.2, 0.03, 2.2),
     new THREE.MeshLambertMaterial({ color: 0xffffff }),
     14,
   );
   for (let towel = 0; towel < 14; towel += 1) {
-    const x = -280 + towel * 43 + random.range(-8, 8);
-    const startZ = random.range(400, 480);
-    const z = inCanal(x, startZ, 1.2) ? CANAL.inlandZ - 2 : startZ;
+    const x = random.range(-520, -450);
+    const z = -280 + towel * 43 + random.range(-8, 8);
     palmMatrix.makeTranslation(x, 0.08, z);
     towelMesh.setMatrixAt(towel, palmMatrix);
     towelMesh.setColorAt(towel, new THREE.Color(random.pick([0x4f8fb0, 0xd0604c, 0xe9c75a, 0xffffff, 0x5aa88c])));
@@ -1384,37 +1490,36 @@ export function createCity(random, reservedPlaces = []) {
   towerRoof.position.y = 5.8;
   towerRoof.rotation.y = Math.PI / 4;
   tower.add(towerBase, cabin, towerRoof);
-  tower.position.set(168, 0, 430);
+  tower.position.set(-430, 0, 168);
   group.add(tower);
   for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.35, 2.2, 0.35), towerMaterial);
-    post.position.set(168 + dx, 1.1, 430 + dz);
+    post.position.set(-430 + dx, 1.1, 168 + dz);
     group.add(post);
   }
-  colliders.push({ minX: 165.2, maxX: 170.8, minZ: 427.2, maxZ: 432.8, height: 6 });
+  colliders.push({ minX: -432.8, maxX: -427.2, minZ: 165.2, maxZ: 170.8, height: 6 });
 
   // Harbor: a pier on the west beach and shipping containers on the sand.
   const pier = new THREE.Group();
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(12, 0.5, 110), new THREE.MeshLambertMaterial({ color: 0x8d7350 }));
-  deck.position.set(-302, 0.9, 590);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(110, 0.5, 12), new THREE.MeshLambertMaterial({ color: 0x8d7350 }));
+  deck.position.set(-500, 0.9, -160);
   pier.add(deck);
   for (let post = 0; post < 12; post += 1) {
     for (const side of [-5, 5]) {
       const piling = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 4.2, 5), new THREE.MeshLambertMaterial({ color: 0x5f4830 }));
-      piling.position.set(-302 + side, 0.3, 540 + post * 9);
+      piling.position.set(-550 + post * 9, 0.3, -160 + side);
       pier.add(piling);
     }
   }
   group.add(pier);
-  addMarina(group, fleetRandom);
 
   const containerColors = [0xb8503e, 0x3f7286, 0xd0a246, 0x5f7d4f, 0x9a5b48];
   for (let container = 0; container < 9; container += 1) {
     const width = random.range(2.5, 3.2);
     const depth = random.range(5.4, 7.4);
     const height = random.range(2.4, 2.9);
-    const x = -318 + (container % 3) * 12 + random.range(-1.5, 1.5);
-    const z = 428 + Math.floor(container / 3) * 12;
+    const x = -482 - Math.floor(container / 3) * 12;
+    const z = -180 + (container % 3) * 12 + random.range(-1.5, 1.5);
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(width, height, depth),
       new THREE.MeshLambertMaterial({ color: random.pick(containerColors) }),
@@ -1458,8 +1563,10 @@ export function createCity(random, reservedPlaces = []) {
 
   const vehicleSpawnPoints = [];
   const pedestrianSpawnPoints = [];
-  const stations = [0.25, 0.5, 0.75];
   for (const edge of graph.edges) {
+    // Short northern segments need endpoint approaches so successive race
+    // checkpoints can stay separated without snapping back down the track.
+    const stations = edge.zone === 'hills' ? [0.1, 0.25, 0.5, 0.75, 0.9] : [0.25, 0.5, 0.75];
     const heading = Math.atan2(edge.dx, edge.dz);
     const normalX = -edge.dz / edge.length;
     const normalZ = edge.dx / edge.length;
@@ -1468,13 +1575,14 @@ export function createCity(random, reservedPlaces = []) {
       const centerX = edge.a.x + edge.dx * t;
       const centerZ = edge.a.z + edge.dz * t;
       for (const side of [-1, 1]) {
-        const x = centerX + normalX * side * 4.2;
-        const z = centerZ + normalZ * side * 4.2;
+        const laneOffset = Math.min(4.2, edge.width / 2 - 1.6);
+        const x = centerX + normalX * side * laneOffset;
+        const z = centerZ + normalZ * side * laneOffset;
         if (pointIsClear(colliders, x, z, 1.3)) {
-          vehicleSpawnPoints.push({ x, z, heading: side < 0 ? heading : heading + Math.PI, laneSide: side, edgeId: edge.a.id * graph.nodes.length + edge.b.id });
+          vehicleSpawnPoints.push({ x, z, heading: side < 0 ? heading : heading + Math.PI, laneSide: side, edge, t: stations[stationIndex], edgeId: edge.a.id * graph.nodes.length + edge.b.id });
         }
-        const pedestrianX = centerX + normalX * side * (CITY.road / 2 + 3);
-        const pedestrianZ = centerZ + normalZ * side * (CITY.road / 2 + 3);
+        const pedestrianX = centerX + normalX * side * (edge.width / 2 + 3);
+        const pedestrianZ = centerZ + normalZ * side * (edge.width / 2 + 3);
         if (pointIsClear(colliders, pedestrianX, pedestrianZ, 0.5)) {
           pedestrianSpawnPoints.push({
             x: pedestrianX,
@@ -1488,16 +1596,18 @@ export function createCity(random, reservedPlaces = []) {
   }
 
   const landmarks = {
-    safehouse: { x: 0, z: 96, name: 'Moreno Garage' },
-    client: { x: 80, z: 152, name: 'Hotel Azure' },
-    garage: { x: -216, z: 216, name: 'Moreno Garage' },
-    coupe: { x: 148, z: -18, name: 'Showroom row' },
-    raceStart: { x: 300, z: 360, name: 'Coast road' },
-    heat: { x: 0, z: 0, name: 'Downtown' },
-    harbor: { x: -302, z: 430, name: 'Solmar Harbor' },
+    safehouse: { x: -216, z: 144, name: 'Moreno Garage' },
+    client: { x: -288, z: 144, name: 'Hotel Azure' },
+    garage: { x: -216, z: 144, name: 'Moreno Garage' },
+    coupe: { x: 144, z: -72, name: 'Showroom Row' },
+    raceStart: { x: -360, z: 288, name: 'Coast road' },
+    heat: { x: -216, z: 144, name: 'Moreno Garage' },
+    harbor: { x: -468, z: -144, name: 'Solmar Harbor' },
     police: { x: 0, z: 0, name: 'SMPD' },
-    beach: { x: 120, z: 440, name: 'Solmar Beach' },
-    downtown: { x: 108, z: 108, name: 'Downtown' },
+    beach: { x: -468, z: 72, name: 'Solmar Beach' },
+    downtown: { x: 72, z: 72, name: 'Downtown' },
+    airfield: { x: 0, z: 432, name: 'Solmar Airfield' },
+    hills: { x: 300, z: -560, name: 'North Hills' },
   };
   for (const key of Object.keys(landmarks)) labels.push(landmarks[key]);
 
@@ -1522,7 +1632,7 @@ export function createCity(random, reservedPlaces = []) {
     },
     landmarks,
     blockPitch,
-    beach: { start: CITY.beachStart, end: CITY.beachEnd },
+    beach: { start: CITY.beachWestStart, end: CITY.beachWestEnd, axis: 'x' },
     // Walkable pads and beach are all at or below this height; used for spawn fall checks.
     groundHeight: 0.3,
   };
@@ -1573,19 +1683,21 @@ export function resolveCollisions(colliders, x, z, radius) {
   return { x: px, z: pz, hit };
 }
 
-/** True when a point is on the beach/ocean side of the city grid. */
+/** True on the west sand strip; ocean and the southern airfield are excluded. */
 export function isOnSand(x, z) {
-  return Number.isFinite(x) && Number.isFinite(z) && z >= CITY.beachStart && z <= CITY.beachEnd && Math.abs(x) <= CITY.half + 20;
+  return Number.isFinite(x) && Number.isFinite(z) && x <= CITY.beachWestStart && x >= CITY.beachWestEnd && Math.abs(z) <= CITY.half + 20;
 }
 
 export function clampToWorld(position) {
   if (!position || typeof position !== 'object') throw new TypeError('World position must be an object.');
   if (!Number.isFinite(position.x)) position.x = 0;
   if (!Number.isFinite(position.z)) position.z = 0;
-  position.z = Math.max(RURAL.minZ, Math.min(CITY.beachEnd - 6, position.z));
-  const xLimit = position.z <= RURAL.maxZ
-    ? RURAL.maxX
-    : isOnSand(position.x, position.z) ? CITY.half + 20 : CITY.edge;
-  position.x = Math.max(-xLimit, Math.min(xLimit, position.x));
+  position.z = Math.max(RURAL.minZ, Math.min(CITY.airfield.maxZ - 6, position.z));
+  // The hills connector reaches the city at z=-360. Choose the west bound from
+  // the terrain band so crossing the grid edge can enter the sand or airport apron.
+  const rural = position.z < CITY.nodeMin;
+  const minX = rural ? RURAL.minX : CITY.beachWestEnd + 6;
+  const maxX = rural ? RURAL.maxX : CITY.edge;
+  position.x = Math.max(minX, Math.min(maxX, position.x));
   return position;
 }

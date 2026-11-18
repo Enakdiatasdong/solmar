@@ -456,7 +456,7 @@ export function createHud() {
     if (stats) {
       const block = document.createElement('div');
       block.className = 'mission-stats';
-      block.textContent = `${stats.rank ?? 'Small Fry'} · ${Number(stats.points ?? 0).toLocaleString('en-US')} REP\n${stats.next ?? 'Max rank'}\n${stats.districts ?? ''}`;
+      block.textContent = `${stats.rank ?? 'Small Fry'} · ${Number(stats.points ?? 0).toLocaleString('en-US')} REP\n${stats.next ?? 'Max rank'}\n${stats.districts ?? ''}\nDifficulty: ${stats.difficulty ?? 'Normal'}`;
       hud.missionList.appendChild(block);
     }
     for (let index = 0; index < list.length; index += 1) {
@@ -662,6 +662,8 @@ export function createHud() {
     mapContext.scale(-scale, -scale);
     mapContext.translate(-actor.x, -actor.z);
 
+    mapContext.fillStyle = 'rgba(44, 120, 138, 0.55)';
+    mapContext.fillRect(CITY.oceanWestStart - 1600, -CITY.oceanWidth / 2, 1600, CITY.oceanWidth);
 
     if (extras?.rural) {
       const { minX, maxX, minZ, maxZ } = extras.rural;
@@ -675,10 +677,13 @@ export function createHud() {
       }
     }
 
-    mapContext.fillStyle = 'rgba(44, 120, 138, 0.55)';
-    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.oceanStart, CITY.oceanWidth, 1600);
     mapContext.fillStyle = 'rgba(196, 172, 120, 0.4)';
-    mapContext.fillRect(-CITY.oceanWidth / 2, CITY.beachStart, CITY.oceanWidth, CITY.beachEnd - CITY.beachStart);
+    mapContext.fillRect(CITY.beachWestEnd, -CITY.half - 20, CITY.beachWestStart - CITY.beachWestEnd, CITY.half * 2 + 40);
+    mapContext.fillStyle = '#626b5d';
+    mapContext.fillRect(CITY.airfield.minX, CITY.airfield.minZ, CITY.airfield.maxX - CITY.airfield.minX, CITY.airfield.maxZ - CITY.airfield.minZ);
+    mapContext.fillStyle = '#30343a';
+    mapContext.fillRect(-280, 455, 560, 34);
+    mapContext.fillRect(-260, 497, 520, 10);
     if (Array.isArray(zones)) {
       mapContext.save();
       mapContext.lineWidth = 1 / scale;
@@ -703,6 +708,14 @@ export function createHud() {
       mapContext.fillRect(offset - road / 2, CITY.nodeMin - road / 2, road, CITY.grid * pitch + road);
       mapContext.fillRect(CITY.nodeMin - road / 2, offset - road / 2, CITY.grid * pitch + road, road);
     }
+    const freeway = CITY.freeway;
+    mapContext.fillStyle = 'rgba(191, 181, 157, 0.7)';
+    for (const z of [freeway.minZ, freeway.maxZ]) {
+      mapContext.fillRect(freeway.minX - freeway.width / 2, z - freeway.width / 2, freeway.maxX - freeway.minX + freeway.width, freeway.width);
+    }
+    for (const x of [freeway.minX, freeway.maxX]) {
+      mapContext.fillRect(x - freeway.width / 2, freeway.minZ - freeway.width / 2, freeway.width, freeway.maxZ - freeway.minZ + freeway.width);
+    }
     mapContext.fillStyle = 'rgba(83, 103, 80, 0.5)';
     for (const block of CITY.parkBlocks) {
       mapContext.fillRect(CITY.nodeMin + (block[0] + 0.5) * pitch - 20, CITY.nodeMin + (block[1] + 0.5) * pitch - 20, 40, 40);
@@ -710,16 +723,17 @@ export function createHud() {
 
     if (Array.isArray(regionSnapshot?.regions)) {
       for (const region of regionSnapshot.regions) {
-        const bounds = region.bounds;
-        const minZ = Math.max(-CITY.edge, bounds.minZ);
-        const maxZ = Math.min(CITY.beachEnd, bounds.maxZ);
-        if (region.locked) {
-          mapContext.fillStyle = REGIONS.mapLocked;
-          mapContext.fillRect(-CITY.edge, minZ, CITY.edge * 2, maxZ - minZ);
-        } else {
-          mapContext.strokeStyle = REGIONS.mapOpen;
-          mapContext.lineWidth = REGIONS.mapLineWidth;
-          mapContext.strokeRect(-CITY.edge, minZ, CITY.edge * 2, maxZ - minZ);
+        for (const bounds of region.rectangles ?? [region.bounds]) {
+          if (!bounds) continue;
+          const { minX, maxX, minZ, maxZ } = bounds;
+          if (region.locked) {
+            mapContext.fillStyle = REGIONS.mapLocked;
+            mapContext.fillRect(minX, minZ, maxX - minX, maxZ - minZ);
+          } else {
+            mapContext.strokeStyle = REGIONS.mapOpen;
+            mapContext.lineWidth = REGIONS.mapLineWidth;
+            mapContext.strokeRect(minX, minZ, maxX - minX, maxZ - minZ);
+          }
         }
       }
     }

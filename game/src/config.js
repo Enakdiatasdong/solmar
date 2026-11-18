@@ -12,7 +12,7 @@ export const OUTFITS = [
 ];
 export const DEFAULT_OUTFIT = 'crimson';
 
-/** Procedural city: a square grid of blocks separated by roads, with a beach on the south edge. */
+/** SOLMAR city grid, west shore, south airfield and the rectangular freeway ring. */
 export const CITY = {
   grid: 10,
   block: 54,
@@ -22,10 +22,14 @@ export const CITY = {
   nodeMax: 360,
   half: 360,
   edge: 369,
-  beachStart: 372,
-  beachEnd: 540,
-  oceanStart: 540,
+  beachWestStart: -372,
+  beachWestEnd: -540,
+  // Expansion collectibles use this coast-orientation capability check.
+  get beachWest() { return this.beachWestStart; },
+  oceanWestStart: -540,
   oceanWidth: 4000,
+  airfield: { minX: -360, maxX: 360, minZ: 372, maxZ: 540 },
+  freeway: { minX: -288, maxX: 288, minZ: -288, maxZ: 288, width: 18 },
   parkBlocks: [
     [3, 3],
     [7, 4],
@@ -97,6 +101,49 @@ export const VEHICLE_TYPES = {
   vespera: { ...VEHICLE, maxSpeed: 46, accel: 22, brake: 34, reverseAccel: 10, maxReverse: 10, steer: 2.4, radius: 1.24 },
   van: { ...VEHICLE, maxSpeed: 26.5, accel: 11, brake: 22, reverseAccel: 7, maxReverse: 7, steer: 1.9, radius: 1.25 },
 };
+
+/** Timed street races. Every configured start and checkpoint lies on a city or rural road. */
+export const RACES = [
+  {
+    id: 'coast-sprint', title: 'Coast Sprint', color: '#55d5df',
+    hint: 'Start on the west boulevard and follow the shoreline road south.',
+    start: { landmark: 'raceStart', x: -360, z: 288 },
+    checkpoints: [
+      { label: 'West boulevard', x: -360, z: 216 },
+      { label: 'Beachfront turn', x: -360, z: 144 },
+      { label: 'South beach road', x: -360, z: 72 },
+      { label: 'Canal approach', x: -288, z: 0 },
+      { label: 'Freeway return', x: -288, z: -144 },
+    ],
+    timeLimit: 150, prizes: { first: 900, second: 450, third: 200 }, regionRequired: 0,
+  },
+  {
+    id: 'harbor-loop', title: 'Harbor Loop', color: '#ff9a72',
+    hint: 'Start near Moreno Garage and loop the west-side streets.',
+    start: { landmark: 'garage', x: -216, z: 144 },
+    checkpoints: [
+      { label: 'Harbor approach', x: -288, z: 216 },
+      { label: 'West grid', x: -216, z: 288 },
+      { label: 'Market crossing', x: -144, z: 216 },
+      { label: 'Canal crossing', x: -144, z: 144 },
+      { label: 'Garage return', x: -216, z: 72 },
+    ],
+    timeLimit: 150, prizes: { first: 900, second: 450, third: 200 }, regionRequired: 0,
+  },
+  {
+    id: 'hills-climb', title: 'North Hills Climb', color: '#9bc779',
+    hint: 'Reach the North Hills after three story jobs, then climb the ridge road.',
+    start: { landmark: 'hills', x: 300, z: -560 },
+    checkpoints: [
+      { label: 'East track', x: 300, z: -640 },
+      { label: 'Farm road', x: 300, z: -720 },
+      { label: 'Ridge bend', x: 300, z: -800 },
+      { label: 'North overlook', x: 300, z: -840 },
+      { label: 'Summit road', x: 300, z: -880 },
+    ],
+    timeLimit: 150, prizes: { first: 900, second: 450, third: 200 }, regionRequired: 3,
+  },
+];
 
 export const TRAFFIC = {
   cars: 24,
@@ -369,9 +416,9 @@ export const DAYNIGHT = [
 
 /** Tuning multipliers by difficulty selection. */
 export const DIFFICULTY = {
-  relaxed: { police: 0.7, wanted: 0.7, enemyDamage: 0.65 },
-  normal: { police: 1, wanted: 1, enemyDamage: 1 },
-  hardcore: { police: 1.35, wanted: 1.3, enemyDamage: 1.5 },
+  relaxed: { label: 'Relaxed', police: 0.7, wanted: 0.7, enemyDamage: 0.65, payout: 0.8 },
+  normal: { label: 'Normal', police: 1, wanted: 1, enemyDamage: 1, payout: 1 },
+  hardcore: { label: 'Hardcore', police: 1.35, wanted: 1.3, enemyDamage: 1.5, payout: 1.5 },
 };
 
 export const SAVE_KEY = 'solmar.save.v3';
@@ -380,17 +427,20 @@ export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
 /** The title vista and the spawn point. */
 export const TITLE_CAMERA = { x: 160, y: 42, z: 500, lookX: -150, lookY: 12, lookZ: 820 };
-export const SPAWN = { x: -1.2, z: 216, heading: 0 };
-export const STARTER_CAR = { x: 4.6, z: 220, heading: 0 };
+export const SPAWN = { x: -360, z: 180, heading: 0 };
+export const STARTER_CAR = { x: -360, z: 192, heading: 0 };
 
 
-/** Story-gated city bands, ordered from the coast northward. */
+/** Story-gated SOLMAR regions across the west shore, city, airport and north hills. */
 export const REGIONS = {
   list: [
-    { id: 'south-shore', name: 'South Shore', minZ: 180, maxZ: Infinity, required: 0 },
-    { id: 'downtown', name: 'Downtown', minZ: -60, maxZ: 180, required: 1 },
-    { id: 'northside', name: 'Northside', minZ: -240, maxZ: -60, required: 2 },
-    { id: 'north-hills', name: 'North Hills', minZ: -Infinity, maxZ: -240, required: 3 },
+    { id: 'south-shore', name: 'Beachside', required: 0, rectangles: [{ minX: -540, maxX: -72, minZ: -360, maxZ: 372 }] },
+    { id: 'downtown', name: 'Downtown', required: 1, rectangles: [
+      { minX: -72, maxX: 180, minZ: -360, maxZ: 372 },
+      { minX: -540, maxX: 369, minZ: 372, maxZ: 540 },
+    ] },
+    { id: 'northside', name: 'Eastside', required: 2, rectangles: [{ minX: 180, maxX: 369, minZ: -360, maxZ: 372 }] },
+    { id: 'north-hills', name: 'North Hills', required: 3, rectangles: [{ minX: -700, maxX: 700, minZ: -950, maxZ: -360 }] },
   ],
   pushMargin: 4,
   repeatWindow: 6,
@@ -403,8 +453,7 @@ export const REGIONS = {
   mapLocked: 'rgba(255, 107, 87, 0.25)',
   mapOpen: 'rgba(73, 198, 184, 0.32)',
   mapLineWidth: 8,
-  // The original introduction was north of the first gate. Use the hotel's south approach.
-  firstPickup: { x: 80, z: 216, name: 'Hotel Azure south approach' },
+  firstPickup: { x: -288, z: 144, name: 'Hotel Azure' },
 };
 
 

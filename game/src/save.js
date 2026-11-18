@@ -1,6 +1,7 @@
 // Versioned localStorage persistence. Invalid or incompatible data is ignored safely.
 import { ASSETS } from './assets.js';
-import { GANGS, MISSIONS, SAVE_KEY, SAVE_VERSION } from './config.js';
+import { DIFFICULTY, GANGS, MISSIONS, SAVE_KEY, SAVE_VERSION } from './config.js';
+import { normalizeCollectedReels } from './collectibles.js';
 import { normalizeSafehouseSave } from './safehouses.js';
 import { normalizeStats } from './stats.js';
 
@@ -67,6 +68,9 @@ function normalizeSave(value) {
     assets,
     safehouses: normalizeSafehouseSave(current ? value.safehouses : null),
     mealsEaten: current ? Math.max(0, finiteNumber(value.mealsEaten, 0)) : 0,
+    difficulty: Object.hasOwn(DIFFICULTY, value.difficulty) ? value.difficulty : 'normal',
+    station: Number.isInteger(value.station) && value.station >= 0 && value.station < 3 ? value.station : 0,
+    collectedReels: normalizeCollectedReels(current ? value.collectedReels : null),
     version: SAVE_VERSION,
     updatedAt: Number.isFinite(value.updatedAt) && value.updatedAt >= 0 ? value.updatedAt : 0,
   };

@@ -1,13 +1,15 @@
 // Story jobs for Jax Moreno in Solmar. Missions use the city's seeded world, the shared HUD,
 // vehicle, police and combat systems, and emit completion events for main.js to award and save.
 import * as THREE from '../vendor/three.module.min.js';
-import { MISSIONS, PALETTE, POLICE, REGIONS } from './config.js';
+import { MISSIONS, PALETTE, POLICE } from './config.js';
 
 const BEACON_COLORS = { available: 0xffc857, active: 0xffc857 };
-const FIRST_PICKUP = { x: 80, z: 152, name: 'Hotel Azure' };
-const FIRST_DROPOFF = { x: 300, z: 268, name: 'Pier 9' };
-const GARAGE = { x: -216, z: 216, name: 'Moreno Garage' };
-const BANK = { x: 288, z: -288, name: 'Solmar Bank' };
+const FIRST_PICKUP = { x: -288, z: 144, name: 'Hotel Azure' };
+const FIRST_DROPOFF = { x: -360, z: 216, name: 'Pier 9' };
+const GARAGE = { x: -216, z: 144, name: 'Moreno Garage' };
+const BANK = { x: 72, z: -72, name: 'Solmar Bank' };
+const SHOWROOM = { x: 144, z: -72, name: 'Showroom Row' };
+const COAST = { x: -360, z: 72, name: 'Beachfront road' };
 const COURIER_SECONDS = MISSIONS.beachRunTime;
 const PURSUIT_SECONDS = MISSIONS.failTime;
 
@@ -41,7 +43,7 @@ const STORY = [
     id: 'first-fare',
     title: 'First Wheels',
     briefing: 'Get in a car and drive to Hotel Azure.',
-    start: { x: 0, z: REGIONS.firstPickup.z, name: 'South Shore' },
+    start: FIRST_PICKUP,
     reward: MISSIONS.rewards['first-fare'],
     lines: [
       { who: 'Mara', text: 'First lesson, Jax: get behind the wheel, pick up our client at Hotel Azure, then take them to Pier 9.' },
@@ -52,7 +54,7 @@ const STORY = [
     id: 'hot-wheels',
     title: 'Courier Run',
     briefing: `Deliver Mara’s package to Hotel Azure within ${COURIER_SECONDS} seconds.`,
-    start: { x: -216, z: 216, name: 'Moreno Garage' },
+    start: SHOWROOM,
     reward: MISSIONS.rewards['hot-wheels'],
     lines: [
       { who: 'Mara', text: 'A client is waiting at Hotel Azure. This package has to reach them before the next ferry leaves.' },
@@ -63,7 +65,7 @@ const STORY = [
     id: 'beach-run',
     title: 'The Pickup',
     briefing: 'Steal the teal coupe from Showroom Row and bring it to Moreno Garage.',
-    start: { x: 148, z: -18, name: 'Showroom Row' },
+    start: COAST,
     reward: MISSIONS.rewards['beach-run'],
     lines: [
       { who: 'Mara', text: 'There’s a teal coupe on Showroom Row with its keys still inside. Take it to the garage.' },
@@ -74,7 +76,7 @@ const STORY = [
     id: 'heat',
     title: 'Heat',
     briefing: `Lose the SMPD’s three-star pursuit within ${PURSUIT_SECONDS} seconds.`,
-    start: { x: 144, z: 72, name: 'Downtown' },
+    start: GARAGE,
     reward: MISSIONS.rewards.heat,
     lines: [
       { who: 'Mara', text: 'The showroom job put three stars on you. Break their line of sight and lose the tail.' },
@@ -85,7 +87,7 @@ const STORY = [
     id: 'harbor-job',
     title: 'The Big One',
     briefing: 'Reach Solmar Bank, take the score to Moreno Garage, then lose the three-star tail.',
-    start: { x: -216, z: 216, name: 'Moreno Garage' },
+    start: GARAGE,
     reward: MISSIONS.rewards['harbor-job'],
     lines: [
       { who: 'Mara', text: 'The Solmar Bank vault opens at noon. We take the cash, get back to the garage, and disappear.' },
@@ -255,8 +257,8 @@ export function createMissions(ctx) {
 
   function beginFirstWheels() {
     state.stage = 'client-pickup';
-    setMarker(REGIONS.firstPickup, REGIONS.firstPickup.name);
-    setObjective('Get in a car and collect the client at Hotel Azure’s south approach.');
+    setMarker(FIRST_PICKUP, FIRST_PICKUP.name);
+    setObjective('Get in a car and collect the client at Hotel Azure on the beachfront.');
   }
 
   function beginCourierRun() {
@@ -268,7 +270,7 @@ export function createMissions(ctx) {
 
   function beginPickup() {
     state.stage = 'steal-car';
-    const target = city.landmarks?.coupe ?? { x: 148, z: -18 };
+    const target = SHOWROOM;
     const spec = { body: 0x2f7f75, cabin: 0x203037, name: 'Teal coupe', variant: 'coupe' };
     state.car = vehicles.addCar(spec, { x: target.x, z: target.z }, Math.PI / 2, { id: 'mission-coupe', kind: 'mission' });
     // main.js applies the normal theft response only to cars not already marked stolen.
@@ -427,7 +429,7 @@ export function createMissions(ctx) {
   function updateFirstWheels() {
     const car = inCar();
     if (car?.state.wrecked) return fail('Your car was wrecked before the client reached Pier 9.');
-    if (state.stage === 'client-pickup' && carNear(REGIONS.firstPickup, 11) && Math.abs(car.state.speed) < 6) {
+    if (state.stage === 'client-pickup' && carNear(FIRST_PICKUP, 11) && Math.abs(car.state.speed) < 6) {
       state.stage = 'client-dropoff';
       say('Client', 'Pier 9, please. The sea air will do me good.');
       setMarker(FIRST_DROPOFF, FIRST_DROPOFF.name);
@@ -438,7 +440,7 @@ export function createMissions(ctx) {
       if (!car) fail('You left the client before reaching Pier 9.');
       else if (car.state.wrecked) fail('The client’s car was wrecked.');
       else if (carNear(FIRST_DROPOFF, 12) && Math.abs(car.state.speed) < 5) complete();
-    } else if (state.stage === 'client-pickup' && distanceTo(REGIONS.firstPickup.x, REGIONS.firstPickup.z) < 6 && !inCar()) {
+    } else if (state.stage === 'client-pickup' && distanceTo(FIRST_PICKUP.x, FIRST_PICKUP.z) < 6 && !inCar()) {
       setObjective('Get in a car, then drive to Hotel Azure.');
     }
   }

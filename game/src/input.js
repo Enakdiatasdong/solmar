@@ -14,6 +14,7 @@ export const ACTION_RESTART = 128;
 export const ACTION_JETPACK = 256;
 export const ACTION_HORN = 512;
 export const ACTION_BUY_AMMO = 1024;
+export const ACTION_RADIO = 2048;
 
 
 const KEYMAP = {
@@ -100,6 +101,9 @@ export function createInput(target, canCycleWeapon = () => false) {
         break;
       case 'KeyH':
         queue(ACTION_HORN);
+        break;
+      case 'KeyV':
+        queue(ACTION_RADIO);
         break;
       case 'KeyM':
         if (event.shiftKey) queue(ACTION_MUTE);

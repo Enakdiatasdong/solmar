@@ -3,7 +3,7 @@ import { createPlaceMarker, nearestPlace } from './places.js';
 
 export const RESTAURANTS = [
   {
-    id: 'casa-marea', name: 'Casa Marea', x: -108, z: 180,
+    id: 'casa-marea', name: 'Casa Marea', x: -288, z: 216,
     color: 0xe58962, roof: 0x693e48, width: 8, depth: 6,
     menu: [
       { name: 'Citrus Plantain Bites', price: 9, heal: 15 },
@@ -12,7 +12,7 @@ export const RESTAURANTS = [
     ],
   },
   {
-    id: 'sunset-grill', name: 'Sunset Grill', x: 180, z: 108,
+    id: 'sunset-grill', name: 'Sunset Grill', x: 144, z: 108,
     color: 0xeab35b, roof: 0x794b35, width: 10, depth: 7,
     menu: [
       { name: 'Charred Lime Corn', price: 10, heal: 15 },
@@ -21,7 +21,7 @@ export const RESTAURANTS = [
     ],
   },
   {
-    id: 'noodle-harbor', name: 'Noodle Harbor', x: -180, z: -108,
+    id: 'noodle-harbor', name: 'Noodle Harbor', x: 288, z: -108,
     color: 0xb286cb, roof: 0x414d66, width: 7.5, depth: 6.5,
     menu: [
       { name: 'Sesame Cucumber Cups', price: 8, heal: 15 },
@@ -30,7 +30,7 @@ export const RESTAURANTS = [
     ],
   },
   {
-    id: 'pier-cafe', name: 'Pier Cafe', x: 108, z: -180,
+    id: 'pier-cafe', name: 'Pier Cafe', x: -360, z: 288,
     color: 0x71c7b4, roof: 0x344f59, width: 7, depth: 5,
     menu: [
       { name: 'Guava Hand Pie', price: 11, heal: 15 },
