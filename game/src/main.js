@@ -1091,7 +1091,10 @@ function makeGame(seedValue, shotName = null) {
       if (label && saved) label.textContent = `Continue — $${Math.round(saved.cash).toLocaleString('en-US')}`;
     }
     function bind(id, listener) { nodes[id]?.addEventListener('click', listener); }
-    bind('btn-start', () => startRun(false));
+    bind('btn-start', () => {
+      state.difficulty = nodes['title-screen']?.querySelector('[data-difficulty][aria-pressed="true"]')?.dataset.difficulty ?? 'normal';
+      startRun(false);
+    });
     bind('btn-continue', () => state.screen === 'paused' ? resume() : startRun(true));
     bind('btn-walk', () => state.screen === 'busted' ? leaveBusted() : startRun(false));
     bind('btn-jobs', () => { if (state.screen === 'menu') startRun(false); showJobs(); });
