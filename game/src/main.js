@@ -2,7 +2,7 @@
 // ?seed=N selects the city; ?shot=start|play|end stages a frozen, reproducible scene.
 import * as THREE from '../vendor/three.module.min.js';
 import {
-  CAMERA, MAX_FRAME, MISSIONS, PLAYER, POLICE, REP, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
+  CAMERA, MAX_FRAME, MISSIONS, PLAYER, POLICE, RADIO, REP, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
 } from './config.js';
 import { createRandom, parseSeed } from './random.js';
 import { clampToWorld, createCity, resolveCollisions } from './world.js';
@@ -39,6 +39,7 @@ import {
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RESTART, createInput,
 } from './input.js';
 import { stageShot } from './shots.js';
+import { cameraPositionAtDistance, findRoadRoute, safeCameraDistance } from './camera.js';
 
 const DOM_IDS = [
   'game', 'status', 'title-screen', 'btn-start', 'btn-walk', 'btn-jobs', 'btn-continue',
@@ -49,16 +50,16 @@ const DOM_IDS = [
 
 
 
-  'hud', 'health-fill', 'health-text', 'cash-value', 'income-value', 'wanted-stars', 'speed-value',
+  'hud', 'health-fill', 'health-text', 'cash-value', 'income-value', 'clock-value', 'wanted-stars', 'speed-value',
   'speed-box', 'vehicle-name', 'jetpack-box', 'jetpack-bar', 'jetpack-fill', 'jetpack-text',
-  'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
+  'objective-text', 'objective-box', 'toasts', 'minimap', 'zone-label', 'mission-list',
   'dialogue', 'dialogue-text', 'subtitle', 'hint', 'region-panel', 'region-current', 'region-list', 'rep-panel', 'rep-rank', 'rep-points', 'rep-progress', 'rep-next', 'mission-stats', 'place-menu', 'place-menu-title',
   'place-menu-subtitle', 'place-menu-rows', 'place-menu-close',
 
   'gangs-panel', 'btn-gangs', 'btn-gangs-hud', 'btn-gangs-close',
   'stats-panel', 'btn-stats', 'btn-stats-title', 'btn-stats-close',
 
-  'weapon-box', 'weapon-text',
+  'weapon-box', 'weapon-text', 'weapon-slots', 'vehicle-condition-bar', 'vehicle-condition', 'vehicle-condition-text', 'police-list', 'mission-card', 'mission-chapter', 'mission-card-title', 'mission-briefing', 'mission-awareness', 'mission-stage', 'mission-timer', 'mission-pips', 'mission-next', 'search-zone-chip', 'radio-box', 'radio-station', 'radio-track', 'radio-artist', 'rep-level', 'day-night-icon',
 
 ];
 const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
@@ -70,6 +71,25 @@ const MAX_STEPS = 8;
 const JETPACK_SERVICE_RADIUS = 12;
 const JETPACK_REWARD_JOB = 'harbor-job';
 const clamp = THREE.MathUtils.clamp;
+
+export function advanceClockAndRadio(state, dt) {
+  if (!state || !Number.isFinite(dt) || dt <= 0) return;
+  state.clockMinutes += dt;
+  while (state.clockMinutes >= 1440) {
+    state.clockMinutes -= 1440;
+    state.day += 1;
+  }
+  state.radioTrackElapsed += dt;
+  while (state.radioTrackElapsed >= 45) {
+    state.radioTrackElapsed -= 45;
+    const station = RADIO.stations[state.radioStationIndex] ?? RADIO.stations[0];
+    state.radioTrackIndex += 1;
+    if (state.radioTrackIndex >= station.tracks.length) {
+      state.radioTrackIndex = 0;
+      state.radioStationIndex = (state.radioStationIndex + 1) % RADIO.stations.length;
+    }
+  }
+}
 
 function element(id) {
   return typeof document === 'undefined' ? null : document.getElementById(id);
@@ -169,6 +189,7 @@ function makeGame(seedValue, shotName = null) {
     muted: Boolean(readSave()?.muted), started: false, elapsed: 0, lastSave: 0,
     pauseReason: '', bustedFine: 0, finalMission: null, pedHitCooldown: 0,
     shotsFired: 0, shot: shotName, respawn: { x: SPAWN.x, z: SPAWN.z },
+    day: 1, clockMinutes: 18 * 60 + 52, radioStationIndex: 0, radioTrackIndex: 0, radioTrackElapsed: 0,
   };
   let shotMode = Boolean(shotName);
   let frameId = null;
@@ -273,15 +294,27 @@ function makeGame(seedValue, shotName = null) {
     hud.setIncome(assets.ownedIncomePerMin(), assets.state.owned.size);
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
-
-
-
-    hud.setVehicleName(player.state.inCar?.spec?.name);
+    const currentCar = player.state.inCar;
+    hud.setVehicleName(currentCar?.spec?.name);
+    hud.setVehicleCondition(currentCar ? (currentCar.state.health / currentCar.state.maxHealth) * 100 : null, currentCar?.spec?.name);
+    const dayNight = getDayNightState();
+    hud.setClock(dayNight.day, Math.floor(dayNight.minutes / 60) % 24, Math.floor(dayNight.minutes % 60));
+    hud.setNight(dayNight.isNight);
     const { fuel, maxFuel, owned, active } = jetpack.state;
     hud.setJetpack(fuel, maxFuel, owned, active);
     const regionSnapshot = regions.snapshot(player.state.x, player.state.z);
     hud.setRegions(regionSnapshot);
     hud.setRep(rep.rankInfo());
+    hud.setWeaponSlots(combat.state.weapons, combat.state.weaponIndex);
+    const radioStation = RADIO.stations[state.radioStationIndex] ?? RADIO.stations[0];
+    hud.setRadio(radioStation, radioStation.tracks[state.radioTrackIndex % radioStation.tracks.length]);
+    hud.setPoliceUnits(police.getChaseStatus(player, Boolean(missions.active?.id === 'paper-moon')), police.state.wanted);
+    const paperMoon = missions.active?.id === 'paper-moon';
+    hud.setMissionCard(paperMoon ? {
+      chapter: 'CH 5 · PAPER MOON', title: 'PAPER MOON', briefing: "Lose the cops before Juno's scanner window closes.",
+      stageIndex: missions.state.paperStageIndex, stageTotal: 4, secondsLeft: missions.state.timer,
+      next: 'Bring the money home', searchZone: true, lineOfSight: police.state.lineOfSight,
+    } : null);
 
     const { x, z } = player.state;
     const district = districts.districtAt(x, z);
@@ -301,13 +334,56 @@ function makeGame(seedValue, shotName = null) {
 
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
+    const heliPosition = police.heliPosition();
+    if (heliPosition) blips.push({ x: heliPosition.x, z: heliPosition.z, color: '#ffc857', size: 26 });
     blips.push(...gangs.getBlips());
     // Mission markers are already included by getBlips(), so do not draw a second copy.
+    const storyMarker = missions.active ? missions.state.marker ?? missions.active.start : null;
+    const actor = player.state.inCar?.state ?? player.state;
+    const roadNodes = storyMarker ? findRoadRoute(city.roadNetwork ?? city.graph, actor, storyMarker) : null;
+    const route = storyMarker ? roadNodes
+      ? [{ x: actor.x, z: actor.z }, ...roadNodes.map((node) => ({ x: node.x, z: node.z })), { x: storyMarker.x, z: storyMarker.z }]
+      : [{ x: actor.x, z: actor.z }, { x: storyMarker.x, z: storyMarker.z }]
+      : null;
     hud.drawMinimap(player, police.state.wanted, null, blips, orbit.yaw, regionSnapshot, {
       rural: districts.bounds, dirtRoads: districts.state.dirtRoads, landmarks: landmarkBlips,
+      searchZone: paperMoon ? { x: player.state.x, z: player.state.z, radius: 120 } : null,
+      route,
+      storyMarker,
     }, gangs.getMinimapZones());
     if (openPanel === 'gangs' && state.elapsed - gangsPanelUpdatedAt >= 0.25) renderGangsPanel();
 
+  }
+
+  // Seam for Coder A's real cycle: a host can provide {day, minutes, isNight} on window.
+  function getDayNightState() {
+    const external = typeof window !== 'undefined' ? window.__solmarDayNight : null;
+    if (external && Number.isFinite(external.day) && Number.isFinite(external.minutes)) {
+      return { day: external.day, minutes: external.minutes, isNight: Boolean(external.isNight) };
+    }
+    const minutes = Number.isFinite(state.clockMinutes) ? state.clockMinutes : 0;
+    return { day: state.day, minutes, isNight: minutes >= 19 * 60 || minutes < 6 * 60 };
+  }
+
+  function updateCameraSafely(dt) {
+    const inCar = player.state.inCar;
+    const focus = player.state.inCar?.state ?? player.state;
+    const focusY = inCar ? 1.4 : 1.5 + (Number.isFinite(player.state.y) ? player.state.y : 0);
+    const height = inCar ? CAMERA.carHeight : CAMERA.height;
+    const requestedDistance = inCar ? CAMERA.carDistance : orbit.distance;
+    const safeDistance = safeCameraDistance(focus, orbit.yaw, orbit.pitch, requestedDistance, city.colliders,
+      { focusY, height });
+    renderer.updateCamera(dt, player, { ...orbit, distance: safeDistance }, 0);
+    const rendererDistance = Math.max(CAMERA.minDistance, Math.min(CAMERA.maxDistance, requestedDistance));
+    // The renderer enforces a minimum zoom and its car mode uses a fixed distance. Correct that
+    // final camera point when either clamp would put it back inside a building.
+    if (safeDistance < rendererDistance) {
+      const safePosition = cameraPositionAtDistance(focus, orbit.yaw, orbit.pitch, safeDistance, { focusY, height });
+      renderer.cameraState.pos.set(safePosition.x, safePosition.y, safePosition.z);
+      renderer.cameraState.distance = safeDistance;
+      renderer.camera.position.copy(renderer.cameraState.pos);
+      renderer.camera.lookAt(renderer.cameraState.target);
+    }
   }
 
   function leaveCar() {
@@ -405,6 +481,7 @@ function makeGame(seedValue, shotName = null) {
     Object.assign(state, {
       started: true, elapsed: 0, lastSave: 0, finalMission: null, bustedFine: 0,
       pedHitCooldown: 0, shotsFired: 0, pauseReason: '',
+      day: 1, clockMinutes: 18 * 60 + 52, radioStationIndex: 0, radioTrackIndex: 0, radioTrackElapsed: 0,
     });
     stats.reset();
     if (save) stats.restore(save.stats);
@@ -418,7 +495,7 @@ function makeGame(seedValue, shotName = null) {
     setStoryObjective('Explore Solmar. Find a gold beacon for a job, or press M.');
 
     hud.toast(save ? 'Welcome back to Solmar.' : 'Solmar. The coast is yours, Jax.', 'mission', 4);
-    renderer.updateCamera(1, player, orbit, 0);
+    updateCameraSafely(1);
     refreshHud();
     announce('Playing SOLMAR. WASD to move, E to use a car or job, M for jobs, P to pause.');
   }
@@ -841,7 +918,13 @@ function makeGame(seedValue, shotName = null) {
   }
 
   function selectWeapon(index) {
-    if (state.screen !== 'playing' || player.state.inCar || !combat.selectWeapon(index)) return false;
+    if (state.screen !== 'playing' || player.state.inCar) return false;
+    const candidate = combat.state.weapons[index];
+    if (candidate?.unlocked === false) {
+      hud.toast(`${candidate.name} is LOCKED — buy ammo at the gun shop`, 'info', 2.8);
+      return false;
+    }
+    if (!combat.selectWeapon(index)) return false;
     hud.setWeapon(combat.state.weapon);
     hud.toast(combat.state.weapon.name, 'info', 1.2);
     return true;
@@ -950,6 +1033,7 @@ function makeGame(seedValue, shotName = null) {
     const { x, z } = player.state;
 
     state.elapsed += dt;
+    advanceClockAndRadio(state, dt);
     districts.update(dt);
     state.pedHitCooldown = Math.max(0, state.pedHitCooldown - dt);
     if (player.state.inCar) {
@@ -1065,7 +1149,9 @@ function makeGame(seedValue, shotName = null) {
         steps += 1;
       }
       if (steps === MAX_STEPS) clock.accumulator %= STEP;
-      renderer.updateCamera(delta, player, orbit, 0);
+      renderer.applyTimeOfDay(state.clockMinutes, city.setNightFactor);
+      city.setSignalClock(state.clockMinutes);
+      updateCameraSafely(delta);
       const car = player.state.inCar;
       const speed = Math.abs(car?.state.speed ?? 0) / (car?.tuning?.maxSpeed ?? VEHICLE.maxSpeed);
       const playing = state.screen === 'playing';
@@ -1143,7 +1229,7 @@ function makeGame(seedValue, shotName = null) {
 
   function beginShot(name) {
     shotMode = true;
-    state.shot = ['play', 'end'].includes(name) ? name : 'start';
+    state.shot = ['play', 'end', 'paper-moon'].includes(name) ? name : 'start';
     const generation = ++shotGeneration;
     window.__shotReady = false;
     window.__gameError = null;
@@ -1159,7 +1245,7 @@ function makeGame(seedValue, shotName = null) {
     syncRider();
     refreshHud();
     if (state.screen === 'menu') renderer.frameTitle();
-    else renderer.updateCamera(1, player, orbit, 0);
+    else updateCameraSafely(1);
     let painted = 0;
     function paint() {
       if (generation !== shotGeneration) return;

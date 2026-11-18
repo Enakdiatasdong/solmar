@@ -94,6 +94,7 @@ export const VEHICLE_TYPES = {
   truck: { ...VEHICLE, maxSpeed: 24, accel: 9, brake: 18, reverseAccel: 5, maxReverse: 6, steer: 1.5, radius: 1.4 },
   buggy: { ...VEHICLE, maxSpeed: 30, accel: 14, brake: 24, reverseAccel: 8, maxReverse: 8, steer: 2.6, radius: 1.24 },
   sport: { ...VEHICLE, maxSpeed: 40, accel: 19, brake: 32, reverseAccel: 10, maxReverse: 10, steer: 2.3, radius: 1.24 },
+  vespera: { ...VEHICLE, maxSpeed: 46, accel: 22, brake: 34, reverseAccel: 10, maxReverse: 10, steer: 2.4, radius: 1.24 },
   van: { ...VEHICLE, maxSpeed: 26.5, accel: 11, brake: 22, reverseAccel: 7, maxReverse: 7, steer: 1.9, radius: 1.25 },
 };
 
@@ -137,8 +138,9 @@ export const MISSIONS = {
     'beach-run': 1200,
     heat: 1500,
     'harbor-job': 3000,
+    'paper-moon': 2000,
   },
-  order: ['first-fare', 'hot-wheels', 'beach-run', 'heat', 'harbor-job'],
+  order: ['first-fare', 'hot-wheels', 'beach-run', 'heat', 'harbor-job', 'paper-moon'],
   failTime: 180,
   beachRunTime: 75,
   pickupRadius: 7.5,
@@ -190,24 +192,24 @@ export const COMBAT = {
   pistolRange: PISTOL.range,
   fireCooldown: PISTOL.fireCooldown,
   weapons: [
-    PISTOL,
+    { ...PISTOL, unlocked: true },
     {
       id: 'scattergun', name: 'Scattergun', ammo: 6, maxAmmo: 24,
       damage: 80, range: 23, fireCooldown: 0.78, spread: 0.12,
-      shopAmount: 6, shopCost: 45,
+      shopAmount: 6, shopCost: 45, unlocked: false,
     },
     {
       id: 'street-smg', name: 'Street SMG', ammo: 32, maxAmmo: 96,
-      damage: 20, range: 55, fireCooldown: 0.095, shopAmount: 24, shopCost: 55,
+      damage: 20, range: 55, fireCooldown: 0.095, shopAmount: 24, shopCost: 55, unlocked: false,
     },
     {
       id: 'longshot', name: 'Longshot rifle', ammo: 5, maxAmmo: 20,
-      damage: 105, range: 115, fireCooldown: 1.05, shopAmount: 5, shopCost: 70,
+      damage: 105, range: 115, fireCooldown: 1.05, shopAmount: 5, shopCost: 70, unlocked: false,
     },
     {
       id: 'fire-bottle', name: 'Fire bottle', ammo: 2, maxAmmo: 6,
       damage: 60, range: 24, fireCooldown: 1.2, blastRadius: 4.5,
-      shopAmount: 2, shopCost: 60,
+      shopAmount: 2, shopCost: 60, unlocked: false,
     },
   ],
   enemyHealth: 60,
@@ -216,6 +218,14 @@ export const COMBAT = {
   enemyDamage: 7,
   muzzleTime: 0.07,
   enemyRadius: 0.55,
+};
+
+export const RADIO = {
+  stations: [
+    { id: 'wave-881', freq: '88.1', name: 'Neon Drive', tracks: [{ title: 'Pink Horizon', artist: 'Lumen Kids' }, { title: 'Afterglow Avenue', artist: 'Vela Bloom' }] },
+    { id: 'sunset-963', freq: '96.3', name: 'Sunset Static', tracks: [{ title: 'Chrome Palms', artist: 'Mira Vale' }, { title: 'Coastline Echo', artist: 'The Mariner Set' }] },
+    { id: 'harbor-1017', freq: '101.7', name: 'Harbor Pulse', tracks: [{ title: 'Signal in the Sand', artist: 'Juno Circuit' }, { title: 'Blue Hour Run', artist: 'Cobalt Youth' }] },
+  ],
 };
 
 export const AUDIO = {
@@ -250,7 +260,7 @@ export const PALETTE = {
   sand: 0xe4cf9f,
   boardwalk: 0xa9865e,
   asphalt: 0x373b42,
-  sidewalk: 0x9c978d,
+  sidewalk: 0xb6b8b6,
   curb: 0xbab5aa,
   grass: 0x6d8a57,
   trunk: 0x7a5a3b,

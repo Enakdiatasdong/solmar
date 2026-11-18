@@ -462,8 +462,15 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
   }
 
   function selectWeapon(index) {
-    if (!Number.isInteger(index) || !state.weapons[index]) return false;
+    if (!Number.isInteger(index) || !state.weapons[index]?.unlocked) return false;
     state.weaponIndex = index;
+    return true;
+  }
+
+  function unlockWeapon(id) {
+    const weapon = state.weapons.find((item) => item.id === id);
+    if (!weapon) return false;
+    weapon.unlocked = true;
     return true;
   }
 
@@ -480,6 +487,7 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
     if (added <= 0) return { ok: false, reason: 'full' };
     if (typeof spendCash !== 'function' || !spendCash(cost)) return { ok: false, reason: 'cash' };
     weapon.ammo += added;
+    weapon.unlocked = true;
     return { ok: true, added, ammo: weapon.ammo, cost };
   }
 
@@ -495,6 +503,7 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
     shootAtPlayer,
     addAmmo,
     selectWeapon,
+    unlockWeapon,
     switchWeapon: selectWeapon,
     cycleWeapon,
     buyAmmo,

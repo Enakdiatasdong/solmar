@@ -1,4 +1,4 @@
-// Five story jobs for Jax Moreno in Solmar. Missions use the city's seeded world, the shared HUD,
+// Story jobs for Jax Moreno in Solmar. Missions use the city's seeded world, the shared HUD,
 // vehicle, police and combat systems, and emit completion events for main.js to award and save.
 import * as THREE from '../vendor/three.module.min.js';
 import { MISSIONS, PALETTE, POLICE, REGIONS } from './config.js';
@@ -35,7 +35,7 @@ function makeBeacon(color) {
   return group;
 }
 
-// Keep these IDs stable: main.js saves them and shots.js starts `first-fare` directly.
+// Keep these IDs stable: main.js saves them and shots.js stages missions directly.
 const STORY = [
   {
     id: 'first-fare',
@@ -93,6 +93,18 @@ const STORY = [
       { who: 'Mara', text: 'Bring the money home and shake the three-star tail. Then we’re done.' },
     ],
   },
+  {
+    id: 'paper-moon',
+    chapter: 'CH 5 · PAPER MOON',
+    title: 'Paper Moon',
+    briefing: "Lose the cops before Juno's scanner window closes.",
+    start: { x: 144, z: 72, name: 'Downtown' },
+    reward: MISSIONS.rewards['paper-moon'],
+    lines: [
+      { who: 'Juno Reyes', text: "Alarms are back! You've got the whole department coming — lose them!" },
+      { who: 'Jax', text: 'I’m on it. Keep that scanner window open.' },
+    ],
+  },
 ];
 
 export function createMissions(ctx) {
@@ -131,6 +143,8 @@ export function createMissions(ctx) {
     hudTimer: 0,
     bestTimes: {},
     failReason: '',
+    paperStageIndex: 0,
+    paperMidline: false,
   };
 
   function completedCount() {
@@ -235,6 +249,7 @@ export function createMissions(ctx) {
     else if (mission.id === 'beach-run') beginPickup();
     else if (mission.id === 'heat') beginHeat();
     else if (mission.id === 'harbor-job') beginBigOne();
+    else if (mission.id === 'paper-moon') beginPaperMoon();
     return true;
   }
 
@@ -279,6 +294,54 @@ export function createMissions(ctx) {
     setObjective('Reach Solmar Bank to take the score.');
   }
 
+  function beginPaperMoon() {
+    state.stage = 'evade';
+    state.timer = 150;
+    state.paperStageIndex = 1;
+    state.paperMidline = false;
+    police.setWanted(4);
+    police.state.forcedDecay = true;
+    combat?.unlockWeapon?.('street-smg');
+    hud?.toast('Juno handed you a Street SMG.', 'mission', 3.2);
+    setMarker(null, '');
+    setObjective("CH 5 · PAPER MOON — Lose the cops before Juno's scanner window closes. · Stage 1/4 · 2:30");
+  }
+
+  const PAPER_STAGES = [
+    { at: 45, label: 'SHAKE THE TAIL', line: 'They’ve split wide. Keep them behind you.' },
+    { at: 90, label: 'BREAK CONTACT', line: 'Scanner has a blind patch. Use it, Jax.' },
+    { at: 120, label: 'GHOST THE GRID', line: 'Almost clear. One last turn and you’re gone.' },
+  ];
+
+  function updatePaperMoon(dt) {
+    state.timer = Math.max(0, state.timer - dt);
+    if (state.elapsed >= 75 && !state.paperMidline) {
+      state.paperMidline = true;
+      say('Juno Reyes', 'Scanner’s holding. Keep them guessing.');
+    }
+    while (state.paperStageIndex < 4 && state.elapsed >= PAPER_STAGES[state.paperStageIndex - 1]?.at) {
+      state.paperStageIndex += 1;
+      const stage = PAPER_STAGES[state.paperStageIndex - 2];
+      hud?.toast(`Stage ${state.paperStageIndex}/4 · ${stage.label}`, 'mission', 2.4);
+      say('Juno Reyes', stage.line);
+    }
+    if (police.state.wanted === 0) {
+      police.state.forcedDecay = false;
+      complete();
+      return;
+    }
+    if (state.timer <= 0) {
+      fail("Juno's scanner window closed while the SMPD still had eyes on you.");
+      return;
+    }
+    state.hudTimer += dt;
+    if (state.hudTimer >= 0.5) {
+      state.hudTimer = 0;
+      const seconds = Math.ceil(state.timer);
+      setObjective(`CH 5 · PAPER MOON — Lose the cops before Juno's scanner window closes. · Stage ${state.paperStageIndex}/4 · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
+    }
+  }
+
   function spawnDockworkers(point) {
     for (const side of [-1, 1]) {
       combat?.spawnEnemy?.(point.x + side * 5, point.z + side * 14, {
@@ -318,6 +381,7 @@ export function createMissions(ctx) {
       state.car = null;
     }
     resetMissionActors();
+    if (mission.id === 'paper-moon') say('Juno Reyes', 'Clean run, Jax. Bring the money home.');
     setAvailableMarkers();
     return event;
   }
@@ -339,6 +403,7 @@ export function createMissions(ctx) {
     hud?.setDialogue('', '');
     resetMissionActors();
     state.stage = '';
+    if (mission.id === 'paper-moon') say('Juno Reyes', 'That’s it. The scanner window is closed.');
     const event = emit({ type: 'fail', mission: { id: mission.id, title: mission.title }, reason });
     setAvailableMarkers();
     return event;
@@ -474,6 +539,7 @@ export function createMissions(ctx) {
       else if (mission.id === 'beach-run') updatePickup(dt);
       else if (mission.id === 'heat') updateHeat(dt);
       else if (mission.id === 'harbor-job') updateBigOne(dt);
+      else if (mission.id === 'paper-moon') updatePaperMoon(dt);
       if (state.active && !player.state.alive) fail('Jax went down.');
     }
 
@@ -497,12 +563,6 @@ export function createMissions(ctx) {
       objectiveBeacon.userData.gem.rotation.y = time * 1.8;
       objectiveBeacon.userData.gem.position.y = 3.2 + Math.sin(time * 2.4) * 0.25;
       objectiveBeacon.userData.ring.rotation.z = time * 0.8;
-    }
-    for (let index = state.events.length - 1; index >= 0; index -= 1) {
-      const event = state.events[index];
-      if (event.type !== 'fail') continue;
-      state.events.splice(index, 1);
-      hud?.toast(`Mission failed: ${event.reason}`, 'danger', 4.5);
     }
   }
 

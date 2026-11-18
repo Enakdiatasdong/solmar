@@ -3,7 +3,7 @@
 // streetlights and props. Exports building/container collision AABBs and the road graph the AI and
 // missions navigate by. Everything is generated from the seeded RNG, so a seed rebuilds the city.
 import * as THREE from '../vendor/three.module.min.js';
-import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR, SUNSET_NIGHT_FACTOR } from './config.js';
+import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR, SUNSET_MINUTE, SUNSET_NIGHT_FACTOR } from './config.js';
 import { createRandom } from './random.js';
 
 const WINDOW_BAY = 2.65;
@@ -13,9 +13,86 @@ const CANAL = { x: -241, width: 16, inlandZ: 469, bridgeZ: 502 };
 
 function facadeGrid(variant) {
   return {
-    columns: variant.glass ? 7 : variant.office ? 6 : variant.deco ? 3 : 4,
-    rows: variant.office ? 10 : variant.glass ? 9 : 7,
+    columns: variant.tower ? 12 : variant.glass ? 7 : variant.office ? 6 : variant.deco ? 3 : 4,
+    rows: variant.tower ? 22 : variant.office ? 10 : variant.glass ? 9 : 7,
   };
+}
+
+function stableHash(x, z, salt = 0) {
+  const value = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+/** Each tower gets a coordinate-seeded glass pattern without advancing the shared city RNG. */
+function makeTowerFacadeTextures(seed) {
+  const canvas = document.createElement('canvas');
+  const emissiveCanvas = document.createElement('canvas');
+  canvas.width = emissiveCanvas.width = 256;
+  canvas.height = emissiveCanvas.height = 512;
+  const context = canvas.getContext('2d');
+  const emissiveContext = emissiveCanvas.getContext('2d');
+  if (!context || !emissiveContext) return { map: null, emissiveMap: null };
+
+  const columns = 12;
+  const rows = 22;
+  const cellW = canvas.width / columns;
+  const cellH = canvas.height / rows;
+  const litRatio = 0.07 + stableHash(seed, 17, 1) * 0.23;
+  const tintShift = Math.floor(stableHash(seed, 29, 2) * 24);
+  context.fillStyle = '#142a40';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  emissiveContext.fillStyle = '#000000';
+  emissiveContext.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Ground-floor storefront band with broad display glass and pale stone piers.
+  const shopTop = Math.floor(canvas.height * 0.89);
+  context.fillStyle = '#d4c8b4';
+  context.fillRect(0, shopTop - 7, canvas.width, 7);
+  context.fillStyle = '#233c4c';
+  context.fillRect(4, shopTop + 4, canvas.width - 8, canvas.height - shopTop - 4);
+  for (let pane = 0; pane < 4; pane += 1) {
+    const x = 8 + pane * (canvas.width / 4);
+    context.fillStyle = pane % 2 ? '#36728c' : '#4285a0';
+    context.fillRect(x, shopTop + 13, canvas.width / 4 - 12, canvas.height - shopTop - 20);
+    emissiveContext.fillStyle = '#3186ad';
+    emissiveContext.fillRect(x + 3, shopTop + 16, canvas.width / 4 - 18, canvas.height - shopTop - 27);
+    context.fillStyle = '#cfbea5';
+    context.fillRect(x - 5, shopTop + 4, 5, canvas.height - shopTop - 4);
+  }
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const x = column * cellW + 3;
+      const y = row * cellH + 3;
+      const paneHash = stableHash(seed + column * 0.37, seed * 0.71 + row * 0.23, 3);
+      const lit = y < shopTop && paneHash < litRatio;
+      if (y >= shopTop) continue;
+      if (lit) {
+        context.fillStyle = paneHash > litRatio * 0.58 ? '#58acd0' : '#3e8bb6';
+        emissiveContext.fillStyle = '#7edbff';
+        emissiveContext.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
+      } else {
+        const blue = 52 + Math.floor(paneHash * 21) + tintShift;
+        context.fillStyle = `rgb(${Math.max(18, blue - 26)},${Math.min(118, blue + 9)},${Math.min(154, blue + 35)})`;
+      }
+      context.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
+    }
+  }
+  // Dense, fine mullions make the facade read as a continuous office curtain wall.
+  context.fillStyle = '#8cb4c5';
+  for (let column = 0; column <= columns; column += 1) context.fillRect(column * cellW, 0, 2, shopTop);
+  context.fillStyle = '#547a91';
+  for (let row = 0; row <= rows; row += 1) context.fillRect(0, row * cellH, canvas.width, 2);
+
+  const makeTexture = (source) => {
+    const texture = new THREE.CanvasTexture(source);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    return texture;
+  };
+  return { map: makeTexture(canvas), emissiveMap: makeTexture(emissiveCanvas) };
 }
 
 /** Flat walls and window bays; keep warm panes in neighboring groups on each lit floor. */
@@ -496,6 +573,24 @@ export function createCity(random, reservedPlaces = []) {
     {},
   ];
   const facadeVariants = facadePatterns.map((variant) => makeFacadeTexture(random, variant));
+  const towerPattern = { tower: true };
+  const towerFacadeVariants = Array.from({ length: 8 }, (_, variant) => makeTowerFacadeTextures(variant * 137 + 29));
+  const towerFacadeMaterials = new Map();
+
+  function towerFacadeMaterial(cx, cz, seed = 0) {
+    const variant = Math.floor(stableHash(cx + (Number.isFinite(seed) ? seed : 0) * 0.001, cz, 6) * towerFacadeVariants.length);
+    if (towerFacadeMaterials.has(variant)) return towerFacadeMaterials.get(variant);
+    const textures = towerFacadeVariants[variant];
+    const material = new THREE.MeshLambertMaterial({
+      color: shade(0x739bb0, (variant - 3.5) * 0.012),
+      map: textures.map,
+      emissive: 0x1d6283,
+      emissiveMap: textures.emissiveMap,
+      emissiveIntensity: 0.38 + (variant % 4) * 0.1,
+    });
+    towerFacadeMaterials.set(variant, material);
+    return material;
+  }
 
   const materialCache = new Map();
   function facadeMaterial(variant, color) {
@@ -595,19 +690,129 @@ export function createCity(random, reservedPlaces = []) {
   dashesEW.instanceMatrix.needsUpdate = true;
   group.add(dashesNS, dashesEW);
 
+  // Main avenues get a double yellow center and every road gets crisp white edge lines.
+  const yellowMaterial = new THREE.MeshBasicMaterial({ color: 0xf1c64b, toneMapped: false });
+  const whiteMaterial = new THREE.MeshBasicMaterial({ color: 0xf5f1df, toneMapped: false });
+  const yellowGeometry = new THREE.BoxGeometry(52, 0.026, 0.16);
+  const edgeNSGeometry = new THREE.BoxGeometry(0.16, 0.026, 52);
+  const edgeEWGeometry = new THREE.BoxGeometry(52, 0.026, 0.16);
+  const yellowLines = new THREE.InstancedMesh(yellowGeometry, yellowMaterial, CITY.grid * 2 * 2);
+  const edgeNSLines = new THREE.InstancedMesh(edgeNSGeometry, whiteMaterial, (CITY.grid + 1) * CITY.grid * 2);
+  const edgeEWLines = new THREE.InstancedMesh(edgeEWGeometry, whiteMaterial, (CITY.grid + 1) * CITY.grid * 2);
+  const markingMatrix = new THREE.Matrix4();
+  let yellowIndex = 0;
+  for (const avenueZ of [216, 288]) {
+    for (let cell = 0; cell < CITY.grid; cell += 1) {
+      const centerX = CITY.nodeMin + cell * blockPitch + blockPitch / 2;
+      for (const offset of [-0.22, 0.22]) {
+        markingMatrix.makeTranslation(centerX, 0.055, avenueZ + offset);
+        yellowLines.setMatrixAt(yellowIndex, markingMatrix);
+        yellowIndex += 1;
+      }
+    }
+  }
+  let edgeNSIndex = 0;
+  let edgeEWIndex = 0;
+  for (let line = 0; line <= CITY.grid; line += 1) {
+    const lineCoord = CITY.nodeMin + line * blockPitch;
+    for (let cell = 0; cell < CITY.grid; cell += 1) {
+      const center = CITY.nodeMin + cell * blockPitch + blockPitch / 2;
+      for (const offset of [-8.35, 8.35]) {
+        markingMatrix.makeTranslation(lineCoord + offset, 0.055, center);
+        edgeNSLines.setMatrixAt(edgeNSIndex, markingMatrix);
+        edgeNSIndex += 1;
+        markingMatrix.makeTranslation(center, 0.055, lineCoord + offset);
+        edgeEWLines.setMatrixAt(edgeEWIndex, markingMatrix);
+        edgeEWIndex += 1;
+      }
+    }
+  }
+  yellowLines.count = yellowIndex;
+  edgeNSLines.count = edgeNSIndex;
+  edgeEWLines.count = edgeEWIndex;
+  yellowLines.instanceMatrix.needsUpdate = true;
+  edgeNSLines.instanceMatrix.needsUpdate = true;
+  edgeEWLines.instanceMatrix.needsUpdate = true;
+  yellowLines.name = 'roads:double-yellow';
+  edgeNSLines.name = 'roads:white-edge-ns';
+  edgeEWLines.name = 'roads:white-edge-ew';
+  group.add(yellowLines, edgeNSLines, edgeEWLines);
+
+  // Seven white bars on each approach make a readable zebra crossing at every node.
+  const crossNS = new THREE.InstancedMesh(new THREE.BoxGeometry(2.05, 0.028, 0.9), whiteMaterial, (CITY.grid + 1) ** 2 * 2 * 7);
+  const crossEW = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.028, 2.05), whiteMaterial, (CITY.grid + 1) ** 2 * 2 * 7);
+  let crossNSIndex = 0;
+  let crossEWIndex = 0;
+  for (let row = 0; row <= CITY.grid; row += 1) {
+    const nodeZ = CITY.nodeMin + row * blockPitch;
+    for (let column = 0; column <= CITY.grid; column += 1) {
+      const nodeX = CITY.nodeMin + column * blockPitch;
+      for (const side of [-1, 1]) {
+        for (let stripe = 0; stripe < 7; stripe += 1) {
+          markingMatrix.makeTranslation(nodeX - 7.2 + stripe * 2.4, 0.06, nodeZ + side * 10);
+          crossNS.setMatrixAt(crossNSIndex, markingMatrix);
+          crossNSIndex += 1;
+          markingMatrix.makeTranslation(nodeX + side * 10, 0.06, nodeZ - 7.2 + stripe * 2.4);
+          crossEW.setMatrixAt(crossEWIndex, markingMatrix);
+          crossEWIndex += 1;
+        }
+      }
+    }
+  }
+  crossNS.count = crossNSIndex;
+  crossEW.count = crossEWIndex;
+  crossNS.instanceMatrix.needsUpdate = true;
+  crossEW.instanceMatrix.needsUpdate = true;
+  crossNS.name = 'roads:zebra-crossings-x';
+  crossEW.name = 'roads:zebra-crossings-z';
+  group.add(crossNS, crossEW);
+
+  // One shared groove material keeps each light-grey sidewalk pad legible without per-block textures.
+  const jointMaterial = new THREE.MeshBasicMaterial({ color: 0x858987, transparent: true, opacity: 0.34, toneMapped: false });
+  const jointNS = new THREE.InstancedMesh(new THREE.BoxGeometry(0.055, 0.012, 50), jointMaterial, CITY.grid * CITY.grid * 7);
+  const jointEW = new THREE.InstancedMesh(new THREE.BoxGeometry(50, 0.012, 0.055), jointMaterial, CITY.grid * CITY.grid * 7);
+  let jointNSIndex = 0;
+  let jointEWIndex = 0;
+  for (const center of lotCenters) {
+    if (center.isPark) continue;
+    for (let joint = 1; joint <= 7; joint += 1) {
+      markingMatrix.makeTranslation(center.x - 25 + joint * 6.25, 0.269, center.z);
+      jointNS.setMatrixAt(jointNSIndex, markingMatrix);
+      jointNSIndex += 1;
+      markingMatrix.makeTranslation(center.x, 0.269, center.z - 25 + joint * 6.25);
+      jointEW.setMatrixAt(jointEWIndex, markingMatrix);
+      jointEWIndex += 1;
+    }
+  }
+  jointNS.count = jointNSIndex;
+  jointEW.count = jointEWIndex;
+  jointNS.instanceMatrix.needsUpdate = true;
+  jointEW.instanceMatrix.needsUpdate = true;
+  jointNS.name = 'sidewalk:joints-ns';
+  jointEW.name = 'sidewalk:joints-ew';
+  group.add(jointNS, jointEW);
+
   function addBuilding(cx, cz, width, depth, height, options = {}) {
+    const tower = Boolean(options.tower);
     const variant = options.variant ?? random.int(0, facadeVariants.length - 1);
     const color = options.color ?? random.pick(PALETTE.buildings);
     // Consume the usual random choices before leaving room for a place marker.
     if (isReserved(cx, cz)) return null;
     const geometry = new THREE.BoxGeometry(width, height, depth);
-    scaleFacadeUVs(geometry, width, height, depth, facadePatterns[variant]);
-    const solid = facadeMaterial(variant, color);
-    const roof = roofMaterial(color);
+    const facadeVariant = tower ? towerPattern : facadePatterns[variant];
+    scaleFacadeUVs(geometry, width, height, depth, facadeVariant);
+    let solid;
+    if (tower) {
+      solid = towerFacadeMaterial(cx, cz, options.towerSeed);
+    } else {
+      solid = facadeMaterial(variant, color);
+    }
+    const roof = roofMaterial(tower ? 0x49677a : color);
     const mesh = new THREE.Mesh(geometry, [solid, solid, roof, roof, solid, solid]);
     mesh.position.set(cx, 0.28 + height / 2, cz);
     mesh.castShadow = true;
-    mesh.receiveShadow = false;
+    mesh.receiveShadow = true;
+    mesh.name = tower ? 'glass-tower' : 'building';
     group.add(mesh);
     const box = {
       minX: cx - width / 2,
@@ -619,9 +824,36 @@ export function createCity(random, reservedPlaces = []) {
     buildings.push(box);
     colliders.push(box);
     if (height > 24) {
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(width * 0.45, 1.6, depth * 0.45), roof);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(width * (tower ? 0.64 : 0.45), tower ? 2.1 : 1.6, depth * (tower ? 0.64 : 0.45)), roof);
       cap.position.set(cx, 0.28 + height + 0.8, cz);
+      cap.castShadow = true;
       group.add(cap);
+      if (tower) {
+        const setback = new THREE.Mesh(
+          new THREE.BoxGeometry(width * 0.38, 1.25, depth * 0.38),
+          new THREE.MeshLambertMaterial({ color: 0x71858f, emissive: 0x173d54, emissiveIntensity: 0.25 }),
+        );
+        setback.position.set(cx, 0.28 + height + 2.45, cz);
+        setback.castShadow = true;
+        group.add(setback);
+        const box = new THREE.Mesh(new THREE.BoxGeometry(width * 0.18, 1.1, depth * 0.2), roof);
+        box.position.set(cx + width * 0.18, 0.28 + height + 3.65, cz - depth * 0.12);
+        box.castShadow = true;
+        group.add(box);
+        const mast = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.09, 0.13, Math.min(9, 2.8 + height * 0.08), 6),
+          new THREE.MeshLambertMaterial({ color: 0x4b5963, emissive: 0x102b3d, emissiveIntensity: 0.2 }),
+        );
+        mast.position.set(cx - width * 0.18, 0.28 + height + 5.5, cz + depth * 0.12);
+        mast.castShadow = true;
+        group.add(mast);
+        const beacon = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 0.22, 1.7),
+          new THREE.MeshBasicMaterial({ color: stableHash(cx, cz, 5) > 0.5 ? 0xff5edb : 0x53e5ff }),
+        );
+        beacon.position.set(mast.position.x, mast.position.y + Math.min(4.5, height * 0.04), mast.position.z);
+        group.add(beacon);
+      }
     }
     if (options.deco) {
       // Step the crown toward the center while keeping the lot and entry frontage clear.
@@ -682,6 +914,8 @@ export function createCity(random, reservedPlaces = []) {
     if (center.isPark) continue;
     const beachfront = center.row === CITY.grid - 1;
     const downtown = center.column >= 3 && center.column <= 6 && center.row >= 3 && center.row <= 6;
+    const avenueFrontage = center.column >= 3 && center.column <= 6 && center.row === 8;
+    const coastalTower = beachfront && center.column >= 3 && center.column <= 6;
     const cells = blockLayout(center);
     for (let cellIndex = 0; cellIndex < cells.length; cellIndex += 1) {
       const cell = cells[cellIndex];
@@ -690,12 +924,23 @@ export function createCity(random, reservedPlaces = []) {
       const width = Math.max(6, cell.w - inset * 2);
       const depth = Math.max(6, cell.d - inset * 2);
       let height;
-      if (beachfront) height = random.range(7, 16);
-      else if (downtown) height = random.range(24, 52);
+      if (downtown) {
+        const edge = THREE.MathUtils.clamp((Math.abs(center.x) + Math.abs(center.z) - 72) / 144, 0, 1);
+        height = random.range(44 - edge * 18, 85 - edge * 40);
+      } else if (avenueFrontage) height = random.range(40, 58);
+      else if (coastalTower) height = random.range(30, 46);
+      else if (beachfront) height = random.range(7, 16);
       else height = random.range(10, 34);
+      // Keep the previous one seeded facade-choice draw per lot cell, even for the new tower set.
       const variant = beachfront ? random.pick([4, 4, 1, 5]) : downtown ? random.pick([0, 2, 3, 0]) : random.int(0, 5);
       const color = random.pick(PALETTE.buildings);
-      addBuilding(center.x + cell.x, center.z + cell.z, width, depth, height, beachfront ? {
+      const tower = downtown || avenueFrontage || coastalTower;
+      addBuilding(center.x + cell.x, center.z + cell.z, width, depth, height, tower ? {
+        tower: true,
+        variant,
+        towerSeed: color,
+        color: 0x527b91,
+      } : beachfront ? {
         variant: 3, color: DECO_PASTELS[(center.column + cellIndex) % DECO_PASTELS.length], deco: true,
       } : { variant, color });
     }
@@ -1006,6 +1251,56 @@ export function createCity(random, reservedPlaces = []) {
   headMesh.instanceMatrix.needsUpdate = true;
   group.add(poleMesh, headMesh);
 
+  // Clock-phased signals are visual-only and use the same state for equal shot times and seeds.
+  const signalLamps = [];
+  const signalPoleMaterial = new THREE.MeshLambertMaterial({ color: 0x5d6870, emissive: 0x17212a, emissiveIntensity: 0.15 });
+  const signalHousingMaterial = new THREE.MeshLambertMaterial({ color: 0x202b32 });
+  const signalLensMaterials = [
+    new THREE.MeshLambertMaterial({ color: 0xff342d, emissive: 0xc81813, emissiveIntensity: 2.2, toneMapped: false }),
+    new THREE.MeshLambertMaterial({ color: 0xffcb45, emissive: 0xb77a10, emissiveIntensity: 2.0, toneMapped: false }),
+    new THREE.MeshLambertMaterial({ color: 0x46ed91, emissive: 0x118c53, emissiveIntensity: 2.0, toneMapped: false }),
+  ];
+  const signalPoleGeometry = new THREE.CylinderGeometry(0.13, 0.19, 7.1, 6).translate(0, 3.55, 0);
+  const signalArmGeometry = new THREE.BoxGeometry(11, 0.18, 0.18);
+  const signalHousingGeometry = new THREE.BoxGeometry(0.82, 2.1, 0.62);
+  const signalLensGeometry = new THREE.SphereGeometry(0.2, 8, 6);
+  for (const avenueZ of boulevardAvenues) {
+    const row = Math.round((avenueZ - CITY.nodeMin) / blockPitch);
+    for (let column = 3; column <= 7; column += 1) {
+      const nodeX = CITY.nodeMin + column * blockPitch;
+      const nodeZ = CITY.nodeMin + row * blockPitch;
+      const poleX = nodeX + 12;
+      const poleZ = nodeZ - 12;
+      const pole = new THREE.Mesh(signalPoleGeometry, signalPoleMaterial);
+      pole.position.set(poleX, 0, poleZ);
+      pole.castShadow = true;
+      const arm = new THREE.Mesh(signalArmGeometry, signalPoleMaterial);
+      arm.position.set(nodeX + 6.5, 7.05, poleZ);
+      arm.castShadow = true;
+      const housing = new THREE.Mesh(signalHousingGeometry, signalHousingMaterial);
+      housing.position.set(nodeX + 1.5, 6.0, poleZ);
+      const lenses = signalLensMaterials.map((material, lens) => {
+        const sphere = new THREE.Mesh(signalLensGeometry, material);
+        sphere.position.set(nodeX + 1.5, 6.65 - lens * 0.64, poleZ - 0.34);
+        return sphere;
+      });
+      const signal = new THREE.Group();
+      signal.name = `traffic-signal:${column}:${row}`;
+      signal.add(pole, arm, housing, ...lenses);
+      group.add(signal);
+      signalLamps.push({ lenses, index: column + row * (CITY.grid + 1) });
+    }
+  }
+  function setSignalClock(clockMinutes) {
+    if (!Number.isFinite(clockMinutes)) return;
+    for (const { lenses, index } of signalLamps) {
+      const phase = ((clockMinutes + index * 11) % 90 + 90) % 90;
+      const active = phase < 42 ? 0 : phase < 80 ? 2 : 1;
+      lenses.forEach((lens, color) => { lens.visible = color === active; });
+    }
+  }
+  setSignalClock(SUNSET_MINUTE);
+
   let nightFactor;
   function setNightFactor(factor) {
     const night = THREE.MathUtils.clamp(factor, 0, 1);
@@ -1215,6 +1510,7 @@ export function createCity(random, reservedPlaces = []) {
     containers,
     colliders,
     setNightFactor,
+    setSignalClock,
     spawnPoints: {
       player: spawnPlayer,
       starterCar: spawnStarterCar,

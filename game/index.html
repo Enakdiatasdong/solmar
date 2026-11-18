@@ -11,6 +11,7 @@
     --ink: #f7efe3;
     --muted: #b6aa9a;
     --gold: #ffc857;
+    --pink: #ff5fa2;
     --coral: #ff6b57;
     --teal: #49c6b8;
     --deep: #131a24;
@@ -19,6 +20,7 @@
     --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #131a24; color: var(--ink); font-family: var(--font); -webkit-font-smoothing: antialiased; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; cursor: grab; }
   #game:active { cursor: grabbing; }
@@ -40,7 +42,7 @@
   #health-bar { position: relative; width: 172px; height: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
   #health-fill { position: absolute; inset: 0; width: 100%; border-radius: 6px; background: var(--teal); transition: width 180ms ease, background 180ms ease; }
   #health-text { font-size: 13px; font-weight: 700; min-width: 26px; text-align: right; }
-  .wanted-row { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+  .wanted-row { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
   .wanted-label { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
   #wanted-stars { display: flex; gap: 3px; font-size: 18px; line-height: 1; }
   #wanted-stars .star { color: rgba(247, 239, 227, 0.22); transition: color 160ms ease, text-shadow 160ms ease; }
@@ -49,14 +51,25 @@
   @keyframes pulse { 50% { transform: scale(1.05); } }
 
   .hud-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-  .cash-panel { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 4px 8px; }
+  .cash-panel { width: min(320px, calc(100vw - 40px)); display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 5px 12px; }
   .cash-label { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
   #cash-value { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: var(--gold); font-variant-numeric: tabular-nums; }
-  #income-value { flex-basis: 100%; text-align: right; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #zone-label { grid-column: 1 / -1; position: static; max-width: 100%; padding: 0; color: var(--ink); background: transparent; border: 0; border-radius: 0; font-size: 11px; font-weight: 700; text-align: right; }
+  #zone-label:empty { display: none; }
+  .clock-row { grid-column: 1 / -1; display: flex; justify-content: flex-end; align-items: center; gap: 7px; }
+  #clock-value { color: var(--ink); font-size: 10px; font-weight: 750; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+  #day-night-icon { width: 15px; color: var(--gold); font-size: 14px; line-height: 1; text-align: center; }
+  #day-night-icon.night { color: #b7c6ff; }
+  .cash-row { display: flex; align-items: baseline; gap: 7px; }
+  #income-value { grid-column: 1 / -1; text-align: right; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   #speed-box { display: none; align-items: center; gap: 8px; }
+  #speed-box { flex-wrap: wrap; min-width: 210px; }
   #vehicle-name { font-size: 12px; color: var(--muted); }
   #vehicle-name:empty { display: none; }
   #speed-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #vehicle-condition-text { flex-basis: 100%; color: var(--muted); font-size: 9px; letter-spacing: .12em; }
+  #vehicle-condition-bar { width: 100%; height: 5px; overflow: hidden; border-radius: 4px; background: rgba(255,255,255,.14); }
+  #vehicle-condition { display: block; height: 100%; width: 100%; border-radius: inherit; transition: width 160ms ease, background 160ms ease; }
 
   #jetpack-box:not([hidden]) { display: flex; align-items: center; gap: 8px; }
   #jetpack-box > span:first-child { font-size: 10px; letter-spacing: 0.12em; color: var(--muted); }
@@ -66,6 +79,7 @@
   #jetpack-text { min-width: 32px; text-align: right; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
   #rep-panel { width: 218px; }
+  #rep-level { display: block; color: var(--ink); font-size: 17px; font-weight: 850; letter-spacing: .03em; }
   #rep-rank { color: var(--gold); font-size: 14px; font-weight: 750; }
   #rep-points { color: var(--muted); font-size: 10px; margin-left: 6px; }
   #rep-track { height: 5px; margin: 7px 0 4px; border-radius: 4px; overflow: hidden; background: rgba(255,255,255,0.13); }
@@ -77,16 +91,60 @@
   #weapon-box { max-width: 230px; padding: 8px 12px; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
   #weapon-text { color: var(--ink); }
 
+  #weapon-slots { display: grid; grid-template-columns: repeat(5, minmax(54px, 1fr)); gap: 4px; width: min(400px, 45vw); padding: 4px; }
+  .weapon-slot { position: relative; min-height: 62px; display: grid; place-items: center; align-content: center; gap: 2px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: rgba(5,9,14,.55); color: var(--muted); text-align: center; }
+  .weapon-slot.selected { border-color: var(--gold); color: var(--ink); box-shadow: inset 0 0 0 1px rgba(255,200,87,.28); }
+  .weapon-slot b { font-size: 14px; color: var(--gold); }
+  .weapon-slot small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
+  .weapon-slot em { font-size: 9px; font-style: normal; font-variant-numeric: tabular-nums; }
+  .weapon-key { position: absolute; top: 3px; left: 5px; font-size: 8px; color: var(--muted); }
+  .weapon-slot.locked { opacity: .42; }
+  .weapon-slot i { position: absolute; inset: auto 0 0; padding: 2px; background: rgba(0,0,0,.72); color: var(--coral); font-size: 7px; font-style: normal; font-weight: 800; letter-spacing: .1em; }
+
+  #radio-box { width: min(300px, 38vw); display: grid; grid-template-columns: 1fr auto; gap: 3px 9px; padding: 8px 11px; border-left: 3px solid var(--pink); }
+  #radio-station { color: var(--pink); font-size: 10px; font-weight: 800; letter-spacing: .06em; }
+  #radio-track { color: var(--ink); font-size: 11px; font-weight: 700; }
+  #radio-artist { color: var(--muted); font-size: 9px; }
+  .radio-bars { grid-column: 2; grid-row: 1 / span 3; display: flex; align-items: end; gap: 2px; height: 24px; }
+  .radio-bars i { width: 3px; height: 35%; background: var(--pink); border-radius: 2px; animation: radio-bounce .6s ease-in-out infinite alternate; }
+  .radio-bars i:nth-child(2) { height: 80%; animation-delay: .16s; }
+  .radio-bars i:nth-child(3) { height: 55%; animation-delay: .3s; }
+  .radio-bars i:nth-child(4) { height: 95%; animation-delay: .42s; }
+  @keyframes radio-bounce { to { transform: scaleY(.5); } }
+
+  #mission-card, #police-list { position: absolute; left: 16px; width: min(330px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 12px; padding: 10px 12px; backdrop-filter: blur(7px); box-shadow: 0 8px 28px rgba(0,0,0,.36); }
+  #mission-card { top: 112px; }
+  .mission-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #mission-chapter { padding: 3px 7px; border-radius: 8px; background: var(--gold); color: var(--deep); font-size: 9px; font-weight: 900; letter-spacing: .08em; }
+  #mission-timer { color: var(--ink); font-size: 19px; font-weight: 850; font-variant-numeric: tabular-nums; }
+  #mission-card-title { margin: 5px 0; font-size: 16px; font-weight: 850; text-transform: uppercase; }
+  #mission-briefing { color: var(--ink); font-size: 12px; font-weight: 650; line-height: 1.35; }
+  #mission-awareness { margin-top: 3px; color: var(--pink); font-size: 10px; font-weight: 700; }
+  .mission-card-stage { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+  #mission-pips { display: flex; gap: 4px; }
+  #mission-pips i { display: block; width: 23px; height: 6px; border-radius: 5px; background: rgba(255,255,255,.16); }
+  #mission-pips i.on { background: var(--gold); }
+  #mission-next { margin-top: 6px; color: var(--muted); font-size: 10px; font-weight: 700; }
+  #search-zone-chip { display: inline-block; margin-top: 6px; padding: 3px 6px; border-radius: 7px; background: rgba(255,107,87,.16); color: #ff9a8d; font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+
+  #police-list { top: 292px; border-left-color: var(--coral); padding: 8px 10px; }
+  .police-header { color: var(--ink); font-size: 8px; line-height: 1.45; font-weight: 850; letter-spacing: .025em; }
+  .police-row { display: grid; grid-template-columns: 1fr 44px 80px; align-items: center; gap: 6px; margin-top: 4px; font-size: 10px; }
+  .police-row b { color: var(--ink); }
+  .police-row span { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .police-row em { padding: 2px 5px; border-radius: 8px; color: var(--deep); font-size: 8px; font-style: normal; font-weight: 900; text-align: center; }
+  .tactic-ramming { background: var(--coral); }
+  .tactic-pursuit { background: #ef6b78; }
+  .tactic-roadblock { background: var(--gold); }
+  #police-list > small { display: block; margin-top: 5px; color: var(--muted); font-size: 8px; }
+
 
   #objective-box { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); max-width: min(560px, 62vw); display: none; text-align: center; }
   #objective-text { font-size: 14px; font-weight: 650; letter-spacing: 0.01em; color: var(--ink); }
   #objective-box::before { content: "OBJECTIVE"; display: block; font-size: 9px; letter-spacing: 0.28em; color: var(--gold); margin-bottom: 3px; }
 
-  #minimap-wrap { position: absolute; left: 20px; bottom: 20px; width: 190px; height: 190px; border-radius: 50%; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); border: 2px solid rgba(247, 239, 227, 0.22); background: rgba(16, 22, 30, 0.7); }
+  #minimap-wrap { position: absolute; left: 20px; bottom: 20px; width: 190px; height: 190px; overflow: hidden; clip-path: circle(50%); border-radius: 50%; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); border: 2px solid rgba(247, 239, 227, 0.22); background: rgba(16, 22, 30, 0.7); }
   #minimap { width: 190px; height: 190px; border-radius: 50%; display: block; }
-
-  #zone-label { position: absolute; left: 20px; bottom: 222px; box-sizing: border-box; max-width: calc(100vw - 40px); padding: 5px 9px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; font-weight: 650; }
-  #zone-label:empty { display: none; }
 
   #region-panel { position: absolute; left: 20px; bottom: 226px; width: 218px; }
   .region-label { font-size: 9px; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; }
@@ -319,23 +377,24 @@
         <div id="health-bar"><div id="health-fill"></div></div>
         <span id="health-text">100</span>
       </div>
-      <div class="wanted-row">
-        <span class="wanted-label">Wanted</span>
-        <span id="wanted-stars" aria-label="wanted level"></span>
-      </div>
     </div>
     <div class="hud-right">
       <div class="hud-panel cash-panel">
-        <span class="cash-label">Cash</span>
-        <span id="cash-value">$250</span>
+        <span id="zone-label"></span>
+        <div class="clock-row"><span id="clock-value">DAY 1 · 18:52</span><span id="day-night-icon" class="day" aria-label="Day" title="Day">☀</span></div>
+        <div class="cash-row"><span class="cash-label">Cash</span><span id="cash-value">$250</span></div>
+        <div class="wanted-row"><span class="wanted-label">Wanted</span><span id="wanted-stars" aria-label="wanted level"></span></div>
         <span id="income-value" hidden></span>
       </div>
       <div class="hud-panel" id="speed-box">
         <span id="vehicle-name"></span>
         <span id="speed-value">0 KM/H</span>
+        <div id="vehicle-condition-bar" hidden><span id="vehicle-condition"></span></div>
+        <small id="vehicle-condition-text" hidden></small>
       </div>
 
       <div class="hud-panel" id="rep-panel" aria-label="Street reputation">
+        <span id="rep-level">RESPECT 1</span>
         <span id="rep-rank">Small Fry</span><span id="rep-points">0 REP</span>
         <div id="rep-track"><div id="rep-progress"></div></div>
         <div id="rep-next">150 TO CORNER RUNNER</div>
@@ -345,6 +404,11 @@
       </div>
 
       <div class="hud-panel" id="weapon-box"><span id="weapon-text">Pistol 24/60</span></div>
+      <div class="hud-panel" id="weapon-slots" aria-label="Weapon slots"></div>
+      <div class="hud-panel" id="radio-box" hidden>
+        <b id="radio-station"></b><span class="radio-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span id="radio-track"></span><small id="radio-artist"></small>
+      </div>
 </div>
 
     </div>
@@ -355,9 +419,15 @@
     <div id="region-list"></div>
   </section>
   <div id="objective-box"><div id="objective-text"></div></div>
+  <section class="hud-panel" id="mission-card" hidden aria-label="Active mission">
+    <div class="mission-card-top"><span id="mission-chapter"></span><strong id="mission-timer"></strong></div>
+    <div id="mission-card-title"></div><div id="mission-briefing"></div><div id="mission-awareness"></div>
+    <div class="mission-card-stage"><span id="mission-stage"></span><span id="mission-pips"></span></div>
+    <div id="mission-next"></div><span id="search-zone-chip" hidden></span>
+  </section>
+  <section class="hud-panel" id="police-list" hidden aria-label="SMPD response units"></section>
   <div id="minimap-wrap"><canvas id="minimap" width="190" height="190" aria-label="minimap"></canvas></div>
 
-  <div id="zone-label"></div>
 
   <button class="btn ghost compact" id="btn-gangs-hud" type="button" aria-controls="gangs-panel" aria-expanded="false">Turf War</button>
 

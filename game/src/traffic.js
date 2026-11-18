@@ -3,7 +3,8 @@ import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, TRAFFIC, VEHICLE } from './config.js';
 import { resolveCollisions } from './world.js';
 
-const PED_LIMIT = 56;
+const PED_LIMIT = 72;
+const SPAWN_DENSITY = { cars: 2, pedestrians: 2 };
 const LANE_SHIFT = 2.5;
 const CAR_GAP = 5;
 const CAR_BRAKE = 17;
@@ -53,6 +54,8 @@ function pedMesh(random) {
 export function createTraffic(city, scene, random) {
   const trafficCars = [];
   const peds = [];
+  const carTarget = Math.min(TRAFFIC.cars * SPAWN_DENSITY.cars, 96);
+  const pedTarget = Math.min(TRAFFIC.pedestrians * SPAWN_DENSITY.pedestrians, PED_LIMIT);
   const carSpecs = PALETTE.cars;
   const roadNetwork = city.roadNetwork ?? city.graph;
   const colliders = city.colliders ?? [];
@@ -126,7 +129,7 @@ export function createTraffic(city, scene, random) {
     car.next = { other: to };
   }
 
-  function spawnPointNear(points, x, z, minRadius, maxRadius, occupied, minSpacing) {
+  function spawnPointNear(points, x, z, minRadius, maxRadius, occupied, minSpacing, preferCenter = false) {
     if (points.length === 0) return null;
     const candidates = points.filter((point) => {
       const distance = Math.hypot(point.x - x, point.z - z);
@@ -134,7 +137,22 @@ export function createTraffic(city, scene, random) {
         && distance <= maxRadius
         && !occupied.some((other) => Math.hypot(other.x - point.x, other.z - point.z) < minSpacing);
     });
-    return candidates.length > 0 ? random.pick(candidates) : null;
+    if (candidates.length === 0) return null;
+    if (!preferCenter) return random.pick(candidates);
+    // Weighted sampling keeps traffic near the main grid while still allowing broad coverage.
+    let totalWeight = 0;
+    const weighted = candidates.map((point) => {
+      const centerDistance = Math.hypot(point.x, point.z);
+      const weight = 1 / (1 + (centerDistance / 210) ** 2);
+      totalWeight += weight;
+      return { point, weight };
+    });
+    let choice = random() * totalWeight;
+    for (const entry of weighted) {
+      choice -= entry.weight;
+      if (choice <= 0) return entry.point;
+    }
+    return weighted.at(-1).point;
   }
 
   function routeCarAt(car, point) {
@@ -150,9 +168,9 @@ export function createTraffic(city, scene, random) {
     setRouteOnEdge(car, edge, t, towardB);
   }
 
-  function randomRoadSpawn(x, z, minRadius = 45) {
+  function randomRoadSpawn(x, z, minRadius = 45, preferCenter = false) {
     const occupied = trafficCars.map((car) => ({ x: car.x, z: car.z }));
-    const point = spawnPointNear(carSpawnPoints, x, z, minRadius, TRAFFIC.spawnRadius, occupied, 12);
+    const point = spawnPointNear(carSpawnPoints, x, z, minRadius, TRAFFIC.spawnRadius, occupied, 12, preferCenter);
     if (point) return point;
     const nearby = randomPointNear(x, z, minRadius, TRAFFIC.spawnRadius);
     const edgePoint = roadNetwork.nearestEdge(nearby.x, nearby.z);
@@ -206,7 +224,7 @@ export function createTraffic(city, scene, random) {
   }
 
   function respawnCar(car, playerX, playerZ) {
-    const point = randomRoadSpawn(playerX, playerZ, 45);
+    const point = randomRoadSpawn(playerX, playerZ, 45, true);
     if (!point) return false;
     car.laneOffset = car.laneTarget = TRAFFIC.laneOffset + car.laneBias;
     car.laneCooldown = random.range(2, 5);
@@ -223,9 +241,9 @@ export function createTraffic(city, scene, random) {
 
   function spawnAll(playerX, playerZ) {
     let attempts = 0;
-    while (trafficCars.length < TRAFFIC.cars && attempts < TRAFFIC.cars * 20) {
+    while (trafficCars.length < carTarget && attempts < carTarget * 16) {
       attempts += 1;
-      const point = randomRoadSpawn(playerX, playerZ);
+      const point = randomRoadSpawn(playerX, playerZ, 45, true);
       if (!point) continue;
       const car = makeTrafficCar(point, point.heading);
       routeCarAt(car, point);
@@ -234,18 +252,18 @@ export function createTraffic(city, scene, random) {
     }
     let pedAttempts = 0;
     let pedFailures = 0;
-    while (peds.length < TRAFFIC.pedestrians && pedAttempts < TRAFFIC.pedestrians * 4 && pedFailures < 3) {
+    while (peds.length < pedTarget && pedAttempts < pedTarget * 5 && pedFailures < 3) {
       const previousCount = peds.length;
-      spawnPed(playerX, playerZ);
+      spawnPed(playerX, playerZ, true);
       pedAttempts += 1;
       pedFailures = peds.length === previousCount ? pedFailures + 1 : 0;
     }
   }
 
-  function spawnPed(playerX, playerZ) {
+  function spawnPed(playerX, playerZ, preferCenter = false) {
     if (peds.length >= PED_LIMIT) return;
     let position = null;
-    const point = spawnPointNear(pedSpawnPoints, playerX, playerZ, 30, TRAFFIC.spawnRadius, peds, 5);
+    const point = spawnPointNear(pedSpawnPoints, playerX, playerZ, 30, TRAFFIC.spawnRadius, peds, 5, preferCenter);
     if (point) position = { x: point.x, z: point.z };
     for (let attempt = 0; attempt < 12 && !position; attempt += 1) {
       const point = randomPointNear(playerX, playerZ, 30, TRAFFIC.spawnRadius);
@@ -568,9 +586,9 @@ export function createTraffic(city, scene, random) {
       if (!stepPed(peds[index], dt, player, vehicles)) peds.splice(index, 1);
     }
     const target = playerPosition(player);
-    if (peds.length < TRAFFIC.pedestrians && random() < 0.2) spawnPed(target.x, target.z);
-    if (trafficCars.length < TRAFFIC.cars) {
-      const point = randomRoadSpawn(target.x, target.z);
+    if (peds.length < pedTarget && random() < 0.2) spawnPed(target.x, target.z, true);
+    if (trafficCars.length < carTarget) {
+      const point = randomRoadSpawn(target.x, target.z, 45, true);
       if (point) {
         const car = makeTrafficCar(point, point.heading);
         routeCarAt(car, point);

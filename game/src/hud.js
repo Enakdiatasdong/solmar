@@ -24,6 +24,9 @@ export function createHud() {
     stars: element('wanted-stars'),
     speed: element('speed-value'),
     speedBox: element('speed-box'),
+    vehicleCondition: element('vehicle-condition'),
+    vehicleConditionBar: element('vehicle-condition-bar'),
+    vehicleConditionText: element('vehicle-condition-text'),
 
     vehicleName: element('vehicle-name'),
     jetpackBox: element('jetpack-box'),
@@ -32,6 +35,24 @@ export function createHud() {
 
     weapon: element('weapon-text'),
     weaponBox: element('weapon-box'),
+    weaponSlots: element('weapon-slots'),
+    policeList: element('police-list'),
+    missionCard: element('mission-card'),
+    missionChapter: element('mission-chapter'),
+    missionCardTitle: element('mission-card-title'),
+    missionBriefing: element('mission-briefing'),
+    missionAwareness: element('mission-awareness'),
+    missionStage: element('mission-stage'),
+    missionTimer: element('mission-timer'),
+    missionPips: element('mission-pips'),
+    missionNext: element('mission-next'),
+    searchZoneChip: element('search-zone-chip'),
+    radio: element('radio-box'),
+    radioStation: element('radio-station'),
+    radioTrack: element('radio-track'),
+    radioArtist: element('radio-artist'),
+    clock: element('clock-value'),
+    nightIndicator: element('day-night-icon'),
 
     objective: element('objective-text'),
     objectiveBox: element('objective-box'),
@@ -62,6 +83,7 @@ export function createHud() {
     repPoints: element('rep-points'),
     repProgress: element('rep-progress'),
     repNext: element('rep-next'),
+    repLevel: element('rep-level'),
   };
   const cache = {
     health: null,
@@ -76,6 +98,13 @@ export function createHud() {
     jetpackColor: null,
     objective: null,
     dialogue: null,
+    vehicleCondition: null,
+    weaponSlots: null,
+    policeUnits: null,
+    radio: null,
+    clock: null,
+    night: null,
+    missionCard: null,
 
     regions: null,
     rep: null,
@@ -152,11 +181,28 @@ export function createHud() {
     cache.speed = value;
     cache.inCar = driving;
     if (hud.speedBox) hud.speedBox.style.display = driving ? 'flex' : 'none';
+    if (!driving && hud.vehicleConditionBar) hud.vehicleConditionBar.hidden = true;
     setText(hud.speed, driving ? value + ' KM/H' : '');
   }
 
   function setVehicleName(name) {
     setText(hud.vehicleName, name || '');
+  }
+
+  function setVehicleCondition(percent, name) {
+    const driving = Number.isFinite(percent) && Boolean(name);
+    if (hud.vehicleCondition) hud.vehicleCondition.hidden = !driving;
+    if (hud.vehicleConditionText) hud.vehicleConditionText.hidden = !driving;
+    if (!driving) return;
+    if (hud.vehicleConditionBar) hud.vehicleConditionBar.hidden = false;
+    if (!hud.vehicleCondition || !hud.vehicleConditionText) return;
+    const value = Math.max(0, Math.min(100, Math.round(percent)));
+    const key = `${String(name)}:${value}`;
+    if (cache.vehicleCondition === key) return;
+    cache.vehicleCondition = key;
+    setText(hud.vehicleConditionText, `${String(name).toUpperCase()} — CONDITION ${value}%`);
+    hud.vehicleCondition.style.width = `${value}%`;
+    hud.vehicleCondition.style.background = value < 28 ? PALETTE.css.coral : value < 55 ? PALETTE.css.gold : PALETTE.css.teal;
   }
 
   function setJetpack(fuel, maxFuel, owned, active) {
@@ -201,6 +247,120 @@ export function createHud() {
     if (hud.weaponBox) hud.weaponBox.style.display = visible && weapon ? 'block' : 'none';
     if (!weapon) return;
     setText(hud.weapon, `${weapon.name} ${weapon.ammo}/${weapon.maxAmmo}`);
+  }
+
+  function setWeaponSlots(weapons, selectedIndex) {
+    if (!hud.weaponSlots || typeof document === 'undefined') return;
+    const glyphs = ['P', 'SG', 'SMG', 'LS', 'FB'];
+    const key = (weapons ?? []).map((weapon) => `${weapon.id}:${weapon.unlocked}:${weapon.ammo}/${weapon.maxAmmo}`).join('|') + `:${selectedIndex}`;
+    if (cache.weaponSlots === key) return;
+    cache.weaponSlots = key;
+    hud.weaponSlots.replaceChildren();
+    for (const [index, weapon] of (weapons ?? []).entries()) {
+      const slot = document.createElement('div');
+      const unlocked = weapon.unlocked !== false;
+      slot.className = `weapon-slot${index === selectedIndex ? ' selected' : ''}${unlocked ? '' : ' locked'}`;
+      slot.innerHTML = `<span class="weapon-key">${index + 1}</span><b>${glyphs[index] ?? '?'}</b><small>${weapon.name}</small><em>${weapon.ammo}/${weapon.maxAmmo}</em>${unlocked ? '' : '<i>LOCKED</i>'}`;
+      hud.weaponSlots.appendChild(slot);
+    }
+  }
+
+  function setPoliceUnits(unitsOrStatus, wanted = 0, lineOfSight = false) {
+    if (!hud.policeList || typeof document === 'undefined') return;
+    const chase = Array.isArray(unitsOrStatus) ? null : unitsOrStatus;
+    const units = chase?.units ?? unitsOrStatus;
+    const list = Array.isArray(units) ? units : [];
+    const status = chase?.status ?? (lineOfSight ? 'IN SIGHT' : 'SEARCHING');
+    const losePercent = Math.max(0, Math.min(100, Math.round(chase?.losePercent ?? 0)));
+    const visibleWanted = Number.isFinite(wanted) ? wanted : 0;
+    hud.policeList.hidden = list.length === 0;
+    const key = `${visibleWanted}:${status}:${losePercent}:${list.map((unit) => `${unit.callsign}:${unit.tactic}:${unit.distance}`).join('|')}`;
+    if (cache.policeUnits === key) return;
+    cache.policeUnits = key;
+    if (!list.length) return;
+    hud.policeList.replaceChildren();
+    const header = document.createElement('div');
+    header.className = 'police-header';
+    header.textContent = `SMPD RESPONSE — ${list.length} UNITS · CODE ${Math.min(5, Math.max(0, Math.round(visibleWanted)))} · ${status} · LOSE THEM ${losePercent}%`;
+    hud.policeList.appendChild(header);
+    const visible = list.slice(0, 5);
+    for (const unit of visible) {
+      const row = document.createElement('div');
+      row.className = 'police-row';
+      row.innerHTML = `<b>${unit.callsign ?? 'SMPD-UNIT'}</b><span>${unit.distance ?? 0} m</span><em class="tactic-${String(unit.tactic ?? '').toLowerCase()}">${unit.tactic ?? 'PURSUIT'}</em>`;
+      hud.policeList.appendChild(row);
+    }
+    if (list.length > visible.length) {
+      const overflow = document.createElement('small');
+      overflow.textContent = `+${list.length - visible.length} more units in the search zone`;
+      hud.policeList.appendChild(overflow);
+    }
+  }
+
+  function setRadio(station, track) {
+    if (!hud.radio) return;
+    hud.radio.hidden = !station;
+    if (!station) return;
+    const key = `${station.id}:${track?.title}:${track?.artist}`;
+    if (cache.radio === key) return;
+    cache.radio = key;
+    setText(hud.radioStation, `${station.freq} · ${station.name}`);
+    setText(hud.radioTrack, track?.title ?? '');
+    setText(hud.radioArtist, track?.artist ?? '');
+  }
+
+  function setClock(day, hh, mm) {
+    if (!hud.clock) return;
+    const value = `DAY ${Math.max(1, Math.floor(day || 1))} · ${String(Math.floor(hh || 0)).padStart(2, '0')}:${String(Math.floor(mm || 0)).padStart(2, '0')}`;
+    if (cache.clock === value) return;
+    cache.clock = value;
+    setText(hud.clock, value);
+  }
+
+  function setNight(isNight) {
+    if (!hud.nightIndicator) return;
+    const night = Boolean(isNight);
+    if (cache.night === night) return;
+    cache.night = night;
+    hud.nightIndicator.textContent = night ? '☾' : '☀';
+    hud.nightIndicator.className = night ? 'night' : 'day';
+    hud.nightIndicator.setAttribute('aria-label', night ? 'Night' : 'Day');
+    hud.nightIndicator.title = night ? 'Night' : 'Day';
+  }
+
+  function setMissionCard(card) {
+    if (!hud.missionCard) return;
+    const active = Boolean(card);
+    hud.missionCard.hidden = !active;
+    if (!active) {
+      if (hud.searchZoneChip) hud.searchZoneChip.hidden = true;
+      cache.missionCard = null;
+      return;
+    }
+    const seconds = Math.max(0, Math.ceil(card.secondsLeft ?? 0));
+    const key = `${card.chapter}:${card.title}:${card.briefing}:${card.stageIndex ?? card.stage}:${seconds}:${card.stageTotal}:${card.next}:${card.searchZone}:${card.lineOfSight}`;
+    if (cache.missionCard === key) return;
+    cache.missionCard = key;
+    setText(hud.missionChapter, card.chapter ?? '');
+    setText(hud.missionCardTitle, card.title ?? '');
+    setText(hud.missionBriefing, card.briefing ?? '');
+    setText(hud.missionStage, `STAGE ${card.stageIndex ?? card.stage ?? 1}/${card.stageTotal ?? 4}`);
+    setText(hud.missionTimer, `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
+    setText(hud.missionNext, `NEXT  ${card.next ?? 'Bring the money home'}`);
+    if (hud.missionPips) {
+      hud.missionPips.replaceChildren();
+      const current = Number(card.stageIndex ?? 1);
+      for (let index = 1; index <= (card.stageTotal ?? 4); index += 1) {
+        const pip = document.createElement('i');
+        pip.className = index <= current ? 'on' : '';
+        hud.missionPips.appendChild(pip);
+      }
+    }
+    if (hud.searchZoneChip) {
+      hud.searchZoneChip.hidden = !card.searchZone;
+      setText(hud.searchZoneChip, 'search zone follows you');
+    }
+    if (hud.missionAwareness) setText(hud.missionAwareness, card.lineOfSight ? 'They can see you — break line of sight' : 'You are hidden — keep moving');
   }
 
   function toast(message, kind = 'info', seconds = 3.4) {
@@ -273,6 +433,7 @@ export function createHud() {
   function setRep(info) {
     if (!info) return;
     setText(hud.repRank, info.name ?? 'Small Fry');
+    setText(hud.repLevel, `RESPECT ${Math.max(1, Math.floor(info.index ?? 0) + 1)}`);
     setText(hud.repPoints, `${Math.max(0, Math.floor(info.points ?? 0)).toLocaleString('en-US')} REP`);
     const progress = Math.max(0, Math.min(1, Number(info.progress) || 0));
     if (hud.repProgress) hud.repProgress.style.width = `${progress * 100}%`;
@@ -563,6 +724,40 @@ export function createHud() {
       }
     }
 
+    if (extras?.searchZone && Number.isFinite(extras.searchZone.x) && Number.isFinite(extras.searchZone.z)
+      && Number.isFinite(extras.searchZone.radius) && extras.searchZone.radius > 0) {
+      mapContext.save();
+      mapContext.beginPath();
+      mapContext.arc(extras.searchZone.x, extras.searchZone.z, extras.searchZone.radius, 0, Math.PI * 2);
+      mapContext.fillStyle = 'rgba(255, 75, 83, 0.18)';
+      mapContext.fill();
+      mapContext.setLineDash([12, 9]);
+      mapContext.lineWidth = 2 / scale;
+      mapContext.strokeStyle = 'rgba(255, 103, 112, 0.9)';
+      mapContext.stroke();
+      mapContext.setLineDash([]);
+      mapContext.restore();
+    }
+
+    const route = Array.isArray(extras?.route) ? extras.route : [];
+    if (route.length > 1 && route.every((point) => Number.isFinite(point?.x) && Number.isFinite(point?.z))) {
+      mapContext.save();
+      mapContext.beginPath();
+      mapContext.moveTo(route[0].x, route[0].z);
+      for (const point of route.slice(1)) mapContext.lineTo(point.x, point.z);
+      mapContext.lineJoin = 'round';
+      mapContext.lineCap = 'round';
+      mapContext.lineWidth = 13 / scale;
+      mapContext.strokeStyle = 'rgba(30, 22, 9, 0.82)';
+      mapContext.stroke();
+      mapContext.lineWidth = 7 / scale;
+      mapContext.strokeStyle = '#ffd54a';
+      mapContext.shadowColor = '#ffc857';
+      mapContext.shadowBlur = 8 / scale;
+      mapContext.stroke();
+      mapContext.restore();
+    }
+
 
     if (Array.isArray(missions)) {
       for (const mission of missions) {
@@ -576,6 +771,7 @@ export function createHud() {
     if (Array.isArray(blips)) {
       for (const blip of blips) {
         if (!Number.isFinite(blip?.x) || !Number.isFinite(blip?.z)) continue;
+        if (extras?.storyMarker && Math.hypot(blip.x - extras.storyMarker.x, blip.z - extras.storyMarker.z) < 0.01) continue;
         if (Array.isArray(extras?.landmarks) && extras.landmarks.some((landmark) =>
           landmark?.x === blip.x && landmark?.z === blip.z && landmark?.color === blip.color)) continue;
         mapContext.fillStyle = blip.color || PALETTE.css.teal;
@@ -592,6 +788,26 @@ export function createHud() {
         mapContext.arc(landmark.x, landmark.z, Number.isFinite(landmark.size) ? landmark.size : 15, 0, Math.PI * 2);
         mapContext.fill();
       }
+    }
+    const storyMarker = extras?.storyMarker;
+    if (storyMarker && Number.isFinite(storyMarker.x) && Number.isFinite(storyMarker.z)) {
+      const pulse = 1 + (Math.sin((typeof performance !== 'undefined' ? performance.now() : 0) * 0.006) + 1) * 0.18;
+      mapContext.save();
+      mapContext.beginPath();
+      mapContext.arc(storyMarker.x, storyMarker.z, 76 * pulse, 0, Math.PI * 2);
+      mapContext.strokeStyle = 'rgba(255, 213, 74, 0.95)';
+      mapContext.lineWidth = 7 / scale;
+      mapContext.shadowColor = '#ffc857';
+      mapContext.shadowBlur = 11 / scale;
+      mapContext.stroke();
+      mapContext.beginPath();
+      mapContext.arc(storyMarker.x, storyMarker.z, 48, 0, Math.PI * 2);
+      mapContext.fillStyle = '#ffd54a';
+      mapContext.fill();
+      mapContext.strokeStyle = '#fff5c5';
+      mapContext.lineWidth = 3 / scale;
+      mapContext.stroke();
+      mapContext.restore();
     }
     mapContext.restore();
 
@@ -632,9 +848,16 @@ export function createHud() {
     setSpeed,
 
     setVehicleName,
+    setVehicleCondition,
     setJetpack,
 
     setWeapon,
+    setWeaponSlots,
+    setPoliceUnits,
+    setRadio,
+    setClock,
+    setNight,
+    setMissionCard,
 
     setMission,
     setObjective: setMission,

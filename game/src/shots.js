@@ -47,6 +47,11 @@ function prepareFreshRun(game) {
   state.finalMission = null;
   state.bustedFine = 0;
   state.elapsed = 0;
+  state.day = 1;
+  state.clockMinutes = 18 * 60 + 52;
+  state.radioStationIndex = 0;
+  state.radioTrackIndex = 0;
+  state.radioTrackElapsed = 0;
   state.started = true;
   orbit.yaw = 0;
   orbit.pitch = CAMERA.pitch;
@@ -100,7 +105,7 @@ function fixedAdvance(game, count, controls = null) {
 }
 
 export function stageShot(name, game) {
-  const shot = name === 'play' || name === 'end' ? name : 'start';
+  const shot = ['play', 'end', 'paper-moon'].includes(name) ? name : 'start';
   const { player, vehicles, missions, hud, renderer, orbit, state, setScreen } = game;
   setReady(false);
   prepareFreshRun(game);
@@ -147,6 +152,31 @@ export function stageShot(name, game) {
       screen: 'playing',
       update() {},
     };
+  }
+
+  if (shot === 'paper-moon') {
+    const paperMoon = missions.list.find((mission) => mission.id === 'paper-moon');
+    if (paperMoon) paperMoon.locked = false;
+    player.state.x = 144;
+    player.state.z = 72;
+    player.syncMesh();
+    const vespera = vehicles.cars.find((car) => car.id === 'vespera-gt');
+    if (vespera) {
+      vehicles.setCarPosition(vespera, 144, 78, 0);
+      player.enterCar(vespera);
+    }
+    missions.start('paper-moon');
+    state.cash = 38420;
+    state.day = 1;
+    state.clockMinutes = 18 * 60 + 52;
+    orbit.yaw = 0.3;
+    orbit.pitch = 0.24;
+    orbit.distance = 9.4;
+    setScreen('playing');
+    fixedAdvance(game, 30, { accelerate: true, brake: false, left: false, right: false, handbrake: false });
+    freezeMissionVisuals(renderer.scene);
+    setReady(true);
+    return { screen: 'playing', update() {} };
   }
 
   // Put the actual first-fare state machine at its drop-off, then let it issue the completion.

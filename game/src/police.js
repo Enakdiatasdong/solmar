@@ -3,6 +3,47 @@ import * as THREE from '../vendor/three.module.min.js';
 import { CITY, POLICE, VEHICLE } from './config.js';
 import { resolveCollisions } from './world.js';
 
+const CALLSIGNS = ['IBIS-43', 'TARPON-10', 'HERON-17', 'KESTREL-31', 'MARLIN-24', 'OSPREY-08', 'PELICAN-62'];
+
+function heliMesh() {
+  const group = new THREE.Group();
+  const body = new THREE.MeshLambertMaterial({ color: 0x172235 });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x0d1421 });
+  const stripe = new THREE.MeshLambertMaterial({ color: 0xf2f1e8 });
+  const red = new THREE.MeshLambertMaterial({ color: 0xff5a4d, emissive: 0xff2f2f, emissiveIntensity: 1.2 });
+  const blue = new THREE.MeshLambertMaterial({ color: 0x3fa7ff, emissive: 0x247bff, emissiveIntensity: 1.2 });
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.15, 4.4), body);
+  hull.position.y = 0.1;
+  group.add(hull);
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 1.55), dark);
+  canopy.position.set(0, 0.72, 0.65);
+  group.add(canopy);
+  const band = new THREE.Mesh(new THREE.BoxGeometry(2.86, 0.22, 1.05), stripe);
+  band.position.set(0, 0.06, -0.1);
+  group.add(band);
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.48, 4.8), body);
+  boom.position.set(0, 0.2, -3.8);
+  group.add(boom);
+  const rotor = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, 8.2), stripe);
+  rotor.position.y = 1.02;
+  group.add(rotor);
+  const rotorCross = new THREE.Mesh(new THREE.BoxGeometry(8.2, 0.08, 0.24), stripe);
+  rotorCross.position.y = 1.02;
+  group.add(rotorCross);
+  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.0, 0.08), stripe);
+  tailRotor.position.set(0, 0.28, -6.18);
+  group.add(tailRotor);
+  const tailRotorCross = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.12, 0.08), stripe);
+  tailRotorCross.position.set(0, 0.28, -6.18);
+  group.add(tailRotorCross);
+  const redLight = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.18), red);
+  const blueLight = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.18), blue);
+  redLight.position.set(-0.65, 0.78, -0.9);
+  blueLight.position.set(0.65, 0.78, -0.9);
+  group.add(redLight, blueLight);
+  return { group, rotor, rotorCross, tailRotor, tailRotorCross, redLight, blueLight };
+}
+
 function copMesh() {
   const group = new THREE.Group();
   const uniform = new THREE.MeshLambertMaterial({ color: 0x24344d });
@@ -46,12 +87,17 @@ export function createPolice(city, scene, vehicles) {
     lastCrimeAt: -999,
     pulse: 0,
     forcedDecay: false,
+    heli: null,
   };
   let worldTime = 0;
   let spawnIndex = 0;
 
   function targetFor(player) {
     return player.state.inCar?.state ?? player.state;
+  }
+
+  function chaseDecayScale() {
+    return !state.forcedDecay && state.wanted >= 3 ? 1.8 : 1;
   }
 
   function hasLineOfSight(observer, target) {
@@ -92,6 +138,7 @@ export function createPolice(city, scene, vehicles) {
     state.heat = state.wanted;
     state.decayTimer = 0;
     if (state.wanted === 0) state.arrestTimer = 0;
+    if (state.wanted === 0) removeHelicopter();
   }
 
   function addWanted(amount, reason) {
@@ -113,6 +160,61 @@ export function createPolice(city, scene, vehicles) {
     scene.remove(cop.group);
   }
 
+  function removeHelicopter() {
+    const heli = state.heli;
+    if (!heli) return;
+    scene.remove(heli.group);
+    scene.remove(heli.spotlight);
+    scene.remove(heli.spotlight.target);
+    scene.remove(heli.ground);
+    state.heli = null;
+  }
+
+  function spawnHelicopter(player) {
+    if (state.heli) return state.heli;
+    const built = heliMesh();
+    const spotlight = new THREE.SpotLight(0xfff3c2, 3.2, 90, Math.PI / 8, 0.5, 1.2);
+    const target = new THREE.Object3D();
+    const ground = new THREE.Mesh(
+      new THREE.TorusGeometry(8, 0.16, 6, 48),
+      new THREE.MeshBasicMaterial({ color: 0xff5a4d, transparent: true, opacity: 0.68 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(built.group, spotlight, target, ground);
+    const position = targetFor(player);
+    built.group.position.set(position.x + 18, 28, position.z - 18);
+    spotlight.position.copy(built.group.position);
+    spotlight.target = target;
+    target.position.set(position.x, 0, position.z);
+    ground.position.set(position.x, 0.08, position.z);
+    state.heli = { ...built, spotlight, ground, orbit: 0 };
+    return state.heli;
+  }
+
+  function updateHelicopter(dt, player) {
+    const heli = state.heli;
+    if (!heli) return;
+    const target = targetFor(player);
+    heli.orbit += dt * 0.24;
+    const desired = new THREE.Vector3(
+      target.x + Math.cos(heli.orbit) * 18,
+      28 + Math.sin(worldTime * 0.7) * 1.8,
+      target.z + Math.sin(heli.orbit) * 18,
+    );
+    heli.group.position.lerp(desired, Math.min(1, dt * 0.9));
+    heli.group.lookAt(target.x, heli.group.position.y, target.z);
+    heli.rotor.rotation.y += dt * 18;
+    heli.rotorCross.rotation.y += dt * 18;
+    heli.tailRotor.rotation.z += dt * 24;
+    heli.tailRotorCross.rotation.z += dt * 24;
+    const flash = Math.floor(worldTime * 4) % 2 === 0;
+    heli.redLight.visible = flash;
+    heli.blueLight.visible = !flash;
+    heli.spotlight.position.copy(heli.group.position);
+    heli.spotlight.target.position.set(target.x, 0, target.z);
+    heli.ground.position.set(target.x, 0.08, target.z);
+  }
+
   function clear() {
     setWanted(0);
     state.busted = false;
@@ -123,6 +225,7 @@ export function createPolice(city, scene, vehicles) {
     state.copCars.length = 0;
     for (const cop of state.cops) removeFootCop(cop);
     state.cops.length = 0;
+    removeHelicopter();
   }
 
   function spawnCopCar(player) {
@@ -142,6 +245,7 @@ export function createPolice(city, scene, vehicles) {
     const listIndex = vehicles.cars.indexOf(car);
     if (listIndex >= 0) vehicles.cars.splice(listIndex, 1);
     car.ai = 'pursue';
+    car.callsign = CALLSIGNS[(spawnIndex - 1) % CALLSIGNS.length];
     car.state.speed = 6;
     car.pursuit = {
       node: roadNetwork.nearestNode(x, z),
@@ -185,6 +289,7 @@ export function createPolice(city, scene, vehicles) {
       health: 60,
       alive: true,
       down: 0,
+      callsign: CALLSIGNS[(spawnIndex - 1) % CALLSIGNS.length],
     });
     return true;
   }
@@ -332,11 +437,14 @@ export function createPolice(city, scene, vehicles) {
       return;
     }
 
+    if (state.wanted >= 3 && !state.heli) spawnHelicopter(player);
+    updateHelicopter(dt, player);
+
     const target = targetFor(player);
     const outOfSight = state.copCars.every((car) => car.state.wrecked || !hasLineOfSight(car.state, target))
       && state.cops.every((cop) => !cop.alive || !hasLineOfSight(cop, target));
     state.lineOfSight = !outOfSight;
-    const decayScale = !state.forcedDecay && state.wanted >= 3 ? 1.8 : 1;
+    const decayScale = chaseDecayScale();
     if (outOfSight) {
       state.decayTimer += dt;
       if (state.decayTimer > POLICE.decayDelay * decayScale) {
@@ -393,6 +501,31 @@ export function createPolice(city, scene, vehicles) {
     return best;
   }
 
+  function getChaseUnits(player) {
+    const target = targetFor(player);
+    const units = [];
+    for (const car of state.copCars) {
+      const distance = Math.hypot(car.state.x - target.x, car.state.z - target.z);
+      // Deterministic briefing rule: nearby cruisers ram a player car, distant cars and foot units roadblock.
+      const tactic = player.state.inCar && distance <= 18 ? 'RAMMING' : distance > 60 ? 'ROADBLOCK' : 'PURSUIT';
+      units.push({ callsign: car.callsign ?? 'SMPD-UNIT', tactic, distance: Math.round(distance) });
+    }
+    for (const cop of state.cops) {
+      const distance = Math.hypot(cop.x - target.x, cop.z - target.z);
+      units.push({ callsign: cop.callsign ?? 'SMPD-UNIT', tactic: 'ROADBLOCK', distance: Math.round(distance) });
+    }
+    return units;
+  }
+
+  function getChaseStatus(player, paperMoonActive = false) {
+    // Panel status is IN SIGHT when visible, otherwise SEARCHING; Paper Moon calls hidden time EVADING.
+    const status = state.lineOfSight ? 'IN SIGHT' : paperMoonActive ? 'EVADING' : 'SEARCHING';
+    const denominator = POLICE.decayDelay * chaseDecayScale();
+    const losePercent = state.lineOfSight ? 0
+      : Math.max(0, Math.min(100, Math.round((state.decayTimer / denominator) * 100)));
+    return { units: getChaseUnits(player), status, losePercent };
+  }
+
   return {
     state,
     addWanted,
@@ -401,6 +534,9 @@ export function createPolice(city, scene, vehicles) {
     update,
     spawnCopCar,
     distanceToNearest,
+    getChaseUnits,
+    getChaseStatus,
+    heliPosition: () => state.heli ? { x: state.heli.group.position.x, y: state.heli.group.position.y, z: state.heli.group.position.z } : null,
     resolveCircle: (colliderList, x, z, radius) => resolveCollisions(colliderList, x, z, radius),
     reset: clear,
   };

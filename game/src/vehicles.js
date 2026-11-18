@@ -40,6 +40,11 @@ const EXPANSION_SPAWNS = [
     spots: [[1.6, 13, Math.PI], [-9.6, -12, Math.PI], [1.6, -15, 0], [-9.6, 12, 0]],
   },
   {
+    id: 'vespera-gt', landmark: 'coupe', clearance: 2.7,
+    spec: { body: 0xff5fa2, cabin: 0x8b315d, name: 'Vespera GT', variant: 'vespera', tuning: VEHICLE_TYPES.vespera },
+    spots: [[15, 14, Math.PI], [18, -12, 0], [-18, 14, Math.PI], [20, 8, 0]],
+  },
+  {
     id: 'van-garage', landmark: 'garage', clearance: 2.7,
     spec: { body: 0x70a8c4, cabin: 0x2e3c48, name: 'Marina Mover', variant: 'cargovan', tuning: VEHICLE_TYPES.van },
     spots: [[5.8, 15, 0], [-5.8, 15, 0], [5.8, -15, Math.PI], [-5.8, -15, Math.PI]],
@@ -172,6 +177,29 @@ function buildExpansionMesh(spec) {
       axle(1.39, 1.08, 0.4, 0.33);
       axle(-1.41, 1.08, 0.42, 0.39);
       break;
+    case 'vespera': {
+      const underglow = new THREE.MeshLambertMaterial({ color: 0xff5fa2, emissive: 0xff2583, emissiveIntensity: 1.2 });
+      const darkTrim = new THREE.MeshLambertMaterial({ color: 0x5e2949 });
+      box(group, trim, 2.55, 0.28, 4.62, 0, 0.34, 0);
+      box(group, body, 2.68, 0.46, 4.58, 0, 0.66, 0);
+      box(group, body, 2.3, 0.14, 1.15, 0, 0.79, 1.47).rotation.x = 0.07;
+      box(group, glassMaterial, 1.82, 0.38, 1.96, 0, 1.01, -0.22);
+      box(group, glassMaterial, 1.75, 0.1, 0.68, 0, 1.07, 0.9).rotation.x = 0.4;
+      box(group, body, 1.7, 0.13, 1.6, 0, 1.25, -0.45);
+      box(group, darkTrim, 1.42, 0.11, 0.09, 0, 0.52, 2.31);
+      box(group, darkTrim, 2.43, 0.14, 0.46, 0, 1.12, -2.08);
+      for (const x of [-0.78, 0.78]) {
+        box(group, darkTrim, 0.14, 0.42, 0.18, x, 0.99, -2.04);
+        box(group, darkTrim, 0.14, 0.12, 4.08, x, 0.42, -0.05);
+        tube(group, darkTrim, 0.055, [x * 0.72, 0.82, -1.42], [x * 0.72, 1.28, -1.9]);
+      }
+      box(group, body, 2.55, 0.1, 0.14, 0, 1.54, -2.11);
+      box(group, underglow, 2.05, 0.045, 3.42, 0, 0.205, -0.04);
+      lamps(0.96, 0.72, 2.27, 0.73, -2.31);
+      axle(1.43, 1.2, 0.4, 0.35);
+      axle(-1.49, 1.2, 0.44, 0.48);
+      break;
+    }
     case 'cargovan':
       box(group, trim, 2.16, 0.31, 4.95, 0, 0.47, 0);
       box(group, body, 2.29, 1.89, 3.26, 0, 1.46, -0.82);
