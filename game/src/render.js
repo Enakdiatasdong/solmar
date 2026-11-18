@@ -28,16 +28,19 @@ export function createRenderer(canvas) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(PALETTE.sky);
-  scene.fog = new THREE.Fog(PALETTE.fog, 140, 620);
+  scene.fog = new THREE.Fog(PALETTE.fog, 175, 1050);
 
   const camera = new THREE.PerspectiveCamera(58, initialSize.width / initialSize.height, 0.1, 1800);
   camera.position.set(0, 8, 14);
 
-  const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 0.72);
+  const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 0.64);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(PALETTE.sun, 2.1);
-  sun.position.set(-140, 170, 90);
+  // Fixed south-west sun, 14.2 degrees above the horizon. Share its direction with the sky
+  // and keep this offset when the shadow box follows the player: screenshots never use a clock.
+  const sunOffset = new THREE.Vector3(-72, 56, 210);
+  const sun = new THREE.DirectionalLight(PALETTE.sun, 2.25);
+  sun.position.copy(sunOffset);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
   sun.shadow.camera.near = 20;
@@ -59,19 +62,28 @@ export function createRenderer(canvas) {
     uniforms: {
       top: { value: new THREE.Color(PALETTE.skyTop) },
       bottom: { value: new THREE.Color(PALETTE.sky) },
-      sunColor: { value: new THREE.Color(0xffd9a0) },
+      rose: { value: new THREE.Color(PALETTE.skyRose) },
+      sunColor: { value: new THREE.Color(PALETTE.sun) },
+      sunDirection: { value: sunOffset.clone().normalize() },
     },
     vertexShader: 'varying vec3 vWorld; void main(){ vWorld = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: `
       uniform vec3 top;
       uniform vec3 bottom;
+      uniform vec3 rose;
       uniform vec3 sunColor;
+      uniform vec3 sunDirection;
       varying vec3 vWorld;
       void main() {
-        float h = clamp(vWorld.y * 1.15 + 0.18, 0.0, 1.0);
-        vec3 color = mix(bottom, top, pow(h, 0.8));
-        float glow = pow(max(dot(normalize(vWorld), normalize(vec3(-0.55, 0.25, 0.8))), 0.0), 6.0);
-        color += sunColor * glow * 0.4;
+        vec3 direction = normalize(vWorld);
+        float h = max(direction.y, 0.0);
+        vec3 color = mix(bottom, rose, smoothstep(0.0, 0.32, h));
+        color = mix(color, top, pow(smoothstep(0.08, 1.0, h), 0.7));
+        float facingSun = max(dot(direction, sunDirection), 0.0);
+        float glow = pow(facingSun, 10.0);
+        float aureole = pow(facingSun, 96.0);
+        float disc = smoothstep(0.99982, 0.99994, facingSun);
+        color += sunColor * (glow * 0.45 + aureole * 0.7 + disc * 4.0);
         gl_FragColor = vec4(color, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -157,7 +169,7 @@ export function createRenderer(canvas) {
     skyDome.position.copy(camera.position);
     const shadowX = Math.round(focus.x / 90) * 90;
     const shadowZ = Math.round(focus.z / 90) * 90;
-    sun.position.set(shadowX - 110, 160, shadowZ + 95);
+    sun.position.set(shadowX + sunOffset.x, sunOffset.y, shadowZ + sunOffset.z);
     sun.target.position.set(shadowX, 0, shadowZ);
     sun.target.updateMatrixWorld();
   }
