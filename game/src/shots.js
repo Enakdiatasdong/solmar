@@ -1,5 +1,5 @@
 // Deterministic screenshot staging using the game's seeded world and its live systems.
-import { CAMERA, MISSIONS, STEP } from './config.js';
+import { CAMERA, MISSIONS, SPAWN, STEP } from './config.js';
 
 const FIXED_STEP_COUNT = 120;
 const STARTER_POSITION = { x: 4.6, z: 100, heading: 0 };
@@ -15,6 +15,10 @@ function prepareFreshRun(game) {
   missions.setProgress([]);
   police.clear();
   combat.reset();
+  game.assets.reset();
+  game.restaurants.reset();
+  game.safehouses.reset();
+  state.respawn = { x: SPAWN.x, z: SPAWN.z };
 
   for (let index = vehicles.cars.length - 1; index >= 0; index -= 1) {
     const car = vehicles.cars[index];

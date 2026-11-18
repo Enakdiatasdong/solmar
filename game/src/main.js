@@ -14,6 +14,9 @@ import { createCombat } from './combat.js';
 import { createAudio } from './audio.js';
 import { createHud } from './hud.js';
 import { createMissions } from './missions.js';
+import { ASSETS, createAssets } from './assets.js';
+import { RESTAURANTS, createRestaurants } from './restaurants.js';
+import { SAFEHOUSES, createSafehouses } from './safehouses.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
@@ -28,9 +31,10 @@ const DOM_IDS = [
   'btn-restart', 'complete-screen', 'complete-title', 'complete-cash', 'complete-extra',
   'complete-time', 'btn-resume', 'btn-restart-pause',
   // Keep this inventory aligned with hud.js; every element is optional.
-  'hud', 'health-fill', 'health-text', 'cash-value', 'wanted-stars', 'speed-value',
+  'hud', 'health-fill', 'health-text', 'cash-value', 'income-value', 'wanted-stars', 'speed-value',
   'speed-box', 'objective-text', 'objective-box', 'toasts', 'minimap', 'mission-list',
-  'dialogue', 'dialogue-text', 'subtitle', 'hint',
+  'dialogue', 'dialogue-text', 'subtitle', 'hint', 'place-menu', 'place-menu-title',
+  'place-menu-subtitle', 'place-menu-rows', 'place-menu-close',
 ];
 const SCREEN_ALIASES = { title: 'menu', 'game-over': 'gameover' };
 const OVERLAYS = {
@@ -54,7 +58,7 @@ function makeGame(seedValue, shotName = null) {
   }
   const random = createRandom(seedValue);
   const renderer = createRenderer(canvas);
-  const city = createCity(random);
+  const city = createCity(random, [...ASSETS, ...RESTAURANTS, ...SAFEHOUSES]);
   renderer.scene.add(city.group);
   const player = createPlayer(city);
   renderer.scene.add(player.group);
@@ -80,6 +84,21 @@ function makeGame(seedValue, shotName = null) {
     // missions.js asks for a one-shot siren cue; audio.js exposes a wanted-level updater.
     audio: { ...audio, siren: () => audio.updateSiren(police.state.wanted) },
   });
+  const assets = createAssets({
+    scene: renderer.scene, hud, onToast: hud.toast,
+    onIncome(amount) {
+      state.cash += amount;
+      hud.setCash(state.cash);
+      hud.setIncome(assets.ownedIncomePerMin(), assets.state.owned.size);
+    },
+  });
+  const restaurants = createRestaurants({ scene: renderer.scene, player, hud });
+  const safehouses = createSafehouses({
+    scene: renderer.scene, player, hud,
+    isMissionComplete: (id) => state.completed.includes(id),
+    onSave: () => saveNow(),
+    onSetRespawn: (place) => { state.respawn = { x: place.x, z: place.z }; },
+  });
   const orbit = player.orbit;
   const input = createInput(canvas);
   const clock = { accumulator: 0, last: null };
@@ -87,7 +106,7 @@ function makeGame(seedValue, shotName = null) {
     screen: 'menu', cash: MISSIONS.startCash, completed: [], missionBest: {},
     muted: Boolean(readSave()?.muted), started: false, elapsed: 0, lastSave: 0,
     pauseReason: '', bustedFine: 0, finalMission: null, pedHitCooldown: 0,
-    shotsFired: 0, shot: shotName,
+    shotsFired: 0, shot: shotName, respawn: { x: SPAWN.x, z: SPAWN.z },
   };
   let shotMode = Boolean(shotName);
   let frameId = null;
@@ -162,6 +181,7 @@ function makeGame(seedValue, shotName = null) {
     }
     hud.setVisible(screen !== 'menu');
     hud.hideMissionList();
+    hud.hidePlaceMenu();
     if (screen === 'playing') audio.startMusic();
     else {
       audio.stopMusic();
@@ -175,9 +195,10 @@ function makeGame(seedValue, shotName = null) {
     syncRider();
     hud.setHealth(player.state.health, player.state.maxHealth);
     hud.setCash(state.cash);
+    hud.setIncome(assets.ownedIncomePerMin(), assets.state.owned.size);
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
-    const blips = missions.getBlips();
+    const blips = [...missions.getBlips(), ...assets.getBlips(), ...restaurants.getBlips(), ...safehouses.getBlips()];
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
     for (const cop of police.state.cops) blips.push({ x: cop.x, z: cop.z, color: '#ff9a72', size: 18 });
     // Mission markers are already included by getBlips(), so do not draw a second copy.
@@ -211,6 +232,9 @@ function makeGame(seedValue, shotName = null) {
     return writeSave({
       cash: state.cash, missions: missions.completedIds, best: { ...state.missionBest },
       muted: state.muted, seed: seedValue, version: SAVE_VERSION,
+      assets: assets.serialize(),
+      mealsEaten: restaurants.state.mealsEaten,
+      safehouses: safehouses.serialize(),
     });
   }
 
@@ -252,6 +276,10 @@ function makeGame(seedValue, shotName = null) {
     missions.state.completed = new Set(state.completed);
     missions.state.bestTimes = { ...state.missionBest };
     missions.setProgress(state.completed);
+    assets.restore(save?.assets);
+    restaurants.state.mealsEaten = save?.mealsEaten || 0;
+    state.respawn = { x: SPAWN.x, z: SPAWN.z };
+    safehouses.restore(save?.safehouses);
     if (save) state.muted = Boolean(save.muted);
     Object.assign(state, {
       started: true, elapsed: 0, lastSave: 0, finalMission: null, bustedFine: 0,
@@ -271,6 +299,20 @@ function makeGame(seedValue, shotName = null) {
   }
 
   function restart() {
+    if (state.screen === 'gameover') {
+      leaveCar();
+      police.clear();
+      cleanPoliceCars();
+      player.reset();
+      Object.assign(player.state, { ...state.respawn, invuln: PLAYER.respawnInvuln });
+      player.syncMesh();
+      missions.takeEvents();
+      setScreen('playing');
+      hud.setObjective('Back in Solmar. Follow a gold beacon or press M for jobs.');
+      refreshHud();
+      announce('Recovered. Back in Solmar.');
+      return;
+    }
     startRun(false);
   }
 
@@ -330,7 +372,7 @@ function makeGame(seedValue, shotName = null) {
     setScreen('busted');
     refreshHud();
     saveNow();
-    announce('Busted. Press Enter to return to the garage.');
+    announce('Busted. Press Enter to return to your respawn point.');
   }
 
   function gameOver() {
@@ -340,13 +382,13 @@ function makeGame(seedValue, shotName = null) {
     setScreen('gameover');
     refreshHud();
     saveNow();
-    announce('Jax went down. Press R or Enter for a new run.');
+    announce('Jax went down. Press R or Enter to return to your respawn point.');
   }
 
   function leaveBusted() {
     if (state.screen !== 'busted') return;
     player.reset();
-    Object.assign(player.state, { ...SPAWN, health: 75, invuln: PLAYER.respawnInvuln });
+    Object.assign(player.state, { ...state.respawn, health: 75, invuln: PLAYER.respawnInvuln });
     player.syncMesh();
     const starter = vehicles.cars.find((car) => car.id === 'starter');
     if (starter) {
@@ -374,6 +416,7 @@ function makeGame(seedValue, shotName = null) {
   const missionList = hud.hud?.missionList || nodes['mission-list'];
   function showJobs(toggle = false) {
     if (state.screen !== 'playing' && state.screen !== 'paused') return;
+    hud.hidePlaceMenu();
     if (toggle && missionList?.classList.contains('open')) {
       hud.hideMissionList();
       return;
@@ -405,10 +448,99 @@ function makeGame(seedValue, shotName = null) {
     return true;
   }
 
+  function showSafehouse(place) {
+    clearInput();
+    hud.hideMissionList();
+    const owned = safehouses.owned(place.id);
+    const locked = safehouses.isLocked(place.id);
+    const rows = [];
+    if (locked) {
+      rows.push({ label: 'Locked', sub: 'Complete The Pickup to unlock this safehouse.' });
+    } else if (!owned && place.price) {
+      rows.push({
+        label: `Buy ${place.name}`, sub: `$${place.price.toLocaleString('en-US')}`,
+        onClick() {
+          const result = safehouses.buy(place.id, state.cash);
+          if (!result.ok) { hud.toast(result.reason, 'info', 3); return; }
+          state.cash -= result.price;
+          hud.toast(`Bought ${place.name}.`, 'mission', 3);
+          saveNow();
+          refreshHud();
+          showSafehouse(place);
+        },
+      });
+    }
+    const actions = [
+      ['Save game', 'Keep your current progress', () => safehouses.saveGame(place.id)],
+      ['Set respawn here', 'Return here after an arrest or knockout', () => safehouses.setActiveRespawn(place.id)],
+      ['Rest / heal full', 'Restore your health', () => safehouses.heal(place.id)],
+      ['Change outfit', 'Cycle through four jacket colours', () => safehouses.changeOutfit(place.id)],
+    ];
+    for (const [label, sub, action] of actions) {
+      rows.push({
+        label, sub: owned ? sub : 'Own this safehouse to use this service',
+        onClick: owned ? () => {
+          if (state.screen !== 'playing') return;
+          const result = action();
+          if (!result.ok) hud.toast(result.reason, 'info', 3);
+          else { saveNow(); refreshHud(); }
+        } : undefined,
+      });
+    }
+    hud.showPlaceMenu({ title: place.name, subtitle: owned ? 'Your safehouse' : locked ? 'Story safehouse' : 'Safehouse for sale', rows });
+  }
+
   function enterOrExit() {
+    if (hud.isPlaceMenuOpen()) {
+      hud.hidePlaceMenu();
+      clearInput();
+      return;
+    }
     if (player.state.inCar) {
       leaveCar();
       announce('On foot.');
+      return;
+    }
+    const safehouse = safehouses.nearest(player.state.x, player.state.z, 5);
+    if (safehouse) {
+      showSafehouse(safehouse);
+      return;
+    }
+    const restaurant = restaurants.nearest(player.state.x, player.state.z, 5);
+    if (restaurant) {
+      clearInput();
+      hud.hideMissionList();
+      hud.showPlaceMenu({
+        title: restaurant.name, subtitle: 'Fresh food · choose a meal',
+        rows: restaurants.getMenu(restaurant.id).map((item, index) => ({
+          label: item.name, sub: `$${item.price} · +${item.heal} HP`,
+          onClick() {
+            if (state.screen !== 'playing') return;
+            const result = restaurants.eat(restaurant.id, index, state.cash);
+            if (result.ok) {
+              state.cash -= result.price;
+              hud.setCash(state.cash);
+              hud.setHealth(player.state.health, player.state.maxHealth);
+              saveNow();
+            } else hud.toast(result.reason, 'info', 3);
+          },
+        })),
+      });
+      return;
+    }
+    const asset = assets.nearest(player.state.x, player.state.z, 5);
+    if (asset) {
+      if (assets.state.owned.has(asset.id)) {
+        hud.toast(`${asset.name} earns $${asset.income}/min.`, 'info', 3);
+      } else {
+        const result = assets.buy(asset.id, state.cash);
+        if (result.ok) {
+          state.cash -= result.price;
+          hud.toast(`Bought ${asset.name}. Income $${asset.income}/min.`, 'mission', 3);
+          saveNow();
+          refreshHud();
+        } else hud.toast(result.reason, 'info', 3);
+      }
       return;
     }
     const mission = missions.nearestStart(player.state.x, player.state.z);
@@ -465,6 +597,7 @@ function makeGame(seedValue, shotName = null) {
     if (actions & ACTION_PAUSE) { pause(); return; }
     if (actions & ACTION_MENU) showJobs(true);
     if (actions & ACTION_ENTER) enterOrExit();
+    if (hud.isPlaceMenuOpen()) return;
     if (actions & ACTION_PUNCH) {
       const hit = combat.punch();
       if (hit) audio.thud();
@@ -481,7 +614,9 @@ function makeGame(seedValue, shotName = null) {
   function step(dt = STEP) {
     if (state.screen !== 'playing' || !Number.isFinite(dt) || dt <= 0) return;
     dt = Math.min(dt, MAX_FRAME);
-    const controls = input.state();
+    assets.update(dt);
+    safehouses.update();
+    const controls = hud.isPlaceMenuOpen() ? {} : input.state();
     state.elapsed += dt;
     state.pedHitCooldown = Math.max(0, state.pedHitCooldown - dt);
     if (player.state.inCar) {
@@ -509,8 +644,8 @@ function makeGame(seedValue, shotName = null) {
         }
       }
     } else {
-      const forward = Number(controls.up) - Number(controls.down);
-      const right = Number(controls.right) - Number(controls.left);
+      const forward = Number(Boolean(controls.up)) - Number(Boolean(controls.down));
+      const right = Number(Boolean(controls.right)) - Number(Boolean(controls.left));
       player.step(dt, {
         x: Math.sin(orbit.yaw) * forward - Math.cos(orbit.yaw) * right,
         z: Math.cos(orbit.yaw) * forward + Math.sin(orbit.yaw) * right,
@@ -539,7 +674,11 @@ function makeGame(seedValue, shotName = null) {
     const car = player.state.inCar;
     const job = !car && missions.nearestStart(player.state.x, player.state.z);
     const nearestCar = !car && vehicles.nearest(player.state.x, player.state.z, 4.6);
-    hud.setHint(car ? 'E — exit car' : job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state.stolen ? 'E — drive' : 'E — use this car') : '');
+    const asset = !car && assets.nearest(player.state.x, player.state.z, 5);
+    const restaurant = !car && restaurants.nearest(player.state.x, player.state.z, 5);
+    const safehouse = !car && safehouses.nearest(player.state.x, player.state.z, 5);
+    const placeHint = safehouse ? `E — ${safehouse.name}` : restaurant ? `E — Eat at ${restaurant.name}` : asset ? (assets.state.owned.has(asset.id) ? `E — ${asset.name} ($${asset.income}/min)` : `E — Buy ${asset.name} ($${asset.price.toLocaleString('en-US')})`) : '';
+    hud.setHint(placeHint || (car ? 'E — exit car' : job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state.stolen ? 'E — drive' : 'E — use this car') : ''));
     refreshHud();
     if (state.elapsed - state.lastSave >= 15) { saveNow(); state.lastSave = state.elapsed; }
   }
@@ -606,6 +745,16 @@ function makeGame(seedValue, shotName = null) {
     }
     missionList?.addEventListener('click', selectMission);
     missionList?.addEventListener('keydown', selectMission);
+    window.addEventListener('keydown', (event) => {
+      if (state.screen !== 'playing' || !hud.isPlaceMenuOpen()) return;
+      if (event.code !== 'Escape' && !/^Digit[1-3]$/.test(event.code)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.repeat) return;
+      if (event.code === 'Escape') hud.hidePlaceMenu();
+      else hud.selectPlaceMenuRow(Number(event.code.slice(-1)) - 1);
+      clearInput();
+    }, true);
     const unlockAudio = () => { if (!shotMode) { audio.unlock(); audio.setMuted(state.muted); } };
     window.addEventListener('pointerdown', unlockAudio, { once: true });
     window.addEventListener('keydown', unlockAudio, { once: true });
@@ -655,7 +804,7 @@ function makeGame(seedValue, shotName = null) {
 
   const game = {
     seed: seedValue, city, renderer, player, vehicles, traffic, police, combat, audio,
-    hud, missions, input, state, orbit, setScreen, startRun, restart, pause, resume,
+    hud, missions, assets, restaurants, safehouses, input, state, orbit, setScreen, startRun, restart, pause, resume,
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,
     leaveBusted, continueAfterMission, showJobs, chooseJob, enterOrExit, step,
     missingElements: DOM_IDS.filter((id) => !nodes[id]),
