@@ -2,7 +2,25 @@
 // car, plus resize handling. Shadows are one directional light with a tight box that moves with
 // the player instead of covering the whole city, which keeps the polygon and draw cost modest.
 import * as THREE from '../vendor/three.module.min.js';
-import { CAMERA, PALETTE, TITLE_CAMERA } from './config.js';
+import { CAMERA, DAYNIGHT, PALETTE, SUNSET_MINUTE, SUNSET_OFFSET, TITLE_CAMERA } from './config.js';
+
+// Match the light positions on the car meshes. A motorbike has a single center lamp.
+const HEADLIGHT_POSITIONS = {
+  bike: [0, 0.71, 0.97],
+  truck: [0.94, 0.99, 3.25],
+  buggy: [0.64, 0.96, 1.62],
+  sport: [0.83, 0.7, 2.3],
+  vespera: [0.96, 0.72, 2.33],
+  cargovan: [0.83, 0.85, 2.43],
+  standard: [0.68, 0.76, 2.26],
+};
+
+const LIGHT_COLORS = ['sky', 'skyRose', 'skyTop', 'fog', 'sun', 'hemiSky', 'hemiGround'];
+const lightFrames = [...DAYNIGHT, { ...DAYNIGHT[0], minute: 1440, azimuth: DAYNIGHT[0].azimuth + 360 }]
+  .map((frame) => ({
+    ...frame,
+    colors: Object.fromEntries(LIGHT_COLORS.map((key) => [key, new THREE.Color(frame[key])])),
+  }));
 
 export function createRenderer(canvas) {
   const viewport = () => ({
@@ -36,9 +54,9 @@ export function createRenderer(canvas) {
   const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 0.64);
   scene.add(hemi);
 
-  // Fixed south-west sun, 14.2 degrees above the horizon. Share its direction with the sky
-  // and keep this offset when the shadow box follows the player: screenshots never use a clock.
-  const sunOffset = new THREE.Vector3(-72, 56, 210);
+  // Staged shots never advance the clock, so they start with the exact original offset.
+  const sunOffset = new THREE.Vector3(...SUNSET_OFFSET);
+  const sunDistance = sunOffset.length();
   const sun = new THREE.DirectionalLight(PALETTE.sun, 2.25);
   sun.position.copy(sunOffset);
   sun.castShadow = true;
@@ -65,6 +83,7 @@ export function createRenderer(canvas) {
       rose: { value: new THREE.Color(PALETTE.skyRose) },
       sunColor: { value: new THREE.Color(PALETTE.sun) },
       sunDirection: { value: sunOffset.clone().normalize() },
+      sunDisc: { value: 1 },
     },
     vertexShader: 'varying vec3 vWorld; void main(){ vWorld = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: `
@@ -73,6 +92,7 @@ export function createRenderer(canvas) {
       uniform vec3 rose;
       uniform vec3 sunColor;
       uniform vec3 sunDirection;
+      uniform float sunDisc;
       varying vec3 vWorld;
       void main() {
         vec3 direction = normalize(vWorld);
@@ -83,7 +103,7 @@ export function createRenderer(canvas) {
         float glow = pow(facingSun, 10.0);
         float aureole = pow(facingSun, 96.0);
         float disc = smoothstep(0.99982, 0.99994, facingSun);
-        color += sunColor * (glow * 0.45 + aureole * 0.7 + disc * 4.0);
+        color += sunColor * (glow * 0.45 + aureole * 0.7 + disc * 4.0) * sunDisc;
         gl_FragColor = vec4(color, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -92,6 +112,89 @@ export function createRenderer(canvas) {
   });
   const skyDome = new THREE.Mesh(skyGeometry, skyMaterial);
   scene.add(skyDome);
+
+  const headlightCanvas = document.createElement('canvas');
+  headlightCanvas.width = headlightCanvas.height = 64;
+  const headlightContext = headlightCanvas.getContext('2d');
+  if (headlightContext) {
+    const fade = headlightContext.createRadialGradient(32, 32, 0, 32, 32, 32);
+    fade.addColorStop(0, 'rgba(255,255,255,0.95)');
+    fade.addColorStop(0.18, 'rgba(255,255,255,0.46)');
+    fade.addColorStop(0.48, 'rgba(255,255,255,0.12)');
+    fade.addColorStop(1, 'rgba(255,255,255,0)');
+    headlightContext.fillStyle = fade;
+    headlightContext.fillRect(0, 0, 64, 64);
+  }
+  const headlightMap = new THREE.CanvasTexture(headlightCanvas);
+  const headlightMaterial = new THREE.SpriteMaterial({
+    map: headlightMap, color: 0xffedcd, opacity: 0, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  });
+  const headlights = Array.from({ length: 2 }, () => {
+    const sprite = new THREE.Sprite(headlightMaterial);
+    sprite.name = 'player:headlight';
+    sprite.scale.set(1.9, 1.9, 1);
+    sprite.visible = false;
+    scene.add(sprite);
+    return sprite;
+  });
+
+  let appliedMinute;
+  let nightFactor;
+  const shadowAnchor = new THREE.Vector3();
+
+  function followSun(x, z) {
+    shadowAnchor.set(x, 0, z);
+    sun.position.copy(shadowAnchor).add(sunOffset);
+    sun.target.position.copy(shadowAnchor);
+    sun.target.updateMatrixWorld();
+  }
+
+  function applyTimeOfDay(clockMinutes, setNightFactor) {
+    const minute = ((clockMinutes % 1440) + 1440) % 1440;
+    if (!Number.isFinite(minute)) return;
+    if (minute !== appliedMinute) {
+      const next = lightFrames.findIndex((frame) => frame.minute > minute);
+      const before = lightFrames[next - 1];
+      const after = lightFrames[next];
+      const mix = THREE.MathUtils.smoothstep(minute, before.minute, after.minute);
+      const value = (key) => THREE.MathUtils.lerp(before[key], after[key], mix);
+      const color = (target, key) => target.copy(before.colors[key]).lerp(after.colors[key], mix);
+      const uniforms = skyMaterial.uniforms;
+      color(scene.background, 'sky');
+      uniforms.bottom.value.copy(scene.background);
+      color(uniforms.rose.value, 'skyRose');
+      color(uniforms.top.value, 'skyTop');
+      color(sun.color, 'sun');
+      uniforms.sunColor.value.copy(sun.color);
+      uniforms.sunDisc.value = value('sunDisc');
+      color(scene.fog.color, 'fog');
+      // Retain the original linear fog and change its effective density by scaling its range.
+      scene.fog.far = 1 / value('fogDensity');
+      scene.fog.near = scene.fog.far / 6;
+      color(hemi.color, 'hemiSky');
+      color(hemi.groundColor, 'hemiGround');
+      hemi.intensity = value('hemiIntensity');
+      sun.intensity = value('sunIntensity');
+      sun.castShadow = sun.intensity > 0;
+      if (minute === SUNSET_MINUTE) {
+        sunOffset.set(...SUNSET_OFFSET);
+      } else {
+        const azimuth = THREE.MathUtils.degToRad(value('azimuth'));
+        const elevation = THREE.MathUtils.degToRad(value('elevation'));
+        const horizontal = Math.cos(elevation) * sunDistance;
+        sunOffset.set(Math.sin(azimuth) * horizontal, Math.sin(elevation) * sunDistance,
+          Math.cos(azimuth) * horizontal);
+      }
+      uniforms.sunDirection.value.copy(sunOffset).normalize();
+      followSun(shadowAnchor.x, shadowAnchor.z);
+      nightFactor = value('nightFactor');
+      headlightMaterial.opacity = value('headlights');
+      if (headlightMaterial.opacity === 0) headlights.forEach((sprite) => { sprite.visible = false; });
+      appliedMinute = minute;
+    }
+    setNightFactor?.(nightFactor);
+  }
 
   const cameraState = {
     yaw: 0,
@@ -168,11 +271,16 @@ export function createRenderer(canvas) {
     cameraState.distance = distance;
     cameraState.mode = inCar ? 'car' : 'foot';
     skyDome.position.copy(camera.position);
-    const shadowX = Math.round(focus.x / 90) * 90;
-    const shadowZ = Math.round(focus.z / 90) * 90;
-    sun.position.set(shadowX + sunOffset.x, sunOffset.y, shadowZ + sunOffset.z);
-    sun.target.position.set(shadowX, 0, shadowZ);
-    sun.target.updateMatrixWorld();
+    followSun(Math.round(focus.x / 90) * 90, Math.round(focus.z / 90) * 90);
+
+    const [lampX, lampY, lampZ] = HEADLIGHT_POSITIONS[inCar?.spec?.variant] ?? HEADLIGHT_POSITIONS.standard;
+    headlights.forEach((sprite, index) => {
+      sprite.visible = Boolean(inCar && headlightMaterial.opacity > 0 && (lampX || index === 0));
+      if (sprite.visible) {
+        sprite.position.set(index === 0 ? -lampX : lampX, lampY, lampZ);
+        inCar.group.localToWorld(sprite.position);
+      }
+    });
   }
 
   function frameTitle() {
@@ -187,6 +295,8 @@ export function createRenderer(canvas) {
     cameraState.yaw = Math.atan2(-dx, -dz);
     cameraState.pitch = Math.asin(dy / cameraState.distance);
     skyDome.position.copy(camera.position);
+    followSun(0, 0);
+    headlights.forEach((sprite) => { sprite.visible = false; });
     snapCamera = true;
     hasPreviousFocus = false;
   }
@@ -197,18 +307,22 @@ export function createRenderer(canvas) {
 
   function dispose() {
     window.removeEventListener('resize', resize);
-    scene.remove(skyDome, sun, sun.target, hemi);
+    scene.remove(skyDome, sun, sun.target, hemi, ...headlights);
     skyGeometry.dispose();
     skyMaterial.dispose();
+    headlightMap.dispose();
+    headlightMaterial.dispose();
     if (renderer) renderer.dispose();
   }
 
+  applyTimeOfDay(SUNSET_MINUTE);
   return {
     scene,
     camera,
     cameraState,
     sun,
     hemi,
+    applyTimeOfDay,
     resize,
     updateCamera,
     frameTitle,

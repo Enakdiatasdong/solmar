@@ -276,12 +276,100 @@ export const PALETTE = {
   npc: { shirt: [0x4f7fa8, 0x9e5a52, 0x5f8a63, 0xb59a55, 0x7a6a9e], skin: [0xc58d68, 0x9a6242, 0xe0b08a, 0x74503a] },
 };
 
+/** Clock-driven atmosphere. At 18:52 the original sunset offset and light levels are exact. */
+export const SUNSET_MINUTE = 18 * 60 + 52;
+export const SUNSET_OFFSET = [-72, 56, 210];
+export const SUNSET_NIGHT_FACTOR = 0.6;
+export const DAYNIGHT = [
+  {
+    minute: 0, azimuth: 20, elevation: -52,
+    sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
+    sky: 0x101b38, skyRose: 0x242b50, skyTop: 0x080f28, fog: 0x151d34, fogDensity: 1 / 860,
+    hemiSky: 0x98a9ce, hemiGround: 0x6b627d, hemiIntensity: 0.44, nightFactor: 1, headlights: 1,
+  },
+  {
+    minute: 300, azimuth: 65, elevation: -11,
+    sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
+    sky: 0x323659, skyRose: 0x77546e, skyTop: 0x232d50, fog: 0x393957, fogDensity: 1 / 900,
+    hemiSky: 0x98a3c1, hemiGround: 0x6b627d, hemiIntensity: 0.46, nightFactor: 0.94, headlights: 1,
+  },
+  {
+    minute: 330, azimuth: 76, elevation: 0,
+    sun: 0xffb18c, sunIntensity: 0.22, sunDisc: 0.52,
+    sky: 0xeca477, skyRose: 0xd78ba0, skyTop: 0x625573, fog: 0xd59a88, fogDensity: 1 / 980,
+    hemiSky: 0xa77c93, hemiGround: 0x745b55, hemiIntensity: 0.5, nightFactor: 0.5, headlights: 0.25,
+  },
+  {
+    minute: 420, azimuth: 92, elevation: 15,
+    sun: 0xffe0bd, sunIntensity: 1.1, sunDisc: 0.85,
+    sky: 0x9dc6dd, skyRose: 0xe3b5a5, skyTop: 0x537b9d, fog: 0xa8c6cf, fogDensity: 1 / 1250,
+    hemiSky: 0x94bad6, hemiGround: 0x6d665d, hemiIntensity: 0.65, nightFactor: 0, headlights: 0,
+  },
+  {
+    minute: 600, azimuth: 112, elevation: 43,
+    sun: 0xfff3d9, sunIntensity: 1.85, sunDisc: 0.9,
+    sky: 0x91c7e8, skyRose: 0xd4d6dd, skyTop: 0x367cae, fog: 0xaccbd7, fogDensity: 1 / 1550,
+    hemiSky: 0x98c7e9, hemiGround: 0x7e7868, hemiIntensity: 0.76, nightFactor: 0, headlights: 0,
+  },
+  {
+    minute: 780, azimuth: 170, elevation: 65,
+    sun: 0xfff9e9, sunIntensity: 2, sunDisc: 0.9,
+    sky: 0x87c6ee, skyRose: 0xc9dced, skyTop: 0x2671aa, fog: 0xb8d5dc, fogDensity: 1 / 1650,
+    hemiSky: 0xa4d0ee, hemiGround: 0x89806a, hemiIntensity: 0.8, nightFactor: 0, headlights: 0,
+  },
+  {
+    minute: 960, azimuth: 248, elevation: 36,
+    sun: 0xffedc8, sunIntensity: 1.75, sunDisc: 0.85,
+    sky: 0x9dc5df, skyRose: 0xe6c0ad, skyTop: 0x527699, fog: 0xc1c6c2, fogDensity: 1 / 1450,
+    hemiSky: 0x96b9d4, hemiGround: 0x827161, hemiIntensity: 0.7, nightFactor: 0, headlights: 0,
+  },
+  {
+    minute: 1080, azimuth: 328, elevation: 22,
+    sun: 0xffd49d, sunIntensity: 2.15, sunDisc: 0.95,
+    sky: 0xedaf84, skyRose: 0xd58d9f, skyTop: 0x6b587c, fog: 0xdeb19a, fogDensity: 1 / 1110,
+    hemiSky: 0xbda4bc, hemiGround: 0x906553, hemiIntensity: 0.64, nightFactor: 0.36, headlights: 0,
+  },
+  {
+    minute: SUNSET_MINUTE,
+    azimuth: 360 + Math.atan2(SUNSET_OFFSET[0], SUNSET_OFFSET[2]) * 180 / Math.PI,
+    elevation: Math.atan2(SUNSET_OFFSET[1], Math.hypot(SUNSET_OFFSET[0], SUNSET_OFFSET[2])) * 180 / Math.PI,
+    sun: PALETTE.sun, sunIntensity: 2.25, sunDisc: 1,
+    sky: PALETTE.sky, skyRose: PALETTE.skyRose, skyTop: PALETTE.skyTop, fog: PALETTE.fog, fogDensity: 1 / 1050,
+    hemiSky: PALETTE.hemiSky, hemiGround: PALETTE.hemiGround, hemiIntensity: 0.64, nightFactor: SUNSET_NIGHT_FACTOR, headlights: 0,
+  },
+  {
+    minute: 1155, azimuth: 347, elevation: 5,
+    sun: 0xffa385, sunIntensity: 0.7, sunDisc: 0.55,
+    sky: 0xbb7491, skyRose: 0x9b648c, skyTop: 0x483b66, fog: 0x965f7e, fogDensity: 1 / 960,
+    hemiSky: 0x9581a6, hemiGround: 0x695162, hemiIntensity: 0.5, nightFactor: 0.82, headlights: 0.5,
+  },
+  {
+    minute: 1230, azimuth: 354, elevation: -11,
+    sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
+    sky: 0x382c50, skyRose: 0x695072, skyTop: 0x24244a, fog: 0x3b3354, fogDensity: 1 / 900,
+    hemiSky: 0x98a5c6, hemiGround: 0x715d74, hemiIntensity: 0.45, nightFactor: 1, headlights: 1,
+  },
+  {
+    minute: 1260, azimuth: 359, elevation: -20,
+    sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
+    sky: 0x101b38, skyRose: 0x242b50, skyTop: 0x080f28, fog: 0x151d34, fogDensity: 1 / 860,
+    hemiSky: 0x98a9ce, hemiGround: 0x6b627d, hemiIntensity: 0.44, nightFactor: 1, headlights: 1,
+  },
+];
+
+/** Tuning multipliers by difficulty selection. */
+export const DIFFICULTY = {
+  relaxed: { police: 0.7, wanted: 0.7, enemyDamage: 0.65 },
+  normal: { police: 1, wanted: 1, enemyDamage: 1 },
+  hardcore: { police: 1.35, wanted: 1.3, enemyDamage: 1.5 },
+};
+
 export const SAVE_KEY = 'solmar.save.v3';
 export const SAVE_VERSION = 3;
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
 /** The title vista and the spawn point. */
-export const TITLE_CAMERA = { x: -310, y: 210, z: 720, lookX: 0, lookY: 26, lookZ: 0 };
+export const TITLE_CAMERA = { x: 160, y: 42, z: 500, lookX: -150, lookY: 12, lookZ: 820 };
 export const SPAWN = { x: -1.2, z: 216, heading: 0 };
 export const STARTER_CAR = { x: 4.6, z: 220, heading: 0 };
 

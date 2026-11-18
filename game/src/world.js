@@ -3,11 +3,22 @@
 // streetlights and props. Exports building/container collision AABBs and the road graph the AI and
 // missions navigate by. Everything is generated from the seeded RNG, so a seed rebuilds the city.
 import * as THREE from '../vendor/three.module.min.js';
-import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR } from './config.js';
+import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR, SUNSET_NIGHT_FACTOR } from './config.js';
+import { createRandom } from './random.js';
 
-const FACADE_UNIT = 5;
+const WINDOW_BAY = 2.65;
+const FLOOR_HEIGHT = 2.85;
+const DECO_PASTELS = [0xe9b6ae, 0xb0d0c1, 0xeed0a7, 0xa9c8d7, 0xd5bbd7];
+const CANAL = { x: -241, width: 16, inlandZ: 469, bridgeZ: 502 };
 
-/** Draw one facade pattern; white walls tint with the building colour, windows stay dark/warm. */
+function facadeGrid(variant) {
+  return {
+    columns: variant.glass ? 7 : variant.office ? 6 : variant.deco ? 3 : 4,
+    rows: variant.office ? 10 : variant.glass ? 9 : 7,
+  };
+}
+
+/** Flat walls and window bays; keep warm panes in neighboring groups on each lit floor. */
 function makeFacadeTexture(random, variant) {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
@@ -17,8 +28,7 @@ function makeFacadeTexture(random, variant) {
   context.fillStyle = variant.glass ? '#e9eef1' : '#f1ece2';
   context.fillRect(0, 0, 128, 256);
 
-  const columns = variant.glass ? 7 : variant.office ? 6 : variant.deco ? 3 : 4;
-  const rows = variant.office ? 10 : variant.glass ? 9 : 7;
+  const { columns, rows } = facadeGrid(variant);
   const cellW = 128 / columns;
   const cellH = 256 / rows;
 
@@ -36,34 +46,29 @@ function makeFacadeTexture(random, variant) {
   }
 
   const bottomRow = variant.shop ? Math.floor(200 / cellH) : rows;
+  const offset = random.int(0, 3);
+  // Keep the same number of seeded draws as the old per-window pattern, so city lots and
+  // vehicle spawn points stay in place when only the facade artwork changes.
+  for (let draw = 1; draw < columns * bottomRow; draw += 1) random();
   for (let row = 0; row < bottomRow; row += 1) {
+    const litStart = (offset + Math.floor(row / 4)) % (columns - 1);
     for (let column = 0; column < columns; column += 1) {
+      const lit = (row + offset) % 4 === 1 && column >= litStart && column < litStart + 2;
       if (variant.glass) {
         const x = column * cellW + 3;
         const y = row * cellH + 5;
-        const lit = random() < 0.18;
-        context.fillStyle = lit ? '#f6dfae' : '#5b7180';
+        context.fillStyle = lit ? '#d9bd97' : '#71828c';
         context.fillRect(x, y, cellW - 6, cellH - 8);
-        context.fillStyle = 'rgba(255,255,255,0.14)';
-        context.fillRect(x, y, 2, cellH - 8);
       } else {
         const marginX = variant.office ? 5 : 7;
         const x = column * cellW + marginX;
         const y = row * cellH + 8;
         const w = cellW - marginX * 2;
         const h = cellH - 14;
-        const lit = random() < 0.22;
-        context.fillStyle = '#4b5560';
+        context.fillStyle = '#687078';
         context.fillRect(x - 1, y - 1, w + 2, h + 2);
-        context.fillStyle = lit ? '#ffdaa1' : '#2f3a44';
+        context.fillStyle = lit ? '#ddbe94' : '#54616d';
         context.fillRect(x, y, w, h);
-        if (lit) {
-          context.fillStyle = 'rgba(255,240,200,0.55)';
-          context.fillRect(x + w * 0.55, y + 2, w * 0.4, h - 4);
-        } else {
-          context.fillStyle = 'rgba(160,190,210,0.18)';
-          context.fillRect(x, y, w, Math.max(2, h * 0.24));
-        }
       }
     }
   }
@@ -132,20 +137,14 @@ function makeNeonTexture(label, color, caption) {
   return texture;
 }
 
-function scaleBoxUVs(geometry, width, height, depth) {
+function scaleFacadeUVs(geometry, width, height, depth, variant) {
   const uv = geometry.attributes.uv;
   if (!uv) return;
-  const faces = [
-    [depth, height],
-    [depth, height],
-    [width, depth],
-    [width, depth],
-    [width, height],
-    [width, height],
-  ];
-  for (let face = 0; face < 6; face += 1) {
-    const su = faces[face][0] / FACADE_UNIT;
-    const sv = faces[face][1] / FACADE_UNIT;
+  const { columns, rows } = facadeGrid(variant);
+  const sv = Math.max(2, Math.round(height / FLOOR_HEIGHT)) / rows;
+  for (const face of [0, 1, 4, 5]) {
+    const length = face < 2 ? depth : width;
+    const su = Math.max(2, Math.round(length / WINDOW_BAY)) / columns;
     for (let vertex = face * 4; vertex < face * 4 + 4; vertex += 1) {
       uv.setXY(vertex, uv.getX(vertex) * su, uv.getY(vertex) * sv);
     }
@@ -157,6 +156,193 @@ function shade(hex, amount) {
   const color = new THREE.Color(hex);
   color.offsetHSL(0, 0, amount);
   return color;
+}
+
+// Repeated waterfront details share geometry and materials, with optional per-instance colors.
+function addWaterfrontInstances(parent, name, geometry, color, items) {
+  const mesh = new THREE.InstancedMesh(geometry, new THREE.MeshLambertMaterial({ color }), items.length);
+  mesh.name = name;
+  const transform = new THREE.Object3D();
+  items.forEach(({ x, y, z, width, height, depth, yaw = 0, tint }, index) => {
+    transform.position.set(x, y, z);
+    transform.scale.set(width, height, depth);
+    transform.rotation.set(0, yaw, 0);
+    transform.updateMatrix();
+    mesh.setMatrixAt(index, transform.matrix);
+    if (tint) mesh.setColorAt(index, tint);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function addBoats(parent, name, boats) {
+  const group = new THREE.Group();
+  group.name = name;
+  parent.add(group);
+  const hull = new THREE.Shape();
+  hull.moveTo(-0.39, 0.5);
+  hull.lineTo(0.39, 0.5);
+  hull.lineTo(0.5, 0.19);
+  hull.lineTo(0.41, -0.24);
+  hull.lineTo(0, -0.5);
+  hull.lineTo(-0.41, -0.24);
+  hull.lineTo(-0.5, 0.19);
+  hull.closePath();
+  const hullGeometry = new THREE.ExtrudeGeometry(hull, { depth: 1, bevelEnabled: false });
+  hullGeometry.rotateX(-Math.PI / 2).translate(0, -0.5, 0);
+  const cube = new THREE.BoxGeometry(1, 1, 1);
+  const part = ({ x, y = 0, z, width, length, yaw }, offset, rise, w, h, d) => ({
+    x: x + Math.sin(yaw) * offset * length,
+    y: y + rise * width,
+    z: z + Math.cos(yaw) * offset * length,
+    width: w * width, height: h * width, depth: d * length, yaw,
+  });
+  addWaterfrontInstances(group, 'hulls', hullGeometry, 0xf1e8d9,
+    boats.map((boat) => part(boat, 0, 0.09, 1, 0.32, 1)));
+  addWaterfrontInstances(group, 'waterline', hullGeometry, 0x245d72,
+    boats.map((boat) => part(boat, 0, 0.025, 1.005, 0.055, 1.005)));
+  addWaterfrontInstances(group, 'cabins', cube, 0xfbf3e7,
+    boats.map((boat) => part(boat, -0.03, 0.37, 0.66, 0.27, 0.49)));
+  addWaterfrontInstances(group, 'cabin glazing', cube, 0x3b5964,
+    boats.map((boat) => part(boat, -0.03, 0.4, 0.668, 0.13, 0.494)));
+  addWaterfrontInstances(group, 'masts', cube, 0xe0d7c9,
+    boats.map((boat) => part(boat, 0.06, 0.78, 0.035, 1.05, 0.013)));
+  addWaterfrontInstances(group, 'burgees', cube, 0xd96668,
+    boats.map((boat) => part(boat, 0.035, 1.26, 0.028, 0.095, 0.052)));
+}
+
+function addCauseway(parent, colliders) {
+  const causeway = new THREE.Group();
+  causeway.name = 'Marea Causeway';
+  parent.add(causeway);
+  const cube = new THREE.BoxGeometry(1, 1, 1);
+  const z = 728;
+  const width = 14;
+  const breaks = [-442, -374, -306, -238, -170, -102, -34, 34, 102];
+  const height = [4.5, 6.3, 9.2, 12, 12, 9.2, 6.3, 4.5, 4.5];
+  const pillars = [];
+  const railPosts = [];
+  const deckMaterial = new THREE.MeshLambertMaterial({ color: 0x8c8586 });
+  const railMaterial = new THREE.MeshLambertMaterial({ color: 0xd8c3b3 });
+  for (let span = 0; span < breaks.length - 1; span += 1) {
+    const run = breaks[span + 1] - breaks[span];
+    const rise = height[span + 1] - height[span];
+    const length = Math.hypot(run, rise);
+    const pitch = Math.atan2(rise, run);
+    const center = breaks[span] + run / 2;
+    const y = height[span] + rise / 2;
+    const deck = new THREE.Mesh(cube, deckMaterial);
+    deck.position.set(center, y, z);
+    deck.scale.set(length + 0.3, 1.35, width);
+    deck.rotation.z = pitch;
+    causeway.add(deck);
+    for (const side of [-1, 1]) {
+      const railZ = z + side * (width / 2 - 0.55);
+      const rail = new THREE.Mesh(cube, railMaterial);
+      rail.position.set(center, y + 1.85, railZ);
+      rail.scale.set(length + 0.2, 0.27, 0.3);
+      rail.rotation.z = pitch;
+      causeway.add(rail);
+      for (let step = 0; step < 8; step += 1) {
+        const fraction = step / 8;
+        railPosts.push({ x: breaks[span] + run * fraction, y: height[span] + rise * fraction + 1.2,
+          z: railZ, width: 0.33, height: 1.28, depth: 0.39 });
+      }
+    }
+  }
+  breaks.forEach((x, index) => {
+    const h = height[index];
+    for (const side of [-1, 1]) {
+      const supportZ = z + side * 4.6;
+      pillars.push({ x, y: (h - 4) / 2, z: supportZ, width: 3.6, height: h + 4, depth: 3.25 });
+      colliders.push({ minX: x - 1.8, maxX: x + 1.8, minZ: supportZ - 1.625,
+        maxZ: supportZ + 1.625, height: h });
+    }
+  });
+  addWaterfrontInstances(causeway, 'piers', cube, 0x9c8a82, pillars);
+  addWaterfrontInstances(causeway, 'guardrail posts', cube, 0xd8c3b3, railPosts);
+  const island = new THREE.CylinderGeometry(0.78, 1, 1, 9);
+  addWaterfrontInstances(causeway, 'approach islets', island, 0xb79b7e, [
+    { x: breaks[0] - 24, y: 0.45, z, width: 36, height: 6.5, depth: 25, yaw: 0.13 },
+    { x: breaks.at(-1) + 19, y: 0.45, z, width: 30, height: 6.5, depth: 23, yaw: -0.24 },
+  ]);
+}
+
+function addMarina(parent, random) {
+  const group = new THREE.Group();
+  group.name = 'Brisa Marina';
+  parent.add(group);
+  const cube = new THREE.BoxGeometry(1, 1, 1);
+  const fingers = [];
+  const pilings = [];
+  const cleats = [];
+  const cleatStems = [];
+  const ropes = [];
+  const boats = [];
+  for (const z of [563, 592, 621]) {
+    fingers.push({ x: -333, y: 0.88, z, width: 54, height: 0.44, depth: 4.4 });
+    for (const x of [-357, -344, -331, -318]) {
+      for (const side of [-1, 1]) {
+        pilings.push({ x, y: 0.25, z: z + side * 1.66, width: 0.46, height: 3.7, depth: 0.46 });
+      }
+    }
+    for (const side of [-1, 1]) {
+      const x = (side < 0 ? -343 : -323) + random.range(-2, 2);
+      const boatZ = z + side * 5.7;
+      const length = random.range(10, 15);
+      boats.push({ x, z: boatZ, length, width: random.range(3.3, 4.6), yaw: Math.PI * side / 2 });
+      for (const end of [-1, 1]) {
+        const cleatX = x + end * length * 0.39;
+        const cleatZ = z + side * 1.9;
+        cleatStems.push({ x: cleatX, y: 1.17, z: cleatZ, width: 0.12, height: 0.17, depth: 0.16 });
+        cleats.push({ x: cleatX, y: 1.26, z: cleatZ, width: 0.44, height: 0.11, depth: 0.19 });
+        ropes.push(cleatX, 1.25, cleatZ, x + end * length * 0.46, 0.67, boatZ);
+      }
+    }
+  }
+  addWaterfrontInstances(group, 'finger docks', cube, 0xa18460, fingers);
+  addWaterfrontInstances(group, 'dock piles', new THREE.CylinderGeometry(0.49, 0.5, 1, 6), 0x6a513b, pilings);
+  addWaterfrontInstances(group, 'cleats', cube, 0xbac2be, [...cleats, ...cleatStems]);
+  const moorings = new THREE.BufferGeometry();
+  moorings.setAttribute('position', new THREE.Float32BufferAttribute(ropes, 3));
+  group.add(new THREE.LineSegments(moorings, new THREE.LineBasicMaterial({ color: 0xe2cfaf })));
+  addBoats(group, 'Moored boats', boats);
+}
+
+function addCanal(parent, waterMaterial, colliders) {
+  const group = new THREE.Group();
+  group.name = 'Lucero Inlet';
+  parent.add(group);
+  const depth = CITY.oceanStart - CANAL.inlandZ;
+  const centerZ = CANAL.inlandZ + depth / 2;
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(CANAL.width, depth), waterMaterial);
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(CANAL.x, -0.12, centerZ);
+  group.add(water);
+
+  const cube = new THREE.BoxGeometry(1, 1, 1);
+  const banks = [{ x: CANAL.x, y: -0.04, z: CANAL.inlandZ, width: CANAL.width, height: 0.17, depth: 0.55 }];
+  const handrails = [];
+  const posts = [];
+  for (const side of [-1, 1]) {
+    const edgeX = CANAL.x + side * CANAL.width / 2;
+    banks.push({ x: edgeX, y: -0.04, z: centerZ, width: 0.72, height: 0.17, depth });
+    // Leave the bridge crossing and both ends of the channel open in the ground collision map.
+    for (const [minZ, maxZ] of [[CANAL.inlandZ + 5, CANAL.bridgeZ - 6], [CANAL.bridgeZ + 6, CITY.oceanStart - 13]]) {
+      colliders.push({ minX: edgeX - 0.22, maxX: edgeX + 0.22, minZ, maxZ, height: 0.23 });
+    }
+    const railZ = CANAL.bridgeZ + side * 2.8;
+    handrails.push({ x: CANAL.x, y: 1.02, z: railZ, width: CANAL.width + 4, height: 0.16, depth: 0.18 });
+    for (const offset of [-9.5, -5.7, -1.9, 1.9, 5.7, 9.5]) {
+      posts.push({ x: CANAL.x + offset, y: 0.65, z: railZ, width: 0.18, height: 0.77, depth: 0.18 });
+    }
+  }
+  addWaterfrontInstances(group, 'limestone coping', cube, 0xd2baa0, banks);
+  addWaterfrontInstances(group, 'footbridge deck', cube, 0x9f7960,
+    [{ x: CANAL.x, y: 0.14, z: CANAL.bridgeZ, width: CANAL.width + 4, height: 0.3, depth: 6.3 }]);
+  addWaterfrontInstances(group, 'footbridge rails', cube, 0xe1c9af, [...handrails, ...posts]);
 }
 
 function validateCityConfig() {
@@ -293,6 +479,7 @@ export function createCity(random, reservedPlaces = []) {
   const buildings = [];
   const containers = [];
   const colliders = [];
+  const decoCaps = [];
   const labels = [];
   const reserved = Array.isArray(reservedPlaces)
     ? reservedPlaces.filter((place) => Number.isFinite(place?.x) && Number.isFinite(place?.z))
@@ -300,14 +487,15 @@ export function createCity(random, reservedPlaces = []) {
   const isReserved = (x, z) => reserved.some((place) =>
     Math.abs(x - place.x) <= CITY.block / 2 && Math.abs(z - place.z) <= CITY.block / 2);
 
-  const facadeVariants = [
+  const facadePatterns = [
     { office: true },
     { residential: true },
     { glass: true },
     { deco: true },
     { shop: true },
     {},
-  ].map((variant) => makeFacadeTexture(random, variant));
+  ];
+  const facadeVariants = facadePatterns.map((variant) => makeFacadeTexture(random, variant));
 
   const materialCache = new Map();
   function facadeMaterial(variant, color) {
@@ -413,7 +601,7 @@ export function createCity(random, reservedPlaces = []) {
     // Consume the usual random choices before leaving room for a place marker.
     if (isReserved(cx, cz)) return null;
     const geometry = new THREE.BoxGeometry(width, height, depth);
-    scaleBoxUVs(geometry, width, height, depth);
+    scaleFacadeUVs(geometry, width, height, depth, facadePatterns[variant]);
     const solid = facadeMaterial(variant, color);
     const roof = roofMaterial(color);
     const mesh = new THREE.Mesh(geometry, [solid, solid, roof, roof, solid, solid]);
@@ -434,6 +622,17 @@ export function createCity(random, reservedPlaces = []) {
       const cap = new THREE.Mesh(new THREE.BoxGeometry(width * 0.45, 1.6, depth * 0.45), roof);
       cap.position.set(cx, 0.28 + height + 0.8, cz);
       group.add(cap);
+    }
+    if (options.deco) {
+      // Step the crown toward the center while keeping the lot and entry frontage clear.
+      const crown = shade(color, 0.09);
+      const trim = new THREE.Color(0xf2e0cc);
+      for (const [spread, level, stepHeight, tint] of [
+        [1, 0.16, 0.32, trim], [0.73, 0.77, 0.9, crown], [0.43, 1.55, 0.66, trim],
+      ]) {
+        decoCaps.push({ x: cx, y: 0.28 + height + level, z: cz,
+          width: width * spread, height: stepHeight, depth: depth * spread, tint });
+      }
     }
     return box;
   }
@@ -495,14 +694,21 @@ export function createCity(random, reservedPlaces = []) {
       else if (downtown) height = random.range(24, 52);
       else height = random.range(10, 34);
       const variant = beachfront ? random.pick([4, 4, 1, 5]) : downtown ? random.pick([0, 2, 3, 0]) : random.int(0, 5);
-      addBuilding(center.x + cell.x, center.z + cell.z, width, depth, height, { variant });
+      const color = random.pick(PALETTE.buildings);
+      addBuilding(center.x + cell.x, center.z + cell.z, width, depth, height, beachfront ? {
+        variant: 3, color: DECO_PASTELS[(center.column + cellIndex) % DECO_PASTELS.length], deco: true,
+      } : { variant, color });
     }
+  }
+  if (decoCaps.length) {
+    addWaterfrontInstances(group, 'Beachfront Deco crowns', new THREE.BoxGeometry(1, 1, 1), 0xffffff, decoCaps);
   }
 
   // Fictional rooftop neon. Two outward faces keep the lettering readable on BOTH approaches;
   // a single DoubleSide texture would show mirrored text from the back.
   const glowTexture = makeGlowTexture();
   const neonTextures = new Map();
+  const neonLights = [];
   const signFrameMaterial = new THREE.MeshLambertMaterial({ color: 0x302c40 });
   function addNeonSign({ id, label, caption, color, x, z, y, width, height,
     baseY = 0.28, supportHalfWidth = width * 0.34 }) {
@@ -531,6 +737,7 @@ export function createCity(random, reservedPlaces = []) {
       map: glowTexture, color, transparent: true, opacity: 0.52,
       blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     });
+    neonLights.push({ faceMaterial, haloMaterial });
     for (const side of [-1, 1]) {
       const face = new THREE.Mesh(faceGeometry, faceMaterial);
       face.name = `neon:${id}:${side < 0 ? 'north' : 'south'}`;
@@ -593,17 +800,27 @@ export function createCity(random, reservedPlaces = []) {
   // the east roofline exposes the same identity beside the card without changing either camera.
   addRooftopNeon({ id: 'flamingo-fm-relay', label: 'FLAMINGO FM', caption: 'THE SOUND OF THE COAST',
     color: 0xff2b99, targetX: 216, targetZ: 324, width: 46, height: 11.5 });
+  addRooftopNeon({ id: 'brisa-marina', label: 'BRISA MARINA', caption: 'BERTHS / BAIT / FUEL',
+    color: 0x50e3d5, targetX: -290, targetZ: 334, width: 21, height: 5.2 });
+  addRooftopNeon({ id: 'peach-lantern', label: 'PEACH LANTERN', caption: 'DINER / SUNSET TO LATE',
+    color: 0xff83aa, targetX: 298, targetZ: 334, width: 22, height: 5.5 });
 
   // Beach and ocean on the south edge.
-  const beachDepth = CITY.beachEnd - CITY.beachStart;
-  const beach = new THREE.Mesh(
-    new THREE.PlaneGeometry(CITY.oceanWidth, beachDepth),
-    new THREE.MeshLambertMaterial({ color: PALETTE.sand }),
-  );
-  beach.rotation.x = -Math.PI / 2;
-  beach.position.set(0, 0.04, (CITY.beachStart + CITY.beachEnd) / 2);
-  beach.receiveShadow = true;
-  group.add(beach);
+  const halfCoast = CITY.oceanWidth / 2;
+  const leftBank = CANAL.x - CANAL.width / 2;
+  const rightBank = CANAL.x + CANAL.width / 2;
+  const sand = new THREE.MeshLambertMaterial({ color: PALETTE.sand });
+  for (const [minX, maxX, minZ, maxZ] of [
+    [-halfCoast, halfCoast, CITY.beachStart, CANAL.inlandZ],
+    [-halfCoast, leftBank, CANAL.inlandZ, CITY.beachEnd],
+    [rightBank, halfCoast, CANAL.inlandZ, CITY.beachEnd],
+  ]) {
+    const beach = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX, maxZ - minZ), sand);
+    beach.rotation.x = -Math.PI / 2;
+    beach.position.set((minX + maxX) / 2, 0.04, (minZ + maxZ) / 2);
+    beach.receiveShadow = true;
+    group.add(beach);
+  }
 
   const boardwalk = new THREE.Mesh(
     new THREE.BoxGeometry(CITY.edge * 2 + 6, 0.34, 12),
@@ -613,21 +830,36 @@ export function createCity(random, reservedPlaces = []) {
   boardwalk.receiveShadow = true;
   group.add(boardwalk);
 
-  const ocean = new THREE.Mesh(
-    new THREE.PlaneGeometry(CITY.oceanWidth, 2400),
-    new THREE.MeshPhongMaterial({ color: PALETTE.ocean, shininess: 70, specular: 0x88a9b0 }),
-  );
+  const water = new THREE.MeshPhongMaterial({ color: PALETTE.ocean, shininess: 70, specular: 0x88a9b0 });
+  const ocean = new THREE.Mesh(new THREE.PlaneGeometry(CITY.oceanWidth, 2400), water);
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.set(0, -0.12, CITY.oceanStart + 1200);
   group.add(ocean);
+  addCanal(group, water, colliders);
+
+  // Seed the fleet separately so the original lot, prop and spawn sequences stay intact.
+  const fleetRandom = createRandom(0x50a1a2);
+  addCauseway(group, colliders);
+  addBoats(group, 'Offshore yachts', [
+    { x: -130, z: 643, width: 8, length: 27, yaw: -0.68 },
+    { x: -360, z: 830, width: 8.5, length: 30, yaw: 0.8 },
+    { x: -105, z: 849, width: 7, length: 24, yaw: -0.32 },
+  ].map((boat) => ({
+    ...boat, x: boat.x + fleetRandom.range(-4, 4), z: boat.z + fleetRandom.range(-6, 6),
+    yaw: boat.yaw + fleetRandom.range(-0.18, 0.18),
+  })));
 
   const foamMaterial = new THREE.MeshBasicMaterial({ color: PALETTE.foam, transparent: true, opacity: 0.8 });
   for (let wave = 0; wave < 5; wave += 1) {
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(CITY.oceanWidth, 1.6 + wave * 0.9), foamMaterial);
-    strip.rotation.x = -Math.PI / 2;
-    strip.position.set(0, 0.02, CITY.oceanStart + wave * 7);
-    group.add(strip);
+    // Break the shoreline's foam at the inlet mouth.
+    for (const [minX, maxX] of wave === 0 ? [[-halfCoast, leftBank], [rightBank, halfCoast]] : [[-halfCoast, halfCoast]]) {
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX, 1.6 + wave * 0.9), foamMaterial);
+      strip.rotation.x = -Math.PI / 2;
+      strip.position.set((minX + maxX) / 2, 0.02, CITY.oceanStart + wave * 7);
+      group.add(strip);
+    }
   }
+  const inCanal = (x, z, margin = 0) => z >= CANAL.inlandZ - margin && Math.abs(x - CANAL.x) <= CANAL.width / 2 + margin;
 
   // Palms: instanced trunks and fronds, along the beach, the parks and a few sidewalks.
   const palmSpots = [];
@@ -688,7 +920,7 @@ export function createCity(random, reservedPlaces = []) {
   let frondIndex = 0;
   for (let palm = 0; palm < palmSpots.length; palm += 1) {
     const spot = palmSpots[palm];
-    const hidden = isReserved(spot.x, spot.z);
+    const hidden = isReserved(spot.x, spot.z) || inCanal(spot.x, spot.z, 2.4);
     const height = 7.2 * spot.scale;
     palmPosition.set(spot.x, 0.2, spot.z);
     palmScale.set(spot.scale, height, spot.scale);
@@ -752,17 +984,20 @@ export function createCity(random, reservedPlaces = []) {
     map: glowTexture, color: PALETTE.lamp, opacity: 0.65, transparent: true,
     blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
   });
+  const ordinaryLampGlowMaterial = lampGlowMaterial.clone();
+  const lampHalos = [];
   for (let lamp = 0; lamp < lampSpots.length; lamp += 1) {
     const spot = lampSpots[lamp];
     palmMatrix.makeTranslation(spot.x, 0.25, spot.z);
     poleMesh.setMatrixAt(lamp, palmMatrix);
     palmMatrix.makeTranslation(spot.x + 0.5, 6.5, spot.z);
     headMesh.setMatrixAt(lamp, palmMatrix);
-    if (spot.glow && glowTexture) {
-      const halo = new THREE.Sprite(lampGlowMaterial);
+    if (glowTexture) {
+      const halo = new THREE.Sprite(spot.glow ? lampGlowMaterial : ordinaryLampGlowMaterial);
       halo.name = 'streetlights:halo';
       halo.position.set(spot.x + 0.5, 6.5, spot.z);
       halo.scale.set(3.1, 3.1, 1);
+      lampHalos.push({ halo, avenue: spot.glow });
       group.add(halo);
     }
     colliders.push({ minX: spot.x - 0.2, maxX: spot.x + 0.2, minZ: spot.z - 0.2, maxZ: spot.z + 0.2, height: 6.65 });
@@ -770,6 +1005,26 @@ export function createCity(random, reservedPlaces = []) {
   poleMesh.instanceMatrix.needsUpdate = true;
   headMesh.instanceMatrix.needsUpdate = true;
   group.add(poleMesh, headMesh);
+
+  let nightFactor;
+  function setNightFactor(factor) {
+    const night = THREE.MathUtils.clamp(factor, 0, 1);
+    if (night === nightFactor) return;
+    nightFactor = night;
+    const evening = Math.min(night / SUNSET_NIGHT_FACTOR, 1);
+    const afterSunset = Math.max((night - SUNSET_NIGHT_FACTOR) / (1 - SUNSET_NIGHT_FACTOR), 0);
+    const lateGlow = afterSunset * afterSunset * (3 - 2 * afterSunset);
+    headMesh.material.emissiveIntensity = 1.2 * evening + 0.6 * lateGlow;
+    lampGlowMaterial.opacity = 0.65 * evening + 0.26 * lateGlow;
+    ordinaryLampGlowMaterial.opacity = 0.74 * lateGlow;
+    for (const { halo, avenue } of lampHalos) {
+      halo.visible = avenue ? lampGlowMaterial.opacity > 0 : ordinaryLampGlowMaterial.opacity > 0;
+    }
+    for (const { faceMaterial, haloMaterial } of neonLights) {
+      faceMaterial.emissiveIntensity = 1.3 * evening + 0.65 * lateGlow;
+      haloMaterial.opacity = 0.52 * evening + 0.25 * lateGlow;
+    }
+  }
 
   // Beach props: umbrellas, towels, benches, lifeguard tower.
   const umbrellaCount = 16;
@@ -782,7 +1037,8 @@ export function createCity(random, reservedPlaces = []) {
   );
   for (let umbrella = 0; umbrella < umbrellaCount; umbrella += 1) {
     const x = -320 + umbrella * 41 + random.range(-6, 6);
-    const z = random.range(392, 470);
+    const startZ = random.range(392, 470);
+    const z = inCanal(x, startZ, 2.3) ? CANAL.inlandZ - 3 : startZ;
     palmMatrix.makeTranslation(x, 0.1, z);
     umbrellaPole.setMatrixAt(umbrella, palmMatrix);
     umbrellaTop.setMatrixAt(umbrella, palmMatrix);
@@ -812,7 +1068,10 @@ export function createCity(random, reservedPlaces = []) {
     14,
   );
   for (let towel = 0; towel < 14; towel += 1) {
-    palmMatrix.makeTranslation(-280 + towel * 43 + random.range(-8, 8), 0.08, random.range(400, 480));
+    const x = -280 + towel * 43 + random.range(-8, 8);
+    const startZ = random.range(400, 480);
+    const z = inCanal(x, startZ, 1.2) ? CANAL.inlandZ - 2 : startZ;
+    palmMatrix.makeTranslation(x, 0.08, z);
     towelMesh.setMatrixAt(towel, palmMatrix);
     towelMesh.setColorAt(towel, new THREE.Color(random.pick([0x4f8fb0, 0xd0604c, 0xe9c75a, 0xffffff, 0x5aa88c])));
   }
@@ -852,6 +1111,7 @@ export function createCity(random, reservedPlaces = []) {
     }
   }
   group.add(pier);
+  addMarina(group, fleetRandom);
 
   const containerColors = [0xb8503e, 0x3f7286, 0xd0a246, 0x5f7d4f, 0x9a5b48];
   for (let container = 0; container < 9; container += 1) {
@@ -946,6 +1206,7 @@ export function createCity(random, reservedPlaces = []) {
   };
   for (const key of Object.keys(landmarks)) labels.push(landmarks[key]);
 
+  setNightFactor(SUNSET_NIGHT_FACTOR);
   return {
     group,
     graph,
@@ -953,6 +1214,7 @@ export function createCity(random, reservedPlaces = []) {
     buildings,
     containers,
     colliders,
+    setNightFactor,
     spawnPoints: {
       player: spawnPlayer,
       starterCar: spawnStarterCar,
