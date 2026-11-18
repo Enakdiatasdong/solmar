@@ -432,31 +432,124 @@ function addAirport(parent, colliders) {
   const airport = new THREE.Group();
   airport.name = 'Solmar Airfield';
   parent.add(airport);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(720, 168), new THREE.MeshLambertMaterial({ color: 0x858b79 }));
+  const cube = new THREE.BoxGeometry(1, 1, 1);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(720, 168), new THREE.MeshLambertMaterial({ color: 0x75836d }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, 0.025, 456);
   airport.add(ground);
   const asphalt = new THREE.MeshLambertMaterial({ color: 0x30343a });
-  const runway = new THREE.Mesh(new THREE.PlaneGeometry(560, 34), asphalt);
-  runway.rotation.x = -Math.PI / 2;
-  runway.position.set(0, 0.045, 472);
-  airport.add(runway);
-  const taxiway = new THREE.Mesh(new THREE.PlaneGeometry(520, 10), asphalt);
-  taxiway.rotation.x = -Math.PI / 2;
-  taxiway.position.set(0, 0.05, 502);
-  airport.add(taxiway);
-  const paint = new THREE.MeshBasicMaterial({ color: 0xf2eee3 });
-  for (let x = -250; x <= 250; x += 28) {
-    const stripe = new THREE.Mesh(new THREE.PlaneGeometry(12, 0.7), paint);
-    stripe.rotation.x = -Math.PI / 2;
-    stripe.position.set(x, 0.065, 472);
-    airport.add(stripe);
+  const surface = (name, x, z, width, depth, y = 0.045) => {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), asphalt);
+    mesh.name = `airfield:${name}`;
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, y, z);
+    mesh.receiveShadow = true;
+    airport.add(mesh);
+  };
+  surface('runway', 0, 472, 560, 34);
+  surface('taxiway', 0, 502, 520, 10, 0.05);
+  surface('north-apron', 0, 431, 580, 40, 0.04);
+  // Keep the existing graph's central approach and terminal access unobstructed.
+  surface('access', 0, 437, 18, 130, 0.05);
+  for (const x of [-220, 220]) surface('taxiway-connector', x, 489, 10, 26, 0.055);
+
+  const whiteMarks = [];
+  const yellowMarks = [];
+  for (let x = -238; x <= 238; x += 28) {
+    whiteMarks.push({ x, y: 0.075, z: 472, width: 12, height: 0.018, depth: 0.85 });
   }
-  const terminal = new THREE.Mesh(new THREE.BoxGeometry(112, 8, 24), new THREE.MeshLambertMaterial({ color: 0xdacdb3 }));
-  terminal.position.set(38, 4.05, 519);
-  terminal.castShadow = true;
-  airport.add(terminal);
-  colliders.push({ minX: -18, maxX: 94, minZ: 507, maxZ: 531, height: 8.1 });
+  for (const z of [456.5, 487.5]) {
+    whiteMarks.push({ x: 0, y: 0.075, z, width: 550, height: 0.018, depth: 0.4 });
+  }
+  for (const x of [-262, 262]) {
+    for (const offset of [-11, -7, -3, 3, 7, 11]) {
+      whiteMarks.push({ x, y: 0.075, z: 472 + offset, width: 10, height: 0.018, depth: 1.8 });
+    }
+  }
+  yellowMarks.push({ x: 0, y: 0.085, z: 502, width: 510, height: 0.018, depth: 0.28 });
+  for (const x of [-220, 220]) {
+    yellowMarks.push({ x, y: 0.085, z: 494, width: 0.28, height: 0.018, depth: 15 });
+  }
+  for (const x of [-160, 170]) {
+    yellowMarks.push({ x, y: 0.085, z: 439, width: 0.28, height: 0.018, depth: 19 });
+    yellowMarks.push({ x, y: 0.085, z: 447, width: 22, height: 0.018, depth: 0.28 });
+  }
+  const runwayPaint = addWaterfrontInstances(airport, 'airfield:runway-markings', cube, 0xf5f1e7, whiteMarks);
+  runwayPaint.material.dispose();
+  runwayPaint.material = new THREE.MeshBasicMaterial({ color: 0xf5f1e7, toneMapped: false });
+  const taxiPaint = addWaterfrontInstances(airport, 'airfield:taxiway-markings', cube, 0xf3c74e, yellowMarks);
+  taxiPaint.material.dispose();
+  taxiPaint.material = new THREE.MeshBasicMaterial({ color: 0xf3c74e, toneMapped: false });
+
+  const structures = [];
+  const doors = [];
+  const roofs = [];
+  const addSolid = (x, z, width, height, depth) => {
+    structures.push({ x, y: height / 2 + 0.05, z, width, height, depth });
+    colliders.push({ minX: x - width / 2, maxX: x + width / 2,
+      minZ: z - depth / 2, maxZ: z + depth / 2, height: height + 0.05 });
+  };
+  for (const x of [-150, 170]) {
+    addSolid(x, 410, 54, 12, 26);
+    doors.push({ x, y: 5, z: 423.06, width: 43, height: 9.6, depth: 0.18 });
+    roofs.push({ x, y: 12.2, z: 410, width: 57, height: 0.7, depth: 29 });
+  }
+  addSolid(38, 519, 112, 8, 24);
+  addSolid(95, 410, 8, 20, 8);
+  roofs.push({ x: 95, y: 24.4, z: 410, width: 16, height: 1.2, depth: 14 });
+  roofs.push({ x: 38, y: 7.3, z: 504, width: 116, height: 0.55, depth: 9 });
+  const solids = addWaterfrontInstances(airport, 'airfield:hangars-terminal-tower', cube, 0xd2d3c5, structures);
+  solids.castShadow = solids.receiveShadow = true;
+  addWaterfrontInstances(airport, 'airfield:hangar-doors', cube, 0x3a5867, doors);
+  addWaterfrontInstances(airport, 'airfield:roofs-canopy', cube, 0x859aa1, roofs).castShadow = true;
+  const glazing = [
+    { x: 38, y: 4.6, z: 506.93, width: 103, height: 3.3, depth: 0.16 },
+    { x: 95, y: 22, z: 410, width: 14, height: 3.6, depth: 12 },
+  ];
+  const windows = addWaterfrontInstances(airport, 'airfield:terminal-control-glazing', cube, 0x438595, glazing);
+  windows.material.emissive.setHex(0x214f60);
+  windows.material.emissiveIntensity = 0.5;
+  const mullions = [];
+  for (let x = -8; x <= 84; x += 9.2) {
+    mullions.push({ x, y: 4.6, z: 506.8, width: 0.25, height: 3.6, depth: 0.25 });
+  }
+  addWaterfrontInstances(airport, 'airfield:terminal-window-frames', cube, 0xdde2d8, mullions);
+
+  // Two parked light aircraft give the entrance apron a recognizable silhouette.
+  // Separate body/wing boxes keep their colliders close to the visible footprint.
+  const aircraft = [-160, 170];
+  const fuselages = aircraft.map((x) => ({ x, y: 2, z: 439, width: 1, height: 1, depth: 1 }));
+  const bodies = addWaterfrontInstances(airport, 'airfield:parked-aircraft-fuselages',
+    new THREE.CylinderGeometry(0.8, 0.52, 16, 10).rotateX(Math.PI / 2), 0xeeeadd, fuselages);
+  bodies.castShadow = true;
+  const wings = [];
+  const cockpit = [];
+  const wheels = [];
+  const fins = [];
+  for (const x of aircraft) {
+    wings.push({ x, y: 1.8, z: 438, width: 20, height: 0.24, depth: 3.2 });
+    wings.push({ x, y: 2.4, z: 445.2, width: 7, height: 0.22, depth: 2 });
+    fins.push({ x, y: 3.6, z: 445, width: 0.26, height: 2.8, depth: 2.5 });
+    cockpit.push({ x, y: 2.55, z: 434.8, width: 1.25, height: 0.55, depth: 2.8 });
+    for (const offset of [-2.2, 2.2]) wheels.push({ x: x + offset, y: 0.55, z: 439.8, width: 0.36, height: 1, depth: 0.8 });
+    wheels.push({ x, y: 0.55, z: 433.6, width: 0.36, height: 1, depth: 0.8 });
+    colliders.push({ minX: x - 1, maxX: x + 1, minZ: 431, maxZ: 447, height: 4.9 });
+    colliders.push({ minX: x - 10, maxX: x + 10, minZ: 436.4, maxZ: 439.6, height: 2.1 });
+    colliders.push({ minX: x - 3.5, maxX: x + 3.5, minZ: 444.2, maxZ: 446.2, height: 2.6 });
+  }
+  addWaterfrontInstances(airport, 'airfield:parked-aircraft-wings', cube, 0xeae5d6, wings).castShadow = true;
+  addWaterfrontInstances(airport, 'airfield:parked-aircraft-tails', cube, 0xd96254, fins);
+  addWaterfrontInstances(airport, 'airfield:parked-aircraft-cockpits', cube, 0x294b60, cockpit);
+  addWaterfrontInstances(airport, 'airfield:parked-aircraft-gear', cube, 0x242b32, wheels);
+
+  const edgeLights = [];
+  for (let x = -274; x <= 274; x += 26) {
+    for (const z of [454, 490]) edgeLights.push({ x, y: 0.28, z, width: 0.46, height: 0.4, depth: 0.46 });
+  }
+  const lamps = addWaterfrontInstances(airport, 'airfield:runway-edge-lights', cube, 0x8ce9ed, edgeLights);
+  lamps.material.emissive.setHex(0x69dbe8);
+  lamps.material.emissiveIntensity = 1.5;
+  lamps.material.toneMapped = false;
 }
 
 function addFreeway(parent) {
