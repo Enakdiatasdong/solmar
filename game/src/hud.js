@@ -27,6 +27,7 @@ export function createHud() {
     objectiveBox: element('objective-box'),
     toasts: element('toasts'),
     minimap: element('minimap'),
+    zone: element('zone-label'),
     missionList: element('mission-list'),
     dialogue: element('dialogue'),
     dialogueText: element('dialogue-text'),
@@ -166,6 +167,10 @@ export function createHud() {
     setText(hud.hint, text ? String(text) : '');
   }
 
+  function setZone(text) {
+    setText(hud.zone, text ? String(text) : '');
+  }
+
   function showMissionList(missions, activeIndex) {
     if (!hud.missionList) return;
     hud.missionList.replaceChildren();
@@ -201,7 +206,7 @@ export function createHud() {
     else showMissionList(missions, activeIndex);
   }
 
-  function drawMinimap(player, wanted, missions, blips, cameraYaw) {
+  function drawMinimap(player, wanted, missions, blips, cameraYaw, extras) {
     if (!mapContext || !hud.minimap || !player?.state) return;
     const width = hud.minimap.width;
     const height = hud.minimap.height;
@@ -224,6 +229,18 @@ export function createHud() {
     mapContext.rotate(heading);
     mapContext.scale(-scale, -scale);
     mapContext.translate(-actor.x, -actor.z);
+
+    if (extras?.rural) {
+      const { minX, maxX, minZ, maxZ } = extras.rural;
+      mapContext.fillStyle = '#30472e';
+      mapContext.fillRect(minX, minZ, maxX - minX, maxZ - minZ);
+    }
+    if (Array.isArray(extras?.dirtRoads)) {
+      mapContext.fillStyle = '#aa794f';
+      for (const { minX, maxX, minZ, maxZ } of extras.dirtRoads) {
+        mapContext.fillRect(minX, minZ, maxX - minX, maxZ - minZ);
+      }
+    }
 
     mapContext.fillStyle = 'rgba(132, 140, 145, 0.5)';
     const pitch = CITY.pitch;
@@ -254,9 +271,20 @@ export function createHud() {
     if (Array.isArray(blips)) {
       for (const blip of blips) {
         if (!Number.isFinite(blip?.x) || !Number.isFinite(blip?.z)) continue;
+        if (Array.isArray(extras?.landmarks) && extras.landmarks.some((landmark) =>
+          landmark?.x === blip.x && landmark?.z === blip.z && landmark?.color === blip.color)) continue;
         mapContext.fillStyle = blip.color || PALETTE.css.teal;
         mapContext.beginPath();
         mapContext.arc(blip.x, blip.z, Number.isFinite(blip.size) ? blip.size : 22, 0, Math.PI * 2);
+        mapContext.fill();
+      }
+    }
+    if (Array.isArray(extras?.landmarks)) {
+      for (const landmark of extras.landmarks) {
+        if (!Number.isFinite(landmark?.x) || !Number.isFinite(landmark?.z)) continue;
+        mapContext.fillStyle = landmark.color || (landmark.visited ? PALETTE.css.teal : PALETTE.css.gold);
+        mapContext.beginPath();
+        mapContext.arc(landmark.x, landmark.z, Number.isFinite(landmark.size) ? landmark.size : 15, 0, Math.PI * 2);
         mapContext.fill();
       }
     }
@@ -301,6 +329,7 @@ export function createHud() {
     toast,
     setDialogue,
     setHint,
+    setZone,
     showMissionList,
     hideMissionList,
     toggleMissionList,
