@@ -182,10 +182,17 @@ export function createTraffic(city, scene, random) {
     return { x: x + Math.cos(angle) * radius, z: z + Math.sin(angle) * radius };
   }
 
-  function pickDirection(node, previousNode) {
-    const options = node?.neighbors ?? [];
-    const onward = options.filter((neighbor) => neighbor.other !== previousNode);
-    return random.pick(onward.length ? onward : options) ?? null;
+  // Pick the next road direction. Never U-turn back to the node the car just
+  // came from when another option exists, so traffic keeps flowing forward
+  // instead of oscillating between two intersections. (BUG-17: the old
+  // bounds filter here was a no-op — every grid node is in-bounds.)
+  function pickDirection(node, fromNode) {
+    const neighbors = node?.neighbors ?? [];
+    if (neighbors.length === 0) return null;
+    const forward = fromNode
+      ? neighbors.filter((neighbor) => neighbor.other !== fromNode)
+      : neighbors;
+    return random.pick(forward.length > 0 ? forward : neighbors);
   }
 
   function isWalkablePosition(position) {
