@@ -192,9 +192,9 @@ export function createPolice(city, scene, vehicles) {
     ground.rotation.x = -Math.PI / 2;
     scene.add(built.group, spotlight, target, ground);
     const position = targetFor(player);
-    const x = position.x + 18;
-    const z = position.z - 18;
-    built.group.position.set(x, helicopterHeight(x, z, 28), z);
+    const { x, z } = helicopterLead(position, 0);
+    built.group.name = 'police:helicopter';
+    built.group.position.set(x, helicopterHeight(x, z, 18), z);
     spotlight.position.copy(built.group.position);
     spotlight.target = target;
     target.position.set(position.x, 0, position.z);
@@ -203,21 +203,33 @@ export function createPolice(city, scene, vehicles) {
     return state.heli;
   }
 
+  function helicopterLead(target, phase) {
+    // Stay ahead of the pursuit, in a street corridor rather than orbiting behind the camera
+    // or over a tower. The small lateral sweep still gives the search aircraft some motion.
+    const heading = target.heading ?? 0;
+    const lead = 34 + Math.min(12, Math.abs(target.speed ?? 0) * 0.25);
+    const x = target.x + Math.sin(heading) * lead;
+    const z = target.z + Math.cos(heading) * lead;
+    const corridor = roadNetwork?.nearestEdge(x, z);
+    const sweep = Math.sin(phase) * 1.5;
+    return {
+      x: (corridor?.x ?? x) + Math.cos(heading) * sweep,
+      z: (corridor?.z ?? z) - Math.sin(heading) * sweep,
+    };
+  }
+
   function updateHelicopter(dt, player) {
     const heli = state.heli;
     if (!heli) return;
     const target = targetFor(player);
     heli.orbit += dt * 0.24;
-    const desired = new THREE.Vector3(
-      target.x + Math.cos(heli.orbit) * 18,
-      28 + Math.sin(worldTime * 0.7) * 1.8,
-      target.z + Math.sin(heli.orbit) * 18,
-    );
+    const lead = helicopterLead(target, heli.orbit);
+    const desired = new THREE.Vector3(lead.x, 18 + Math.sin(worldTime * 0.7) * 1.2, lead.z);
     const position = heli.group.position;
-    const approach = Math.min(1, dt * 0.9);
+    const approach = 1 - Math.exp(-dt * 5);
     const nextX = THREE.MathUtils.lerp(position.x, desired.x, approach);
     const nextZ = THREE.MathUtils.lerp(position.z, desired.z, approach);
-    const climb = helicopterHeight(nextX, nextZ, desired.y, 11);
+    const climb = helicopterHeight(nextX, nextZ, desired.y);
     position.set(nextX, helicopterHeight(nextX, nextZ, THREE.MathUtils.lerp(position.y, climb, approach)), nextZ);
     heli.group.lookAt(target.x, heli.group.position.y, target.z);
     heli.rotor.rotation.y += dt * 18;

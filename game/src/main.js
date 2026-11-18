@@ -403,15 +403,16 @@ function makeGame(seedValue, shotName = null) {
 
   function updateCameraSafely(dt) {
     const inCar = player.state.inCar;
+    const chase = police.state.wanted >= 3;
     const focus = player.state.inCar?.state ?? player.state;
     const focusY = inCar ? 1.4 : 1.5 + (Number.isFinite(player.state.y) ? player.state.y : 0);
-    const height = inCar ? CAMERA.carHeight : CAMERA.height;
-    const requestedDistance = inCar ? CAMERA.carDistance : orbit.distance;
+    const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
+    const requestedDistance = inCar ? (chase ? CAMERA.chaseDistance : CAMERA.carDistance) : orbit.distance;
     const safeDistance = safeCameraDistance(focus, orbit.yaw, orbit.pitch, requestedDistance, city.colliders,
       { focusY, height });
-    renderer.updateCamera(dt, player, { ...orbit, distance: safeDistance }, 0);
+    renderer.updateCamera(dt, player, { ...orbit, chase, distance: safeDistance }, 0);
     const rendererDistance = Math.max(CAMERA.minDistance, Math.min(CAMERA.maxDistance, requestedDistance));
-    // The renderer enforces a minimum zoom and its car mode uses a fixed distance. Correct that
+    // The renderer enforces a minimum zoom. Correct that
     // final camera point when either clamp would put it back inside a building.
     if (safeDistance < rendererDistance) {
       const safePosition = cameraPositionAtDistance(focus, orbit.yaw, orbit.pitch, safeDistance, { focusY, height });

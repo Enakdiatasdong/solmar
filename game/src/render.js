@@ -239,8 +239,14 @@ export function createRenderer(canvas) {
     const state = player?.state ?? {};
     const inCar = state.inCar;
     const focus = inCar ? inCar.state : player.state;
-    const height = inCar ? CAMERA.carHeight : CAMERA.height;
-    const requestedDistance = inCar ? CAMERA.carDistance : orbit?.distance ?? CAMERA.distance;
+    const chase = Boolean(orbit?.chase);
+    const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
+    const requestedDistance = orbit?.distance ?? (inCar ? CAMERA.carDistance : CAMERA.distance);
+    const fov = chase ? CAMERA.chaseFov : 58;
+    if (camera.fov !== fov) {
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+    }
     const distance = THREE.MathUtils.clamp(
       Number.isFinite(requestedDistance) ? requestedDistance : CAMERA.distance,
       CAMERA.minDistance,
@@ -251,7 +257,7 @@ export function createRenderer(canvas) {
     const yaw = requestedYaw;
     const pitch = THREE.MathUtils.clamp(requestedPitch, CAMERA.minPitch, CAMERA.maxPitch);
     const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(state.y) ? state.y : 0);
-    cameraState.target.set(focus.x, focusY + 0.9, focus.z);
+    cameraState.target.set(focus.x, focusY + 0.9 + (chase ? (inCar ? 3.4 : 2.6) : 0), focus.z);
     const horizontal = Math.cos(pitch) * distance;
     const desiredX = focus.x - Math.sin(yaw) * horizontal;
     const desiredZ = focus.z - Math.cos(yaw) * horizontal;
@@ -298,6 +304,8 @@ export function createRenderer(canvas) {
   }
 
   function frameTitle() {
+    camera.fov = 58;
+    camera.updateProjectionMatrix();
     camera.position.set(TITLE_CAMERA.x, TITLE_CAMERA.y, TITLE_CAMERA.z);
     camera.lookAt(TITLE_CAMERA.lookX, TITLE_CAMERA.lookY, TITLE_CAMERA.lookZ);
     cameraState.pos.copy(camera.position);
