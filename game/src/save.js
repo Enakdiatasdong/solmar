@@ -32,6 +32,7 @@ function normalizeSave(value) {
     : [];
   return {
     cash: Math.max(0, Math.min(1e9, finiteNumber(value.cash, MISSIONS.startCash))),
+    rep: Math.max(0, Math.min(100000, Number.isFinite(value.rep) ? Math.floor(value.rep) : 0)),
     missions,
     best: normalizeBest(value.best),
     muted: value.muted === true,

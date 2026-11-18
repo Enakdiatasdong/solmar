@@ -1,7 +1,7 @@
 // Five story jobs for Jax Moreno in Solmar. Missions use the city's seeded world, the shared HUD,
 // vehicle, police and combat systems, and emit completion events for main.js to award and save.
 import * as THREE from '../vendor/three.module.min.js';
-import { MISSIONS, PALETTE, POLICE } from './config.js';
+import { MISSIONS, PALETTE, POLICE, REGIONS } from './config.js';
 
 const BEACON_COLORS = { available: 0xffc857, active: 0xffc857 };
 const FIRST_PICKUP = { x: 80, z: 152, name: 'Hotel Azure' };
@@ -41,7 +41,7 @@ const STORY = [
     id: 'first-fare',
     title: 'First Wheels',
     briefing: 'Get in a car and drive to Hotel Azure.',
-    start: { x: 0, z: 96, name: 'Moreno Garage' },
+    start: { x: 0, z: REGIONS.firstPickup.z, name: 'South Shore' },
     reward: MISSIONS.rewards['first-fare'],
     lines: [
       { who: 'Mara', text: 'First lesson, Jax: get behind the wheel, pick up our client at Hotel Azure, then take them to Pier 9.' },
@@ -240,8 +240,8 @@ export function createMissions(ctx) {
 
   function beginFirstWheels() {
     state.stage = 'client-pickup';
-    setMarker(FIRST_PICKUP, FIRST_PICKUP.name);
-    setObjective('Get in a car and drive to Hotel Azure.');
+    setMarker(REGIONS.firstPickup, REGIONS.firstPickup.name);
+    setObjective('Get in a car and collect the client at Hotel Azure’s south approach.');
   }
 
   function beginCourierRun() {
@@ -364,7 +364,7 @@ export function createMissions(ctx) {
   function updateFirstWheels() {
     const car = inCar();
     if (car?.state.wrecked) return fail('Your car was wrecked before the client reached Pier 9.');
-    if (state.stage === 'client-pickup' && carNear(FIRST_PICKUP, 11) && Math.abs(car.state.speed) < 6) {
+    if (state.stage === 'client-pickup' && carNear(REGIONS.firstPickup, 11) && Math.abs(car.state.speed) < 6) {
       state.stage = 'client-dropoff';
       say('Client', 'Pier 9, please. The sea air will do me good.');
       setMarker(FIRST_DROPOFF, FIRST_DROPOFF.name);
@@ -375,7 +375,7 @@ export function createMissions(ctx) {
       if (!car) fail('You left the client before reaching Pier 9.');
       else if (car.state.wrecked) fail('The client’s car was wrecked.');
       else if (carNear(FIRST_DROPOFF, 12) && Math.abs(car.state.speed) < 5) complete();
-    } else if (state.stage === 'client-pickup' && distanceTo(FIRST_PICKUP.x, FIRST_PICKUP.z) < 6 && !inCar()) {
+    } else if (state.stage === 'client-pickup' && distanceTo(REGIONS.firstPickup.x, REGIONS.firstPickup.z) < 6 && !inCar()) {
       setObjective('Get in a car, then drive to Hotel Azure.');
     }
   }

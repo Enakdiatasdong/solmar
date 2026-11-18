@@ -203,5 +203,51 @@ export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
 /** The title vista and the spawn point. */
 export const TITLE_CAMERA = { x: -310, y: 210, z: 720, lookX: 0, lookY: 26, lookZ: 0 };
-export const SPAWN = { x: -1.2, z: 96, heading: 0 };
-export const STARTER_CAR = { x: 4.6, z: 100, heading: 0 };
+export const SPAWN = { x: -1.2, z: 216, heading: 0 };
+export const STARTER_CAR = { x: 4.6, z: 220, heading: 0 };
+
+
+/** Story-gated city bands, ordered from the coast northward. */
+export const REGIONS = {
+  list: [
+    { id: 'south-shore', name: 'South Shore', minZ: 180, maxZ: Infinity, required: 0 },
+    { id: 'downtown', name: 'Downtown', minZ: -60, maxZ: 180, required: 1 },
+    { id: 'northside', name: 'Northside', minZ: -240, maxZ: -60, required: 2 },
+    { id: 'north-hills', name: 'North Hills', minZ: -Infinity, maxZ: -240, required: 3 },
+  ],
+  pushMargin: 4,
+  repeatWindow: 6,
+  wantedCooldown: 12,
+  warningCooldown: 3,
+  warningDuration: 4,
+  barrierHeight: 12,
+  barrierColor: 0xff6b57,
+  barrierOpacity: 0.22,
+  mapLocked: 'rgba(255, 107, 87, 0.25)',
+  mapOpen: 'rgba(73, 198, 184, 0.32)',
+  mapLineWidth: 8,
+  // The original introduction was north of the first gate. Use the hotel's south approach.
+  firstPickup: { x: 80, z: 216, name: 'Hotel Azure south approach' },
+};
+
+
+/** Street reputation: thresholds, point awards and persistence cap. */
+export const REP = {
+  maxPoints: 100000,
+  mission: 120,
+  theft: 25,
+  pedHit: 15,
+  punchNearCop: 10,
+  fireNearCop: 10,
+  wantedStar: 10,
+  lostTail: 40,
+  tailWanted: 3,
+  ranks: [
+    { name: 'Small Fry', points: 0 },
+    { name: 'Corner Runner', points: 150 },
+    { name: 'Street Hustler', points: 400 },
+    { name: 'Wheelman', points: 800 },
+    { name: 'Harbor Boss', points: 1500 },
+    { name: 'Solmar Legend', points: 2500 },
+  ],
+};
