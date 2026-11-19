@@ -28,6 +28,9 @@ const KEYMAP = {
   ArrowRight: 'right',
 };
 
+const MOUSE_LEFT = 1;
+const MOUSE_RIGHT = 2;
+
 export function createInput(target, canCycleWeapon = () => false) {
   if ('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches) {
     document.body?.classList.add('touch');
@@ -41,6 +44,7 @@ export function createInput(target, canCycleWeapon = () => false) {
   // Aim mode (hold right mouse / Alt / touch AIM). Right-button state is tracked
   // separately from the left-button drag orbit, so aiming never starts a drag.
   let aiming = false;
+  let mousePointerId = null;
   let touchAim = false;
   let actions = 0;
   let dragX = 0;
@@ -161,6 +165,7 @@ export function createInput(target, canCycleWeapon = () => false) {
     runKeys.clear();
     aimKeys.clear();
     aiming = false;
+    mousePointerId = null;
     touchAim = false;
     touchHeld.up = false;
     touchHeld.down = false;
@@ -181,46 +186,84 @@ export function createInput(target, canCycleWeapon = () => false) {
   });
 
   if (target && target.addEventListener) {
-    target.addEventListener('contextmenu', (event) => event.preventDefault());
-    target.addEventListener('pointerdown', (event) => {
-      // Right button held = aim mode; it never starts a camera drag.
-      if (event.button === 2) {
-        aiming = true;
-        return;
-      }
-      if (event.button !== undefined && event.button !== 0) return;
+    const startDrag = (event) => {
       pointerId = event.pointerId;
       dragging = true;
       lastX = event.clientX;
       lastY = event.clientY;
       downAt = performance.now();
       moved = 0;
-      target.setPointerCapture?.(event.pointerId);
-    });
-    target.addEventListener('pointermove', (event) => {
-      if (!dragging || event.pointerId !== pointerId) return;
-      const dx = event.clientX - lastX;
-      const dy = event.clientY - lastY;
-      lastX = event.clientX;
-      lastY = event.clientY;
-      dragX += dx;
-      dragY += dy;
-      moved += Math.abs(dx) + Math.abs(dy);
-    });
-    const release = (event) => {
-      if (event.button === 2) {
-        aiming = false;
-        return;
-      }
-      if (event.pointerId !== pointerId) return;
+    };
+    const finishDrag = () => {
       const elapsed = performance.now() - downAt;
       if (moved < 7 && elapsed < 380) queue(ACTION_FIRE);
       dragging = false;
       pointerId = null;
     };
-    target.addEventListener('pointerup', release);
+    const updateMouseButtons = (event) => {
+      // Only the first button press and last release emit pointerdown/up.
+      // Other button changes arrive as pointermove with a different buttons mask.
+      const leftHeld = (event.buttons & MOUSE_LEFT) !== 0;
+      aiming = (event.buttons & MOUSE_RIGHT) !== 0;
+      if (leftHeld && !dragging) startDrag(event);
+      else if (!leftHeld && event.pointerId === pointerId) finishDrag();
+      if (event.buttons === 0) mousePointerId = null;
+    };
+
+    target.addEventListener('contextmenu', (event) => event.preventDefault());
+    target.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse') {
+        if ((event.buttons & (MOUSE_LEFT | MOUSE_RIGHT)) === 0) return;
+        if (event.pointerId !== mousePointerId) {
+          mousePointerId = event.pointerId;
+          target.setPointerCapture?.(event.pointerId);
+        }
+        updateMouseButtons(event);
+        return;
+      }
+      if (event.button === 2) {
+        aiming = true;
+        return;
+      }
+      if (event.button !== undefined && event.button !== 0) return;
+      startDrag(event);
+      target.setPointerCapture?.(event.pointerId);
+    });
+    target.addEventListener('pointermove', (event) => {
+      if (dragging && event.pointerId === pointerId) {
+        const dx = event.clientX - lastX;
+        const dy = event.clientY - lastY;
+        lastX = event.clientX;
+        lastY = event.clientY;
+        dragX += dx;
+        dragY += dy;
+        moved += Math.abs(dx) + Math.abs(dy);
+      }
+      // Count any movement on the same event as a left release before testing for a click.
+      if (event.pointerId === mousePointerId) updateMouseButtons(event);
+    });
+    target.addEventListener('pointerup', (event) => {
+      if (event.pointerId === mousePointerId) {
+        updateMouseButtons(event);
+        return;
+      }
+      if (event.button === 2) {
+        aiming = false;
+        return;
+      }
+      if (event.pointerId === pointerId) finishDrag();
+    });
     target.addEventListener('pointercancel', () => {
       aiming = false;
+      mousePointerId = null;
+      dragging = false;
+      pointerId = null;
+    });
+    target.addEventListener('lostpointercapture', (event) => {
+      if (event.pointerId !== mousePointerId) return;
+      aiming = false;
+      mousePointerId = null;
+      if (event.pointerId !== pointerId) return;
       dragging = false;
       pointerId = null;
     });
