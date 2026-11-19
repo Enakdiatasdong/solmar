@@ -80,13 +80,14 @@ function makeTowerFacadeTextures(seed, downtown) {
   canvas.height = emissiveCanvas.height = 512;
   const context = canvas.getContext('2d');
   const emissiveContext = emissiveCanvas.getContext('2d');
-  if (!context || !emissiveContext) return { map: null, emissiveMap: null };
+  if (!context) return { map: null, emissiveMap: null };
 
   const columns = 12;
   const rows = 22;
   const cellW = canvas.width / columns;
   const cellH = canvas.height / rows;
-  const litRatio = 0.07 + stableHash(seed, 17, 1) * 0.23;
+  const diffuseLitRatio = 0.07 + stableHash(seed, 17, 1) * 0.23;
+  const emissiveLitRatio = 0.35 + stableHash(seed, 17, 1) * 0.2;
   const tintShift = Math.floor(stableHash(seed, 29, 2) * 24);
   context.fillStyle = '#142a40';
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -115,17 +116,21 @@ function makeTowerFacadeTextures(seed, downtown) {
       const y = row * cellH + 3;
       const paneHash = stableHash(seed + column * 0.37, seed * 0.71 + row * 0.23, 3);
       if (downtown ? y + cellH > shopTop : y >= shopTop) continue;
-      const lit = paneHash < litRatio;
+      const lit = paneHash < diffuseLitRatio;
+      const emissiveLit = paneHash < emissiveLitRatio;
       if (lit) {
-        const warm = downtown && paneHash < litRatio * 0.58;
-        context.fillStyle = warm ? '#9b8975' : paneHash > litRatio * 0.58 ? '#58acd0' : '#3e8bb6';
-        emissiveContext.fillStyle = warm ? '#ffc77c' : '#7edbff';
-        emissiveContext.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
+        const warm = downtown && paneHash < diffuseLitRatio * 0.58;
+        context.fillStyle = warm ? '#9b8975' : paneHash > diffuseLitRatio * 0.58 ? '#58acd0' : '#3e8bb6';
       } else {
         const blue = 52 + Math.floor(paneHash * 21) + tintShift;
         context.fillStyle = `rgb(${Math.max(18, blue - 26)},${Math.min(118, blue + 9)},${Math.min(154, blue + 35)})`;
       }
       context.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
+      if (emissiveLit) {
+        const warm = stableHash(seed + column * 0.61, seed + row * 0.43, 7) < 0.48;
+        emissiveContext.fillStyle = warm ? '#ffc77c' : '#7edbff';
+        emissiveContext.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
+      }
     }
   }
   // Dense, fine mullions make the facade read as a continuous office curtain wall.
@@ -157,18 +162,26 @@ function makeTowerFacadeTextures(seed, downtown) {
 }
 
 /** Flat walls and window bays; keep warm panes in neighboring groups on each lit floor. */
-function makeFacadeTexture(random, variant) {
+function makeFacadeTexture(random, variant, variantIndex) {
   const canvas = document.createElement('canvas');
+  const emissiveCanvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 256;
+  emissiveCanvas.width = canvas.width;
+  emissiveCanvas.height = canvas.height;
   const context = canvas.getContext('2d');
-  if (!context) return null;
+  const emissiveContext = emissiveCanvas.getContext('2d');
+  if (!context) return { map: null, emissiveMap: null };
   context.fillStyle = variant.glass ? '#e9eef1' : '#f1ece2';
   context.fillRect(0, 0, 128, 256);
 
   const { columns, rows } = facadeGrid(variant);
   const cellW = 128 / columns;
   const cellH = 256 / rows;
+  if (emissiveContext) {
+    emissiveContext.fillStyle = '#000000';
+    emissiveContext.fillRect(0, 0, emissiveCanvas.width, emissiveCanvas.height);
+  }
 
   if (variant.deco) {
     context.fillStyle = '#d9d2c5';
@@ -192,11 +205,22 @@ function makeFacadeTexture(random, variant) {
     const litStart = (offset + Math.floor(row / 4)) % (columns - 1);
     for (let column = 0; column < columns; column += 1) {
       const lit = (row + offset) % 4 === 1 && column >= litStart && column < litStart + 2;
+      // Night windows use stable, facade-variant-seeded groups. This deliberately avoids
+      // the shared city RNG so changing the night artwork cannot move any generated lots.
+      const groupHash = stableHash(Math.floor(column / 2), Math.floor(row / 2), 100 + variantIndex);
+      const cellHash = stableHash(column, row, 200 + variantIndex);
+      const windowLit = groupHash < (0.35 + stableHash(variantIndex, 7, 300) * 0.2)
+        && (cellHash > 0.12 || groupHash < 0.2);
+      const cool = stableHash(Math.floor(column / 2), Math.floor(row / 2), 400 + variantIndex) > 0.48;
       if (variant.glass) {
         const x = column * cellW + 3;
         const y = row * cellH + 5;
         context.fillStyle = lit ? '#d9bd97' : '#71828c';
         context.fillRect(x, y, cellW - 6, cellH - 8);
+        if (windowLit && emissiveContext) {
+          emissiveContext.fillStyle = cool ? '#8ddcff' : '#ffd18c';
+          emissiveContext.fillRect(x, y, cellW - 6, cellH - 8);
+        }
       } else {
         const marginX = variant.office ? 5 : 7;
         const x = column * cellW + marginX;
@@ -207,6 +231,10 @@ function makeFacadeTexture(random, variant) {
         context.fillRect(x - 1, y - 1, w + 2, h + 2);
         context.fillStyle = lit ? '#ddbe94' : '#54616d';
         context.fillRect(x, y, w, h);
+        if (windowLit && emissiveContext) {
+          emissiveContext.fillStyle = cool ? '#8ddcff' : '#ffd18c';
+          emissiveContext.fillRect(x, y, w, h);
+        }
       }
     }
   }
@@ -219,7 +247,14 @@ function makeFacadeTexture(random, variant) {
   texture.wrapT = THREE.RepeatWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 2;
-  return texture;
+  const emissiveMap = emissiveContext ? new THREE.CanvasTexture(emissiveCanvas) : null;
+  if (emissiveMap) {
+    emissiveMap.wrapS = THREE.RepeatWrapping;
+    emissiveMap.wrapT = THREE.RepeatWrapping;
+    emissiveMap.colorSpace = THREE.SRGBColorSpace;
+    emissiveMap.anisotropy = 2;
+  }
+  return { map: texture, emissiveMap };
 }
 
 /** Shared soft falloff for neon spill and lamp halos; generated once per city, never an image. */
@@ -877,7 +912,7 @@ export function createCity(random, reservedPlaces = []) {
     { shop: true },
     {},
   ];
-  const facadeVariants = facadePatterns.map((variant) => makeFacadeTexture(random, variant));
+  const facadeVariants = facadePatterns.map((variant, index) => makeFacadeTexture(random, variant, index));
   const towerPattern = { tower: true };
   const towerFacadeMaterials = new Map();
   const downtownFacades = new Map();
@@ -889,8 +924,8 @@ export function createCity(random, reservedPlaces = []) {
     const params = {
       color: shade(downtown ? 0xb4cee7 : 0x739bb0, (variant - 3.5) * 0.012),
       ...makeTowerFacadeTextures(variant * 137 + 29, downtown),
-      emissive: downtown ? 0xffffff : 0x1d6283,
-      emissiveIntensity: 0.38 + (variant % 4) * 0.1,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.08,
     };
     const material = downtown
       ? new THREE.MeshPhongMaterial({ ...params, shininess: 32, specular: 0x607789 })
@@ -903,8 +938,13 @@ export function createCity(random, reservedPlaces = []) {
   function facadeMaterial(variant, color) {
     const key = `${variant}:${color}`;
     if (materialCache.has(key)) return materialCache.get(key);
-    const map = facadeVariants[variant];
-    const material = new THREE.MeshLambertMaterial({ color: shade(color, 0.06), map });
+    const textures = facadeVariants[variant];
+    const material = new THREE.MeshLambertMaterial({
+      color: shade(color, 0.06),
+      ...textures,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.06,
+    });
     materialCache.set(key, material);
     return material;
   }
@@ -1689,14 +1729,23 @@ export function createCity(random, reservedPlaces = []) {
   if (frondMesh.instanceColor) frondMesh.instanceColor.needsUpdate = true;
   group.add(trunkMesh, frondMesh);
 
-  // Streetlights at every other intersection corner.
+  // Pair streetlights across opposite corners at each valid intersection, at
+  // furnitureOffset so the poles stay beside both crossing lanes.
   const lampSpots = [...downtownStreetLamps];
-  for (let line = 0; line <= CITY.grid; line += 2) {
-    for (let cross = 0; cross <= CITY.grid; cross += 2) {
-      const x = CITY.nodeMin + line * blockPitch + 11;
-      const z = CITY.nodeMin + cross * blockPitch + 11;
-      lampSpots.push({ x, z });
-      lampSpots.push({ x: x - 22, z: z + 11 });
+  for (let line = 0; line <= CITY.grid; line += 1) {
+    for (let cross = 0; cross <= CITY.grid; cross += 1) {
+      const nodeX = CITY.nodeMin + line * blockPitch;
+      const nodeZ = CITY.nodeMin + cross * blockPitch;
+      // Use opposite corners for a visible pair. Candidate order is fixed and
+      // adds no seeded draws, preserving all subsequent city-generation RNG.
+      for (const [sideX, sideZ] of [[1, 1], [-1, -1]]) {
+        const x = nodeX + sideX * furnitureOffset;
+        const z = nodeZ + sideZ * furnitureOffset;
+        if (x < CITY.nodeMin || x > CITY.nodeMax || z < CITY.nodeMin || z > CITY.nodeMax
+          || isReserved(x, z) || !pointIsClear(colliders, x, z, 0.65)) continue;
+        const yaw = Math.atan2(sideZ, -sideX);
+        lampSpots.push({ x, z, yaw });
+      }
     }
   }
   for (const avenueZ of boulevardAvenues) {
@@ -1704,11 +1753,13 @@ export function createCity(random, reservedPlaces = []) {
       for (const side of [-1, 1]) {
         const x = CITY.nodeMin + block * blockPitch + (side < 0 ? 26 : 46) + random.range(-0.6, 0.6);
         const z = avenueZ + side * boulevardOffset;
-        if (!isReserved(x, z) && pointIsClear(colliders, x, z, 0.65)) lampSpots.push({ x, z, glow: true });
+        if (!isReserved(x, z) && pointIsClear(colliders, x, z, 0.65)) {
+          lampSpots.push({ x, z, glow: true, yaw: side * Math.PI / 2 });
+        }
       }
     }
   }
-  // Retain the downtown prefix used by its pavement-glow indices; filtering consumes no RNG.
+  // Filter freeway corridor candidates without changing seeded random draw order.
   for (let lamp = lampSpots.length - 1; lamp >= downtownStreetLamps.length; lamp -= 1) {
     if (inFreewayCorridor(lampSpots[lamp].x, lampSpots[lamp].z, 1.2)) lampSpots.splice(lamp, 1);
   }
@@ -1724,21 +1775,23 @@ export function createCity(random, reservedPlaces = []) {
   );
   poleMesh.name = 'streetlights:poles';
   headMesh.name = 'streetlights:heads';
+  poleMesh.userData.roadInfrastructure = true;
+  headMesh.userData.roadInfrastructure = true;
   const lampGlowMaterial = new THREE.SpriteMaterial({
     map: glowTexture, color: PALETTE.lamp, opacity: 0.65, transparent: true,
     blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
   });
   const ordinaryLampGlowMaterial = lampGlowMaterial.clone();
-  const pavementGlow = new THREE.InstancedMesh(new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2),
+  const pavementGlow = new THREE.InstancedMesh(new THREE.PlaneGeometry(14, 14).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({
       map: glowTexture, color: 0xffb969, transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-    }), downtownStreetLamps.length);
-  pavementGlow.name = 'streetlights:downtown-pavement-glow';
+    }), lampSpots.length);
+  pavementGlow.name = 'streetlights:pavement-glow';
+  pavementGlow.userData.roadInfrastructure = true;
   const lampHalos = [];
   for (let lamp = 0; lamp < lampSpots.length; lamp += 1) {
     const spot = lampSpots[lamp];
-    Object.assign(spot, relocateProp(spot, { width: 2.7, depth: 2.7 }));
     palmMatrix.makeTranslation(spot.x, 0.25, spot.z);
     poleMesh.setMatrixAt(lamp, palmMatrix);
     const yaw = spot.yaw ?? 0;
@@ -1746,19 +1799,17 @@ export function createCity(random, reservedPlaces = []) {
     const dz = -Math.sin(yaw);
     palmMatrix.makeRotationY(yaw).setPosition(spot.x + dx * 0.5, 6.5, spot.z + dz * 0.5);
     headMesh.setMatrixAt(lamp, palmMatrix);
-    if (lamp < downtownStreetLamps.length) {
-      palmMatrix.makeTranslation(spot.x + dx * 1.5, 0.285, spot.z + dz * 1.5);
-      pavementGlow.setMatrixAt(lamp, palmMatrix);
-    }
+    palmMatrix.makeTranslation(spot.x + dx * 1.5, 0.285, spot.z + dz * 1.5);
+    pavementGlow.setMatrixAt(lamp, palmMatrix);
     if (glowTexture) {
       const halo = new THREE.Sprite(spot.glow ? lampGlowMaterial : ordinaryLampGlowMaterial);
       halo.name = 'streetlights:halo';
       halo.position.set(spot.x + dx * 0.5, 6.5, spot.z + dz * 0.5);
-      halo.scale.set(3.1, 3.1, 1);
+      halo.scale.set(5.2, 5.2, 1);
       lampHalos.push({ halo, avenue: spot.glow });
       group.add(halo);
     }
-    colliders.push({ minX: spot.x - 0.2, maxX: spot.x + 0.2, minZ: spot.z - 0.2, maxZ: spot.z + 0.2, height: 6.65 });
+    colliders.push({ roadInfrastructure: true, minX: spot.x - 0.2, maxX: spot.x + 0.2, minZ: spot.z - 0.2, maxZ: spot.z + 0.2, height: 6.65 });
   }
   poleMesh.instanceMatrix.needsUpdate = true;
   headMesh.instanceMatrix.needsUpdate = true;
@@ -1825,12 +1876,15 @@ export function createCity(random, reservedPlaces = []) {
     const evening = Math.min(night / SUNSET_NIGHT_FACTOR, 1);
     const afterSunset = Math.max((night - SUNSET_NIGHT_FACTOR) / (1 - SUNSET_NIGHT_FACTOR), 0);
     const lateGlow = afterSunset * afterSunset * (3 - 2 * afterSunset);
-    headMesh.material.emissiveIntensity = 1.2 * evening + 0.6 * lateGlow;
-    lampGlowMaterial.opacity = 0.65 * evening + 0.26 * lateGlow;
-    ordinaryLampGlowMaterial.opacity = 0.74 * lateGlow;
-    pavementGlow.material.opacity = 0.27 * evening + 0.19 * lateGlow;
+    headMesh.material.emissiveIntensity = 1.3 * evening + 0.75 * lateGlow;
+    lampGlowMaterial.opacity = 0.72 * evening + 0.28 * lateGlow;
+    ordinaryLampGlowMaterial.opacity = 0.95 * lateGlow;
+    pavementGlow.material.opacity = 0.34 * evening + 0.42 * lateGlow;
     pavementGlow.visible = Boolean(glowTexture) && pavementGlow.material.opacity > 0;
-    for (const material of downtownFacades.values()) material.emissiveIntensity = 0.12 + 0.48 * evening + 0.68 * lateGlow;
+    const facadeEmission = 0.06 + 0.7 * evening + 0.48 * lateGlow;
+    for (const material of materialCache.values()) material.emissiveIntensity = facadeEmission;
+    for (const material of towerFacadeMaterials.values()) material.emissiveIntensity = facadeEmission;
+    for (const material of downtownFacades.values()) material.emissiveIntensity = 0.08 + 0.82 * evening + 0.7 * lateGlow;
     for (const material of roofNeon) material.emissiveIntensity = 0.12 + 0.66 * evening + 0.42 * lateGlow;
     for (const { halo, avenue } of lampHalos) {
       halo.visible = avenue ? lampGlowMaterial.opacity > 0 : ordinaryLampGlowMaterial.opacity > 0;

@@ -365,13 +365,13 @@ export const DAYNIGHT = [
     minute: 0, azimuth: 20, elevation: -52,
     sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
     sky: 0x101b38, skyRose: 0x242b50, skyTop: 0x080f28, fog: 0x151d34, fogDensity: 1 / 860,
-    hemiSky: 0x98a9ce, hemiGround: 0x6b627d, hemiIntensity: 0.44, nightFactor: 1, headlights: 1,
+    hemiSky: 0x98a9ce, hemiGround: 0x6b627d, hemiIntensity: 0.86, nightFactor: 1, headlights: 1,
   },
   {
     minute: 300, azimuth: 65, elevation: -11,
     sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
     sky: 0x323659, skyRose: 0x77546e, skyTop: 0x232d50, fog: 0x393957, fogDensity: 1 / 900,
-    hemiSky: 0x98a3c1, hemiGround: 0x6b627d, hemiIntensity: 0.46, nightFactor: 0.94, headlights: 1,
+    hemiSky: 0x98a3c1, hemiGround: 0x6b627d, hemiIntensity: 0.84, nightFactor: 0.94, headlights: 1,
   },
   {
     minute: 330, azimuth: 76, elevation: 0,
@@ -427,13 +427,13 @@ export const DAYNIGHT = [
     minute: 1230, azimuth: 354, elevation: -11,
     sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
     sky: 0x382c50, skyRose: 0x695072, skyTop: 0x24244a, fog: 0x3b3354, fogDensity: 1 / 900,
-    hemiSky: 0x98a5c6, hemiGround: 0x715d74, hemiIntensity: 0.45, nightFactor: 1, headlights: 1,
+    hemiSky: 0x98a5c6, hemiGround: 0x715d74, hemiIntensity: 0.85, nightFactor: 1, headlights: 1,
   },
   {
     minute: 1260, azimuth: 359, elevation: -20,
     sun: 0xffb38a, sunIntensity: 0, sunDisc: 0,
     sky: 0x101b38, skyRose: 0x242b50, skyTop: 0x080f28, fog: 0x151d34, fogDensity: 1 / 860,
-    hemiSky: 0x98a9ce, hemiGround: 0x6b627d, hemiIntensity: 0.44, nightFactor: 1, headlights: 1,
+    hemiSky: 0x98a9ce, hemiGround: 0x6b627d, hemiIntensity: 0.88, nightFactor: 1, headlights: 1,
   },
 ];
 
