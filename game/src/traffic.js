@@ -1,6 +1,7 @@
 // Ambient traffic follows the road graph. Pedestrians walk between curbs and cross near corners.
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, TRAFFIC, VEHICLE } from './config.js';
+import { roadConflict } from './roads.js';
 import { resolveCollisions } from './world.js';
 
 const PED_LIMIT = 72;
@@ -21,6 +22,7 @@ const trafficGeometry = {
 };
 const ambientMaterials = new Map();
 const pantsColors = [0x2f3a4a, 0x4a3d2f, 0x2c3230, 0x5a5040];
+const pedStride = (phase) => Math.sin(phase) * 0.55;
 
 function ambientMaterial(color) {
   if (!ambientMaterials.has(color)) ambientMaterials.set(color, new THREE.MeshLambertMaterial({ color }));
@@ -51,9 +53,84 @@ function pedMesh(random) {
   return { group, legs };
 }
 
+// Passersby on short paved paths behind the curb use traffic's pedestrian models.
+function createSidewalkWalkers(parent, routes, random) {
+  const group = new THREE.Group();
+  group.name = 'Sidewalk passersby';
+  parent.add(group);
+  const walkers = [];
+  for (const { x, z, axis, length } of routes) {
+    const acrossX = axis === 'x';
+    if (roadConflict({ x, z, width: (acrossX ? length : 0) + 1.2,
+      depth: (acrossX ? 0 : length) + 1.2 })) continue;
+    walkers.push({ x, z, acrossX, length,
+      distance: random.range(0, length * 2),
+      speed: random.range(TRAFFIC.pedSpeedMin, TRAFFIC.pedSpeedMax),
+      walk: random.range(0, Math.PI * 2),
+    });
+  }
+  if (!walkers.length) return { count: 0, update() {} };
+
+  const batch = (part, copies = 1) => {
+    const mesh = new THREE.InstancedMesh(trafficGeometry[part], ambientMaterial(0xffffff), walkers.length * copies);
+    mesh.name = `sidewalk-pedestrian:${part}`;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // This citywide batch moves within its reserved paths.
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    return mesh;
+  };
+  const torsos = batch('torso'), heads = batch('head'), legs = batch('leg', 2), arms = batch('arm', 2);
+  const color = new THREE.Color();
+  for (let index = 0; index < walkers.length; index += 1) {
+    torsos.setColorAt(index, color.setHex(random.pick(PALETTE.npc.shirt)));
+    arms.setColorAt(index * 2, color);
+    arms.setColorAt(index * 2 + 1, color);
+    heads.setColorAt(index, color.setHex(random.pick(PALETTE.npc.skin)));
+    color.setHex(random.pick(pantsColors));
+    legs.setColorAt(index * 2, color);
+    legs.setColorAt(index * 2 + 1, color);
+  }
+  const pose = new THREE.Object3D();
+  pose.rotation.order = 'YXZ';
+  function place(mesh, index, x, y, z, yaw, pitch = 0) {
+    pose.position.set(x, y + 0.28, z);
+    pose.rotation.set(pitch, yaw, 0);
+    pose.updateMatrix();
+    mesh.setMatrixAt(index, pose.matrix);
+  }
+  function update(dt) {
+    for (let index = 0; index < walkers.length; index += 1) {
+      const ped = walkers[index];
+      ped.distance = (ped.distance + dt * ped.speed) % (ped.length * 2);
+      ped.walk = (ped.walk + dt * ped.speed * 4.2) % (Math.PI * 2);
+      const outward = ped.distance < ped.length;
+      const along = (outward ? ped.distance : 2 * ped.length - ped.distance) - ped.length / 2;
+      const x = ped.x + (ped.acrossX ? along : 0);
+      const z = ped.z + (ped.acrossX ? 0 : along);
+      const yaw = (ped.acrossX ? Math.PI / 2 : 0) + (outward ? 0 : Math.PI);
+      const swing = pedStride(ped.walk);
+      place(torsos, index, x, 1.18, z, yaw);
+      place(heads, index, x, 1.68, z, yaw);
+      for (let side = -1; side <= 1; side += 2) {
+        const slot = index * 2 + (side + 1) / 2;
+        const dx = ped.acrossX ? 0 : side;
+        const dz = ped.acrossX ? side : 0;
+        place(legs, slot, x + dx * 0.11, 0.4, z + dz * 0.11, yaw, swing * side);
+        place(arms, slot, x + dx * 0.3, 1.2, z + dz * 0.3, yaw, -swing * side);
+      }
+    }
+    torsos.instanceMatrix.needsUpdate = heads.instanceMatrix.needsUpdate =
+      legs.instanceMatrix.needsUpdate = arms.instanceMatrix.needsUpdate = true;
+  }
+  update(0);
+  return { count: walkers.length, update };
+}
+
 export function createTraffic(city, scene, random) {
   const trafficCars = [];
   const peds = [];
+  let sidewalkWalkers = null;
   const carTarget = Math.min(TRAFFIC.cars * SPAWN_DENSITY.cars, 96);
   const pedTarget = Math.min(TRAFFIC.pedestrians * SPAWN_DENSITY.pedestrians, PED_LIMIT);
   const carSpecs = PALETTE.cars;
@@ -573,7 +650,7 @@ export function createTraffic(city, scene, random) {
     ped.walk += dt * ped.speed * 4.2;
     ped.group.position.set(ped.x, groundHeightAt(ped.x, ped.z) + 0.28, ped.z);
     ped.group.rotation.y = ped.heading;
-    const swing = Math.sin(ped.walk) * 0.55;
+    const swing = pedStride(ped.walk);
     ped.legs[0].rotation.x = swing;
     ped.legs[1].rotation.x = -swing;
     return true;
@@ -581,6 +658,7 @@ export function createTraffic(city, scene, random) {
 
   function update(dt, player, vehicles) {
     if (!Number.isFinite(dt) || dt <= 0) return;
+    sidewalkWalkers?.update(dt);
     for (let index = 0; index < trafficCars.length; index += 1) {
       const car = trafficCars[index];
       const previousX = car.x;
@@ -639,6 +717,10 @@ export function createTraffic(city, scene, random) {
     horn,
     onGunshot,
     update,
+    addSidewalkWalkers(parent, routes, walkerRandom) {
+      sidewalkWalkers = createSidewalkWalkers(parent, routes, walkerRandom);
+      return sidewalkWalkers.count;
+    },
     knockPed,
     nearestPed,
     reset,

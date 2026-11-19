@@ -7,7 +7,9 @@ import {
 } from './config.js';
 import { currentDifficulty, setDifficulty } from './difficulty.js';
 import { createRandom, parseSeed } from './random.js';
-import { createCity, resolveCollisions } from './world.js';
+import { clampToWorld, createCity, resolveCollisions } from './world.js';
+import { createBeachActivity } from './beach-activity.js';
+import { createCityInfill } from './city-infill.js';
 import { createDistricts } from './districts.js';
 import { createLandmarks } from './landmarks.js';
 import { createPlayer } from './player.js';
@@ -216,6 +218,20 @@ function makeGame(seedValue, shotName = null) {
       saveNow();
     },
   });
+  const cityInfill = createCityInfill({
+    city, scene: renderer.scene, random: createRandom(seedValue ^ 0xc171),
+    reserved: [
+      ...parked.map(({ x, z }) => ({ x, z, radius: 4 })),
+      ...landmarks.list.map(({ x, z }) => ({ x, z, radius: 8 })),
+      ...collectibles.list.map(({ x, z }) => ({ x, z, radius: 3 })),
+      ...missions.list.map(({ start }) => ({ ...start, radius: 8 })),
+      ...[...assets.list, ...restaurants.list, ...safehouses.list].map(({ x, z }) => ({ x, z, radius: 6 })),
+      { ...city.landmarks.garage, radius: 21 },
+    ],
+  });
+  cityInfill.counts.pedestrians = traffic.addSidewalkWalkers(cityInfill.group,
+    cityInfill.pedestrianRoutes, createRandom(seedValue ^ 0x51de));
+  const beachActivity = createBeachActivity(city.group);
   let shotMode = Boolean(shotName);
   let frameId = null;
   let shotFrameId = null;
@@ -1108,6 +1124,7 @@ function makeGame(seedValue, shotName = null) {
     advanceClockAndRadio(state, dt);
     radio.update(dt);
     districts.update(dt);
+    beachActivity.update(dt);
     state.pedHitCooldown = Math.max(0, state.pedHitCooldown - dt);
     if (player.state.inCar) {
       const car = player.state.inCar;
@@ -1345,7 +1362,7 @@ function makeGame(seedValue, shotName = null) {
 
   const game = {
 
-    seed: seedValue, city, districts, landmarks, collectibles, renderer, player, jetpack, vehicles, traffic, police, combat, audio, respray,
+    seed: seedValue, city, cityInfill, beachActivity, districts, landmarks, collectibles, renderer, player, jetpack, vehicles, traffic, police, combat, audio, respray,
     hud, missions, regions, rep, assets, restaurants, safehouses, gangs, stats, vehicleJobs, races, radio, input, state, orbit, setScreen, startRun, restart, pause, resume,
 
     boot, beginShot, refreshHud, saveNow, completeMission, busted, gameOver,

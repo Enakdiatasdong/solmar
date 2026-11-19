@@ -4,7 +4,7 @@ import { roadConflict, relocateFootprint } from './roads.js';
 
 export const relocateProp = relocateFootprint;
 
-function visitFootprints(root, visit) {
+export function visitFootprints(root, visit) {
   root.updateMatrixWorld(true);
   const instance = new THREE.Matrix4(), world = new THREE.Matrix4();
   const vertex = new THREE.Vector3();
