@@ -1692,59 +1692,253 @@ export function createCity(random, reservedPlaces = []) {
       downtownStreetLamps.push({ x, z, glow: true, yaw });
     }
   }
-  const frondsPerPalm = 7;
-  const trunkMesh = new THREE.InstancedMesh(
-    new THREE.CylinderGeometry(0.2, 0.36, 1, 6).translate(0, 0.5, 0),
-    new THREE.MeshLambertMaterial({ color: PALETTE.trunk }),
-    palmSpots.length,
-  );
-  const frondMesh = new THREE.InstancedMesh(
-    new THREE.ConeGeometry(0.62, 3.3, 4).translate(0, 1.65, 0),
-    new THREE.MeshLambertMaterial({ color: PALETTE.leaf, flatShading: true }),
-    palmSpots.length * frondsPerPalm,
-  );
+  // Palm geometry is shared across every instance. Fronds run along +X so the
+  // same curved blade can be fanned around a crown with a single Y rotation.
+  const frondsPerPalm = 9;
+  const oldFrondsPerPalm = 7;
+  const frondSegments = 6;
+  const frondLength = 3.45;
+  const frondHalfWidth = 0.53;
+  const palmFrondY = (t) => -0.06 + 0.82 * Math.sin(Math.PI * t) - 0.8 * t * t;
+  const trunkGeometry = new THREE.BufferGeometry();
+  const trunkPositions = [];
+  const trunkColors = [];
+  const trunkIndices = [];
+  const trunkRings = 7;
+  const trunkRadialSegments = 10;
+  const trunkTip = new THREE.Vector3();
+  for (let ring = 0; ring < trunkRings; ring += 1) {
+    const t = ring / (trunkRings - 1);
+    const radius = 0.36 + (0.2 - 0.36) * t + Math.sin(t * Math.PI) * 0.012;
+    const bendX = 0.48 * t * t;
+    const bendZ = 0.12 * Math.sin(Math.PI * t / 2);
+    if (ring === trunkRings - 1) trunkTip.set(bendX, t, bendZ);
+    const shade = new THREE.Color(PALETTE.trunk).offsetHSL(0, 0, (ring % 2 ? -0.035 : 0.015));
+    for (let side = 0; side < trunkRadialSegments; side += 1) {
+      const angle = side / trunkRadialSegments * Math.PI * 2;
+      trunkPositions.push(
+        bendX + Math.cos(angle) * radius,
+        t,
+        bendZ + Math.sin(angle) * radius,
+      );
+      trunkColors.push(shade.r, shade.g, shade.b);
+    }
+  }
+  for (let ring = 0; ring < trunkRings - 1; ring += 1) {
+    for (let side = 0; side < trunkRadialSegments; side += 1) {
+      const next = (side + 1) % trunkRadialSegments;
+      const a = ring * trunkRadialSegments + side;
+      const b = ring * trunkRadialSegments + next;
+      const c = (ring + 1) * trunkRadialSegments + next;
+      const d = (ring + 1) * trunkRadialSegments + side;
+      trunkIndices.push(a, d, b, b, d, c);
+    }
+  }
+  for (let side = 1; side < trunkRadialSegments - 1; side += 1) {
+    trunkIndices.push(0, side, side + 1);
+    const top = (trunkRings - 1) * trunkRadialSegments;
+    trunkIndices.push(top, top + side + 1, top + side);
+  }
+  trunkGeometry.setAttribute('position', new THREE.Float32BufferAttribute(trunkPositions, 3));
+  trunkGeometry.setAttribute('color', new THREE.Float32BufferAttribute(trunkColors, 3));
+  trunkGeometry.setIndex(trunkIndices);
+  trunkGeometry.computeVertexNormals();
+
+  const frondGeometry = new THREE.BufferGeometry();
+  const frondPositions = [];
+  const frondIndices = [];
+  for (let segment = 0; segment <= frondSegments; segment += 1) {
+    const t = segment / frondSegments;
+    const x = frondLength * t;
+    const width = 0.015 + 0.12 * (1 - t) + 0.43 * Math.sin(Math.PI * t) * (1 - 0.17 * t);
+    const thickness = 0.13 * (1 - 0.88 * t);
+    const y = palmFrondY(t);
+    // A diamond section puts solid volume under the ridge and tapers to thin edges.
+    frondPositions.push(
+      x, y + thickness, 0,
+      x, y, width,
+      x, y - thickness, 0,
+      x, y, -width,
+    );
+  }
+  for (let segment = 0; segment < frondSegments; segment += 1) {
+    const a = segment * 4;
+    const b = a + 4;
+    frondIndices.push(
+      a, b + 1, b, a, a + 1, b + 1,
+      a + 1, b + 2, b + 1, a + 1, a + 2, b + 2,
+      a + 2, b + 3, b + 2, a + 2, a + 3, b + 3,
+      a + 3, b, b + 3, a + 3, a, b,
+    );
+  }
+  frondIndices.push(0, 3, 2, 0, 2, 1);
+  const frondTip = frondSegments * 4;
+  frondIndices.push(frondTip, frondTip + 1, frondTip + 2, frondTip, frondTip + 2, frondTip + 3);
+  frondGeometry.setAttribute('position', new THREE.Float32BufferAttribute(frondPositions, 3));
+  frondGeometry.setIndex(frondIndices);
+  frondGeometry.computeVertexNormals();
+
+  const ribGeometry = new THREE.BufferGeometry();
+  const ribPositions = [];
+  const ribIndices = [];
+  const ribRadialSegments = 3;
+  for (let segment = 0; segment < frondSegments; segment += 1) {
+    const t = segment / frondSegments;
+    const x = frondLength * t;
+    const y = palmFrondY(t) + 0.13 * (1 - 0.88 * t) - 0.008;
+    const radius = 0.033 - 0.018 * t;
+    for (let side = 0; side < ribRadialSegments; side += 1) {
+      const angle = side / ribRadialSegments * Math.PI * 2;
+      ribPositions.push(x, y + Math.cos(angle) * radius, Math.sin(angle) * radius);
+    }
+  }
+  for (let segment = 0; segment < frondSegments - 1; segment += 1) {
+    for (let side = 0; side < ribRadialSegments; side += 1) {
+      const next = (side + 1) % ribRadialSegments;
+      const a = segment * ribRadialSegments + side;
+      const b = segment * ribRadialSegments + next;
+      const c = (segment + 1) * ribRadialSegments + next;
+      const d = (segment + 1) * ribRadialSegments + side;
+      ribIndices.push(a, b, d, b, c, d);
+    }
+  }
+  ribGeometry.setAttribute('position', new THREE.Float32BufferAttribute(ribPositions, 3));
+  ribGeometry.setIndex(ribIndices);
+  ribGeometry.computeVertexNormals();
+
+  const coconutGeometry = new THREE.SphereGeometry(0.16, 7, 5);
+  const trunkMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  const leafMaterial = new THREE.MeshLambertMaterial({
+    emissive: 0x1c542d,
+    emissiveIntensity: 0.28,
+    side: THREE.DoubleSide,
+  });
+  const ribMaterial = new THREE.MeshLambertMaterial({
+    color: PALETTE.leafLight,
+    emissive: PALETTE.leafLight,
+    emissiveIntensity: 0.16,
+  });
+  const coconutMaterial = new THREE.MeshLambertMaterial({ color: PALETTE.trunk });
+  const renderPalm = palmSpots.map(({ x, z, scale }) =>
+    !roadConflict({ x, z, width: 8 * scale, depth: 8 * scale }) && !isReserved(x, z)
+    && !inCanal(x, z, 2.4) && !inFreewayCorridor(x, z, 1.5)
+    // A trunk planted inside (or hard against) a solid — e.g. a park palm under a
+    // tower footprint — would grow through the facade, so hide it like the
+    // downtown/boulevard spots already do via pointIsClear at collection time.
+    && pointIsClear(colliders, x, z, 0.75));
+  const visiblePalmCount = renderPalm.filter(Boolean).length;
+  const trunkMesh = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, visiblePalmCount);
+  const frondMesh = new THREE.InstancedMesh(frondGeometry, leafMaterial, visiblePalmCount * frondsPerPalm);
+  const ribMesh = new THREE.InstancedMesh(ribGeometry, ribMaterial, visiblePalmCount * frondsPerPalm);
+  const coconutMesh = new THREE.InstancedMesh(coconutGeometry, coconutMaterial, visiblePalmCount * 3);
   trunkMesh.name = 'palms:trunks';
   frondMesh.name = 'palms:fronds';
-  trunkMesh.castShadow = true;
-  frondMesh.castShadow = true;
+  ribMesh.name = 'palms:ribs';
+  coconutMesh.name = 'palms:coconuts';
+  trunkMesh.castShadow = frondMesh.castShadow = true;
   const palmMatrix = new THREE.Matrix4();
   const palmQuat = new THREE.Quaternion();
+  const palmRotation = new THREE.Euler(0, 0, 0, 'YXZ');
   const palmScale = new THREE.Vector3();
   const palmPosition = new THREE.Vector3();
+  const crownCenter = new THREE.Vector3();
+  const coconutPosition = new THREE.Vector3();
   const leafTint = new THREE.Color();
+  let trunkIndex = 0;
   let frondIndex = 0;
+  let coconutIndex = 0;
+  const crownObstacles = colliders.slice();
+  const rayClearance = (x, z, directionX, directionZ, maxDistance, minY, padding) => {
+    let clearance = maxDistance;
+    for (const box of crownObstacles) {
+      if (box.roadInfrastructure || (Number.isFinite(box.height) && box.height < minY)) continue;
+      let tMin = 0;
+      let tMax = clearance;
+      if (Math.abs(directionX) < 1e-7) {
+        if (x < box.minX - padding || x > box.maxX + padding) continue;
+      } else {
+        const near = (box.minX - padding - x) / directionX;
+        const far = (box.maxX + padding - x) / directionX;
+        tMin = Math.max(tMin, Math.min(near, far));
+        tMax = Math.min(tMax, Math.max(near, far));
+      }
+      if (tMax < tMin) continue;
+      if (Math.abs(directionZ) < 1e-7) {
+        if (z < box.minZ - padding || z > box.maxZ + padding) continue;
+      } else {
+        const near = (box.minZ - padding - z) / directionZ;
+        const far = (box.maxZ + padding - z) / directionZ;
+        tMin = Math.max(tMin, Math.min(near, far));
+        tMax = Math.min(tMax, Math.max(near, far));
+      }
+      if (tMin <= tMax && tMin < clearance) clearance = tMin;
+    }
+    return clearance;
+  };
   for (let palm = 0; palm < palmSpots.length; palm += 1) {
     const spot = palmSpots[palm];
     const palmRandom = palm >= firstDowntownPalm ? downtownRandom : random;
-    const hidden = Boolean(roadConflict({ x: spot.x, z: spot.z, width: 8 * spot.scale, depth: 8 * spot.scale })) || isReserved(spot.x, spot.z) || inCanal(spot.x, spot.z, 2.4)
-      || inFreewayCorridor(spot.x, spot.z, 1.5);
+    const yaw = palmRandom.range(0, Math.PI * 2);
+    // Preserve the old trunk yaw and four draws per original blade, even for rejected spots.
+    if (!renderPalm[palm]) {
+      for (let draw = 0; draw < oldFrondsPerPalm * 4; draw += 1) palmRandom();
+      continue;
+    }
     const height = 7.2 * spot.scale;
-    palmPosition.set(spot.x, 0.2, spot.z);
-    palmScale.set(spot.scale, height, spot.scale);
-    palmQuat.setFromEuler(new THREE.Euler(spot.x * 0.0006, palmRandom.range(0, Math.PI * 2), spot.z * 0.0005));
-    if (hidden) palmScale.set(0, 0, 0);
+    palmPosition.set(spot.x, 0, spot.z);
+    palmScale.set(spot.scale, height + 0.2, spot.scale);
+    palmQuat.setFromEuler(palmRotation.set(0, yaw, 0));
     palmMatrix.compose(palmPosition, palmQuat, palmScale);
-    trunkMesh.setMatrixAt(palm, palmMatrix);
+    trunkMesh.setMatrixAt(trunkIndex++, palmMatrix);
+    crownCenter.copy(trunkTip).applyMatrix4(palmMatrix);
     const trunkRadius = 0.36 * spot.scale;
-    if (!hidden) colliders.push({ minX: spot.x - trunkRadius, maxX: spot.x + trunkRadius, minZ: spot.z - trunkRadius, maxZ: spot.z + trunkRadius, height: 0.2 + height });
+    const trunkCollider = { minX: spot.x - trunkRadius, maxX: spot.x + trunkRadius,
+      minZ: spot.z - trunkRadius, maxZ: spot.z + trunkRadius, height: 0.2 + height };
     for (let frond = 0; frond < frondsPerPalm; frond += 1) {
-      const angle = (frond / frondsPerPalm) * Math.PI * 2 + palmRandom.range(-0.2, 0.2);
-      const tilt = palmRandom.range(0.9, 1.35);
-      palmQuat.setFromEuler(new THREE.Euler(tilt, angle, 0, 'YXZ'));
-      palmPosition.set(spot.x, 0.2 + height, spot.z);
-      palmScale.set(1.15 * spot.scale, 1.15 * spot.scale, 0.32 * spot.scale);
-      if (hidden) palmScale.set(0, 0, 0);
-      palmMatrix.compose(palmPosition, palmQuat, palmScale);
-      if (frondIndex < frondMesh.count) frondMesh.setMatrixAt(frondIndex, palmMatrix);
-      leafTint.setHex(palmRandom.chance(0.5) ? PALETTE.leaf : PALETTE.leafLight).offsetHSL(0, 0, palmRandom.range(-0.04, 0.04));
+      const original = frond < oldFrondsPerPalm;
+      const jitter = original ? palmRandom.range(-0.2, 0.2) : 0;
+      const rise = original ? palmRandom.range(-0.08, 0.14) : 0.04;
+      const angle = yaw + (frond / frondsPerPalm) * Math.PI * 2 + jitter;
+      const tilt = rise + (frond % 3 === 0 ? 0.18 : 0);
+      palmQuat.setFromEuler(palmRotation.set(0, angle, tilt));
+      // Make room for the blade width and the horizontal reach of its tilted arc.
+      const sweep = frondLength * spot.scale;
+      const arcReach = Math.abs(Math.sin(tilt)) * spot.scale;
+      const available = rayClearance(crownCenter.x, crownCenter.z, Math.cos(angle), -Math.sin(angle),
+        sweep, crownCenter.y - 0.92 * spot.scale + Math.min(0, Math.sin(tilt) * sweep),
+        frondHalfWidth * spot.scale + arcReach + 0.12);
+      const radialScale = Math.max(0.04, available / frondLength);
+      palmScale.set(radialScale, spot.scale, spot.scale);
+      palmMatrix.compose(crownCenter, palmQuat, palmScale);
+      frondMesh.setMatrixAt(frondIndex, palmMatrix);
+      const leafChoice = original ? palmRandom.chance(0.5) : frond % 2 === 0;
+      const tintJitter = original ? palmRandom.range(-0.04, 0.04) : 0;
+      leafTint.setHex(leafChoice ? PALETTE.leaf : PALETTE.leafLight).offsetHSL(0, 0, tintJitter);
       frondMesh.setColorAt(frondIndex, leafTint);
+      ribMesh.setMatrixAt(frondIndex, palmMatrix);
       frondIndex += 1;
     }
+    palmQuat.setFromEuler(palmRotation.set(0, yaw, 0));
+    for (let coconut = 0; coconut < 3; coconut += 1) {
+      const angle = coconut / 3 * Math.PI * 2 + yaw;
+      coconutPosition.set(
+        crownCenter.x + Math.cos(angle) * 0.23 * spot.scale,
+        crownCenter.y - (0.16 + 0.04 * coconut) * spot.scale,
+        crownCenter.z + Math.sin(angle) * 0.23 * spot.scale,
+      );
+      palmScale.set(spot.scale, spot.scale, spot.scale);
+      palmMatrix.compose(coconutPosition, palmQuat, palmScale);
+      coconutMesh.setMatrixAt(coconutIndex, palmMatrix);
+      coconutIndex += 1;
+    }
+    colliders.push(trunkCollider);
   }
   trunkMesh.instanceMatrix.needsUpdate = true;
   frondMesh.instanceMatrix.needsUpdate = true;
+  ribMesh.instanceMatrix.needsUpdate = true;
+  coconutMesh.instanceMatrix.needsUpdate = true;
   if (frondMesh.instanceColor) frondMesh.instanceColor.needsUpdate = true;
-  group.add(trunkMesh, frondMesh);
+  group.add(trunkMesh, frondMesh, ribMesh, coconutMesh);
 
   // Pair streetlights across opposite corners at each valid intersection, at
   // furnitureOffset so the poles stay beside both crossing lanes.
