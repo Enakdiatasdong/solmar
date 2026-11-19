@@ -5,7 +5,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR, SUNSET_MINUTE, SUNSET_NIGHT_FACTOR, GARAGE_LOCATION, HOTEL_LOCATION } from './config.js';
 import { createRandom } from './random.js';
-import { buildRoadGraph, roadConflict, fitGridFootprint } from './roads.js';
+import { buildRoadGraph, roadConflict, roadSurfaceConflict, fitGridFootprint } from './roads.js';
 import { enforceRoadClearance, relocateProp } from './static-props.js';
 
 const WINDOW_BAY = 2.65;
@@ -883,6 +883,29 @@ function pointIsClear(colliders, x, z, radius) {
   });
 }
 
+function createPalmColliderTest() {
+  const bounds = new THREE.Box3();
+  const triangle = new THREE.Triangle();
+  const vertices = [];
+  return (geometry, matrix, obstacles, ownCollider) => {
+    if (geometry.boundingBox === null) geometry.computeBoundingBox();
+    bounds.copy(geometry.boundingBox).applyMatrix4(matrix);
+    const nearby = obstacles.filter(({ collider, box }) => collider !== ownCollider && box.intersectsBox(bounds));
+    if (!nearby.length) return false;
+    const { index, attributes: { position } } = geometry;
+    for (let v = 0; v < position.count; v += 1) {
+      vertices[v] ??= new THREE.Vector3();
+      vertices[v].fromBufferAttribute(position, v).applyMatrix4(matrix);
+    }
+    for (let i = 0; i < index.count; i += 3) {
+      triangle.set(vertices[index.getX(i)], vertices[index.getX(i + 1)], vertices[index.getX(i + 2)]);
+      if (nearby.some(({ box }) => box.intersectsTriangle(triangle))) return true;
+    }
+    return false;
+  };
+}
+
+const PALM_TRUNK_RADIUS = 0.36;
 
 export function createCity(random, reservedPlaces = []) {
   validateCityConfig();
@@ -1635,13 +1658,14 @@ export function createCity(random, reservedPlaces = []) {
   // Palms: instanced trunks and fronds, along the beach, the parks and a few sidewalks.
   const palmSpots = [];
   for (let z = -330; z <= 330; z += random.range(17, 27)) {
-    palmSpots.push({ x: random.range(-410, -392), z: z + random.range(-3, 3), scale: random.range(0.9, 1.3) });
-    if (random.chance(0.45)) palmSpots.push({ x: random.range(-490, -464), z: z + random.range(-8, 8), scale: random.range(0.85, 1.15) });
+    palmSpots.push({ area: 'beach', x: random.range(-410, -392), z: z + random.range(-3, 3), scale: random.range(0.9, 1.3) });
+    if (random.chance(0.45)) palmSpots.push({ area: 'beach', x: random.range(-490, -464), z: z + random.range(-8, 8), scale: random.range(0.85, 1.15) });
   }
   for (const center of lotCenters) {
     if (!center.isPark || (center.column === 6 && center.row === 6)) continue;
     for (let tree = 0; tree < 4; tree += 1) {
       palmSpots.push({
+        area: 'park',
         x: center.x + random.range(-20, 20),
         z: center.z + random.range(-20, 20),
         scale: random.range(0.8, 1.15),
@@ -1663,7 +1687,7 @@ export function createCity(random, reservedPlaces = []) {
           // Six younger approach palms keep their crowns in the fixed, downward play view.
           const approachPalm = avenueZ === 288 && side > 0 && Math.abs(x) < 58;
           const scale = matureScale * (approachPalm ? 0.5 : 1);
-          if (pointIsClear(colliders, x, z, 0.75)) palmSpots.push({ x, z, scale });
+          if (pointIsClear(colliders, x, z, 0.75)) palmSpots.push({ area: 'boulevard', x, z, scale });
         }
       }
     }
@@ -1680,7 +1704,7 @@ export function createCity(random, reservedPlaces = []) {
       const x = northSouth ? curb : station;
       const z = northSouth ? station : curb;
       if (!isReserved(x, z) && pointIsClear(colliders, x, z, 0.75)) {
-        palmSpots.push({ x, z, scale: downtownRandom.range(0.85, 1.23) });
+        palmSpots.push({ area: 'downtown', x, z, scale: downtownRandom.range(0.85, 1.23) });
       }
     }
     const side = Math.round((line + center - CITY.pitch / 2) / CITY.pitch) % 2 === 0 ? -1 : 1;
@@ -1709,7 +1733,7 @@ export function createCity(random, reservedPlaces = []) {
   const trunkTip = new THREE.Vector3();
   for (let ring = 0; ring < trunkRings; ring += 1) {
     const t = ring / (trunkRings - 1);
-    const radius = 0.36 + (0.2 - 0.36) * t + Math.sin(t * Math.PI) * 0.012;
+    const radius = PALM_TRUNK_RADIUS + (0.2 - PALM_TRUNK_RADIUS) * t + Math.sin(t * Math.PI) * 0.012;
     const bendX = 0.48 * t * t;
     const bendZ = 0.12 * Math.sin(Math.PI * t / 2);
     if (ring === trunkRings - 1) trunkTip.set(bendX, t, bendZ);
@@ -1819,8 +1843,15 @@ export function createCity(random, reservedPlaces = []) {
     emissiveIntensity: 0.16,
   });
   const coconutMaterial = new THREE.MeshLambertMaterial({ color: PALETTE.trunk });
-  const renderPalm = palmSpots.map(({ x, z, scale }) =>
+  // Keep the pre-finalization collider snapshot identical to Fixer H. Restored
+  // sidewalk palms are rendered now, but their trunk colliders are installed
+  // only by finalizePalms after spawn-point generation.
+  const preservePalmCollider = palmSpots.map(({ x, z, scale }) =>
     !roadConflict({ x, z, width: 8 * scale, depth: 8 * scale }) && !isReserved(x, z)
+    && !inCanal(x, z, 2.4) && !inFreewayCorridor(x, z, 1.5)
+    && pointIsClear(colliders, x, z, 0.75));
+  const renderPalm = palmSpots.map(({ x, z, scale }) =>
+    !roadSurfaceConflict({ x, z, width: 0.72 * scale, depth: 0.72 * scale }) && !isReserved(x, z)
     && !inCanal(x, z, 2.4) && !inFreewayCorridor(x, z, 1.5)
     // A trunk planted inside (or hard against) a solid — e.g. a park palm under a
     // tower footprint — would grow through the facade, so hide it like the
@@ -1835,6 +1866,11 @@ export function createCity(random, reservedPlaces = []) {
   frondMesh.name = 'palms:fronds';
   ribMesh.name = 'palms:ribs';
   coconutMesh.name = 'palms:coconuts';
+  trunkMesh.userData.palmTrunk = true;
+  trunkMesh.userData.roadFootprintRadius = PALM_TRUNK_RADIUS;
+  frondMesh.userData.roadOverhang = true;
+  ribMesh.userData.roadOverhang = true;
+  coconutMesh.userData.roadOverhang = true;
   trunkMesh.castShadow = frondMesh.castShadow = true;
   const palmMatrix = new THREE.Matrix4();
   const palmQuat = new THREE.Quaternion();
@@ -1847,6 +1883,7 @@ export function createCity(random, reservedPlaces = []) {
   let trunkIndex = 0;
   let frondIndex = 0;
   let coconutIndex = 0;
+  const palmRecords = [];
   const crownObstacles = colliders.slice();
   const rayClearance = (x, z, directionX, directionZ, maxDistance, minY, padding) => {
     let clearance = maxDistance;
@@ -1879,21 +1916,18 @@ export function createCity(random, reservedPlaces = []) {
     const spot = palmSpots[palm];
     const palmRandom = palm >= firstDowntownPalm ? downtownRandom : random;
     const yaw = palmRandom.range(0, Math.PI * 2);
-    // Preserve the old trunk yaw and four draws per original blade, even for rejected spots.
-    if (!renderPalm[palm]) {
-      for (let draw = 0; draw < oldFrondsPerPalm * 4; draw += 1) palmRandom();
-      continue;
-    }
+    const initiallyVisible = renderPalm[palm];
     const height = 7.2 * spot.scale;
     palmPosition.set(spot.x, 0, spot.z);
     palmScale.set(spot.scale, height + 0.2, spot.scale);
     palmQuat.setFromEuler(palmRotation.set(0, yaw, 0));
     palmMatrix.compose(palmPosition, palmQuat, palmScale);
-    trunkMesh.setMatrixAt(trunkIndex++, palmMatrix);
+    if (initiallyVisible) trunkMesh.setMatrixAt(trunkIndex++, palmMatrix);
     crownCenter.copy(trunkTip).applyMatrix4(palmMatrix);
     const trunkRadius = 0.36 * spot.scale;
     const trunkCollider = { minX: spot.x - trunkRadius, maxX: spot.x + trunkRadius,
-      minZ: spot.z - trunkRadius, maxZ: spot.z + trunkRadius, height: 0.2 + height };
+      minZ: spot.z - trunkRadius, maxZ: spot.z + trunkRadius, height: 0.2 + height, palmTrunk: true };
+    const record = { spot, yaw, height, crownCenter: crownCenter.clone(), trunkCollider, collider: trunkCollider, fronds: [], coconuts: [] };
     for (let frond = 0; frond < frondsPerPalm; frond += 1) {
       const original = frond < oldFrondsPerPalm;
       const jitter = original ? palmRandom.range(-0.2, 0.2) : 0;
@@ -1910,13 +1944,16 @@ export function createCity(random, reservedPlaces = []) {
       const radialScale = Math.max(0.04, available / frondLength);
       palmScale.set(radialScale, spot.scale, spot.scale);
       palmMatrix.compose(crownCenter, palmQuat, palmScale);
-      frondMesh.setMatrixAt(frondIndex, palmMatrix);
+      if (initiallyVisible) frondMesh.setMatrixAt(frondIndex, palmMatrix);
       const leafChoice = original ? palmRandom.chance(0.5) : frond % 2 === 0;
       const tintJitter = original ? palmRandom.range(-0.04, 0.04) : 0;
       leafTint.setHex(leafChoice ? PALETTE.leaf : PALETTE.leafLight).offsetHSL(0, 0, tintJitter);
-      frondMesh.setColorAt(frondIndex, leafTint);
-      ribMesh.setMatrixAt(frondIndex, palmMatrix);
-      frondIndex += 1;
+      if (initiallyVisible) {
+        frondMesh.setColorAt(frondIndex, leafTint);
+        ribMesh.setMatrixAt(frondIndex, palmMatrix);
+        frondIndex += 1;
+      }
+      record.fronds.push({ angle, tilt, radialScale, tint: leafTint.clone() });
     }
     palmQuat.setFromEuler(palmRotation.set(0, yaw, 0));
     for (let coconut = 0; coconut < 3; coconut += 1) {
@@ -1928,10 +1965,14 @@ export function createCity(random, reservedPlaces = []) {
       );
       palmScale.set(spot.scale, spot.scale, spot.scale);
       palmMatrix.compose(coconutPosition, palmQuat, palmScale);
-      coconutMesh.setMatrixAt(coconutIndex, palmMatrix);
-      coconutIndex += 1;
+      if (initiallyVisible) coconutMesh.setMatrixAt(coconutIndex, palmMatrix);
+      record.coconuts.push(coconutPosition.clone());
+      if (initiallyVisible) coconutIndex += 1;
     }
-    colliders.push(trunkCollider);
+    record.area = spot.area;
+    record.visible = initiallyVisible;
+    palmRecords.push(record);
+    if (preservePalmCollider[palm]) colliders.push(trunkCollider);
   }
   trunkMesh.instanceMatrix.needsUpdate = true;
   frondMesh.instanceMatrix.needsUpdate = true;
@@ -1942,6 +1983,103 @@ export function createCity(random, reservedPlaces = []) {
 
   // Pair streetlights across opposite corners at each valid intersection, at
   // furnitureOffset so the poles stay beside both crossing lanes.
+  // Districts, landmarks, and harbor props are built after createCity. Rebuild
+  // the palm instances once those final colliders exist, using exact triangle
+  // tests so a clipped palm is removed rather than left at a tiny scale.
+  let palmsFinalized = false;
+  const finalizePalms = () => {
+    if (palmsFinalized) return { candidates: palmSpots, visible: palmRecords.filter((record) => record.visible), hiddenForClearance: palmRecords.filter((record) => !record.visible).length };
+    const obstacles = colliders.filter((box) => !box.palmTrunk && Number.isFinite(box.height)).map((box) => ({
+      collider: box,
+      box: new THREE.Box3(new THREE.Vector3(box.minX, 0, box.minZ), new THREE.Vector3(box.maxX, box.height, box.maxZ)),
+    }));
+    const test = createPalmColliderTest();
+    const matrix = new THREE.Matrix4();
+    const quat = new THREE.Quaternion();
+    const rotation = new THREE.Euler(0, 0, 0, 'YXZ');
+    const scale = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    const makeTrunkMatrix = (record) => {
+      scale.set(record.spot.scale, record.height + 0.2, record.spot.scale);
+      quat.setFromEuler(rotation.set(0, record.yaw, 0));
+      return matrix.compose(new THREE.Vector3(record.spot.x, 0, record.spot.z), quat, scale);
+    };
+    const makeCrownMatrix = (record, frond, radial) => {
+      quat.setFromEuler(rotation.set(0, frond.angle, frond.tilt));
+      scale.set(radial, record.spot.scale, record.spot.scale);
+      return matrix.compose(center.copy(record.crownCenter), quat, scale);
+    };
+    const makeNutMatrix = (record, position) => {
+      quat.setFromEuler(rotation.set(0, record.yaw, 0));
+      scale.set(record.spot.scale, record.spot.scale, record.spot.scale);
+      return matrix.compose(position, quat, scale);
+    };
+    const safeRadial = (record, frond) => {
+      let high = frond.radialScale;
+      makeCrownMatrix(record, frond, high);
+      if (!test(frondGeometry, matrix, obstacles, record.trunkCollider)
+        && !test(ribGeometry, matrix, obstacles, record.trunkCollider)) return high;
+      let low = 0;
+      for (let iteration = 0; iteration < 14; iteration += 1) {
+        const mid = (low + high) / 2;
+        makeCrownMatrix(record, frond, mid);
+        if (test(frondGeometry, matrix, obstacles, record.trunkCollider)
+          || test(ribGeometry, matrix, obstacles, record.trunkCollider)) high = mid;
+        else low = mid;
+      }
+      return low >= 0.039 ? low : 0;
+    };
+    const kept = [];
+    for (const record of palmRecords) {
+      let safe = !roadSurfaceConflict({ x: record.spot.x, z: record.spot.z,
+        width: 0.72 * record.spot.scale, depth: 0.72 * record.spot.scale })
+        && !test(trunkGeometry, makeTrunkMatrix(record), obstacles, record.trunkCollider);
+      if (safe) {
+        for (const frond of record.fronds) {
+          frond.radialScale = safeRadial(record, frond);
+          if (!frond.radialScale) { safe = false; break; }
+        }
+      }
+      if (safe) for (const position of record.coconuts) {
+        if (test(coconutGeometry, makeNutMatrix(record, position), obstacles, record.trunkCollider)) { safe = false; break; }
+      }
+      record.visible = safe;
+      if (safe) kept.push(record);
+    }
+    for (let index = colliders.length - 1; index >= 0; index -= 1) if (colliders[index].palmTrunk) colliders.splice(index, 1);
+    for (const record of kept) colliders.push(record.trunkCollider);
+    const oldMeshes = [trunkMesh, frondMesh, ribMesh, coconutMesh];
+    oldMeshes.forEach((mesh) => mesh.removeFromParent());
+    const nextTrunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, kept.length);
+    const nextFronds = new THREE.InstancedMesh(frondGeometry, leafMaterial, kept.length * frondsPerPalm);
+    const nextRibs = new THREE.InstancedMesh(ribGeometry, ribMaterial, kept.length * frondsPerPalm);
+    const nextCoconuts = new THREE.InstancedMesh(coconutGeometry, coconutMaterial, kept.length * 3);
+    nextTrunks.name = 'palms:trunks'; nextFronds.name = 'palms:fronds'; nextRibs.name = 'palms:ribs'; nextCoconuts.name = 'palms:coconuts';
+    nextTrunks.userData.palmTrunk = true;
+    nextTrunks.userData.roadFootprintRadius = PALM_TRUNK_RADIUS;
+    nextFronds.userData.roadOverhang = true;
+    nextRibs.userData.roadOverhang = true;
+    nextCoconuts.userData.roadOverhang = true;
+    nextTrunks.castShadow = nextFronds.castShadow = true;
+    let ti = 0, fi = 0, ci = 0;
+    for (const record of kept) {
+      nextTrunks.setMatrixAt(ti++, makeTrunkMatrix(record));
+      for (const frond of record.fronds) {
+        nextFronds.setMatrixAt(fi, makeCrownMatrix(record, frond, frond.radialScale));
+        nextRibs.setMatrixAt(fi, matrix);
+        nextFronds.setColorAt(fi, frond.tint);
+        fi += 1;
+      }
+      for (const position of record.coconuts) nextCoconuts.setMatrixAt(ci++, makeNutMatrix(record, position));
+    }
+    for (const mesh of [nextTrunks, nextFronds, nextRibs, nextCoconuts]) { mesh.instanceMatrix.needsUpdate = true; mesh.userData.palmFinalized = true; }
+    if (nextFronds.instanceColor) nextFronds.instanceColor.needsUpdate = true;
+    group.add(nextTrunks, nextFronds, nextRibs, nextCoconuts);
+    palmsFinalized = true;
+    return { candidates: palmSpots, visible: kept, hiddenForClearance: palmRecords.length - kept.length };
+  };
+
+  // Streetlights at every other intersection corner.
   const lampSpots = [...downtownStreetLamps];
   for (let line = 0; line <= CITY.grid; line += 1) {
     for (let cross = 0; cross <= CITY.grid; cross += 1) {
@@ -2336,6 +2474,7 @@ export function createCity(random, reservedPlaces = []) {
     cameraBlockers,
     groundHeightAt,
     lampSpots,
+    finalizePalms,
     setNightFactor,
     setSignalClock,
     spawnPoints: {

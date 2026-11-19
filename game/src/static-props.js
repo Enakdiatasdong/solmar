@@ -1,6 +1,6 @@
 // Validate actual rendered geometry as well as declared building/place footprints.
 import * as THREE from '../vendor/three.module.min.js';
-import { roadConflict, relocateFootprint } from './roads.js';
+import { roadConflict, roadSurfaceConflict, relocateFootprint } from './roads.js';
 
 export const relocateProp = relocateFootprint;
 
@@ -12,18 +12,26 @@ export function visitFootprints(root, visit) {
     infrastructure ||= node.userData.roadInfrastructure === true;
     if (!node.visible || infrastructure) return;
     if (node.material?.blending === THREE.AdditiveBlending) return; // light spill has no physical footprint
-    if (node.geometry && (node.isMesh || node.isInstancedMesh)) {
+    if (node.geometry && !node.userData.roadOverhang && (node.isMesh || node.isInstancedMesh)) {
       if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+      const baseRadius = node.userData.roadFootprintRadius;
       const count = node.isInstancedMesh ? node.count : 1;
       for (let index = 0; index < count; index++) {
         if (node.isInstancedMesh) {
           node.getMatrixAt(index, instance);
           world.multiplyMatrices(node.matrixWorld, instance);
         } else world.copy(node.matrixWorld);
+        const e = world.elements;
+        // Palms reserve the trunk base on the pavement. The crown can hang over a curb.
+        if (baseRadius) {
+          const radius = baseRadius * Math.hypot(e[0], e[2]);
+          if (radius > 0) visit(node, index, { minX: e[12] - radius, maxX: e[12] + radius,
+            minZ: e[14] - radius, maxZ: e[14] + radius }, roadSurfaceConflict);
+          continue;
+        }
         let box = node.geometry.boundingBox.clone().applyMatrix4(world);
         // A rotated bounding box overstates gabled/conical roofs. Use transformed
         // vertices for rotated geometry, so valid market roofs are not culled.
-        const e = world.elements;
         if (Math.abs(e[1]) + Math.abs(e[2]) + Math.abs(e[4]) + Math.abs(e[6]) + Math.abs(e[8]) + Math.abs(e[9]) > 1e-6) {
           box = new THREE.Box3();
           const positions = node.geometry.getAttribute('position');
@@ -31,7 +39,7 @@ export function visitFootprints(root, visit) {
         }
         // Flat ground, paving and road paint are surfaces, not roadside obstacles.
         if (box.isEmpty() || box.max.y <= 0.4 || (box.max.x - box.min.x < 1e-7 && box.max.z - box.min.z < 1e-7)) continue;
-        visit(node, index, { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z });
+        visit(node, index, { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z }, roadConflict);
       }
     }
     for (const child of [...node.children]) walk(child, infrastructure);
@@ -46,8 +54,8 @@ export function visitFootprints(root, visit) {
 export function enforceRoadClearance(root, colliders = []) {
   const removed = [];
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-  visitFootprints(root, (node, index, bounds) => {
-    if (!roadConflict(bounds)) return;
+  visitFootprints(root, (node, index, bounds, conflict) => {
+    if (!conflict(bounds)) return;
     removed.push({ name: node.name || node.geometry.type, index, ...bounds });
     if (node.isInstancedMesh) {
       node.setMatrixAt(index, zero);
@@ -57,7 +65,8 @@ export function enforceRoadClearance(root, colliders = []) {
     } else node.removeFromParent();
   });
   for (let index = colliders.length - 1; index >= 0; index--) {
-    if (!colliders[index].roadInfrastructure && roadConflict(colliders[index])) colliders.splice(index, 1);
+    const box = colliders[index];
+    if (!box.roadInfrastructure && (box.palmTrunk ? roadSurfaceConflict(box) : roadConflict(box))) colliders.splice(index, 1);
   }
   root.userData.roadClearance = { removed };
   return removed;
@@ -68,9 +77,9 @@ export function auditRoadClearance(roots) {
   const violations = [], categories = {};
   for (const root of roots) {
     let count = 0;
-    visitFootprints(root, (node, index, bounds) => {
+    visitFootprints(root, (node, index, bounds, conflict) => {
       checked++; count++;
-      if (roadConflict(bounds)) violations.push({ root: root.name, name: node.name || node.geometry.type, index, ...bounds });
+      if (conflict(bounds)) violations.push({ root: root.name, name: node.name || node.geometry.type, index, ...bounds });
     });
     categories[root.name] = (categories[root.name] ?? 0) + count;
   }

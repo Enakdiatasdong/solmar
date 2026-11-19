@@ -133,6 +133,8 @@ function makeGame(seedValue, shotName = null) {
   const audio = createAudio();
   const hud = createHud();
   const landmarks = createLandmarks({ scene: renderer.scene, city, districts, hud });
+  // City, districts, and landmarks have now registered their static colliders.
+  city.finalizePalms();
   const cameraColliders = [...city.colliders, ...city.cameraBlockers];
   let storyObjective = '';
   let vehicleObjective = '';

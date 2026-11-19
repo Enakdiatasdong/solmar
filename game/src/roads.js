@@ -125,9 +125,9 @@ export function buildRoadGraph() {
 export const ROAD_CORRIDORS = [
   ...buildRoadGraph().edges,
   ...DIRT_ROADS.map(({ minX, maxX, minZ, maxZ }) => maxX - minX > maxZ - minZ
-    ? { a: { x: minX, z: (minZ + maxZ) / 2 }, b: { x: maxX, z: (minZ + maxZ) / 2 }, width: maxZ - minZ }
-    : { a: { x: (minX + maxX) / 2, z: minZ }, b: { x: (minX + maxX) / 2, z: maxZ }, width: maxX - minX }),
-  { a: { x: -648, z: 84 }, b: { x: -360, z: 84 }, width: 18 },
+    ? { a: { x: minX, z: (minZ + maxZ) / 2 }, b: { x: maxX, z: (minZ + maxZ) / 2 }, width: maxZ - minZ, surfaceEndPadding: 0 }
+    : { a: { x: (minX + maxX) / 2, z: minZ }, b: { x: (minX + maxX) / 2, z: maxZ }, width: maxX - minX, surfaceEndPadding: 0 }),
+  { a: { x: -648, z: 84 }, b: { x: -360, z: 84 }, width: 18, surfaceEndPadding: 0.16 },
 ];
 
 export function footprint({ x, z }, { width, depth, offsetX = 0, offsetZ = 0 }) {
@@ -151,18 +151,29 @@ export function fitGridFootprint(x, z, width, depth) {
  * the AABB, never just a point/centre check. 15 m reserves the 11 m road half-width
  * plus sidewalk/buffer; the 24 m freeway gets 16 m. Both exceed the 2 m minimum. */
 export function roadConflict(box, corridors = ROAD_CORRIDORS) {
-  const roadInfrastructure = box.roadInfrastructure === true;
+  return findRoadOverlap(box, corridors, false);
+}
+
+/** Sidewalk fixtures can use the space up to the edge of the road surface. */
+export function roadSurfaceConflict(box) {
+  return findRoadOverlap(box, ROAD_CORRIDORS, true);
+}
+
+function findRoadOverlap(box, corridors, surfaceOnly) {
   if ('width' in box) box = footprint(box, box);
   if (![box.minX, box.maxX, box.minZ, box.maxZ].every(Number.isFinite)
     || box.minX > box.maxX || box.minZ > box.maxZ) throw new TypeError('Invalid prop footprint');
-  return corridors.find(({ a, b, width }) => {
-    // Ordinary props need the 15 m setback. Marked infrastructure may occupy
-    // the sidewalk buffer, but its footprint must still clear the road deck.
-    const margin = roadInfrastructure ? width / 2 : Math.max(15, width / 2 + 4);
-    return box.maxX > Math.min(a.x, b.x) - margin + 1e-6
-      && box.minX < Math.max(a.x, b.x) + margin - 1e-6
-      && box.maxZ > Math.min(a.z, b.z) - margin + 1e-6
-      && box.minZ < Math.max(a.z, b.z) + margin - 1e-6;
+  return corridors.find(({ a, b, width, surfaceEndPadding, zone }) => {
+    // Marked infrastructure (causeway decks/railings/piers, hotel meshes) may
+    // occupy the sidewalk buffer; its footprint must still clear the road deck.
+    const margin = surfaceOnly || box.roadInfrastructure === true ? width / 2 : Math.max(15, width / 2 + 4);
+    const ends = surfaceOnly ? (surfaceEndPadding ?? (zone === 'hills' ? 0 : margin)) : margin;
+    const xMargin = a.z === b.z ? ends : margin;
+    const zMargin = a.x === b.x ? ends : margin;
+    return box.maxX > Math.min(a.x, b.x) - xMargin + 1e-6
+      && box.minX < Math.max(a.x, b.x) + xMargin - 1e-6
+      && box.maxZ > Math.min(a.z, b.z) - zMargin + 1e-6
+      && box.minZ < Math.max(a.z, b.z) + zMargin - 1e-6;
   }) ?? null;
 }
 

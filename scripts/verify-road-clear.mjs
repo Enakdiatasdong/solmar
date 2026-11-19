@@ -13,7 +13,7 @@ import { ASSETS } from '../game/src/assets.js';
 import { createRandom } from '../game/src/random.js';
 import { GARAGE_LOCATION, RACES } from '../game/src/config.js';
 import { auditRoadClearance } from '../game/src/static-props.js';
-import { roadConflict, ROAD_CORRIDORS, placeShape, footprint, relocateFootprint } from '../game/src/roads.js';
+import { roadConflict, roadSurfaceConflict, ROAD_CORRIDORS, placeShape, footprint, relocateFootprint } from '../game/src/roads.js';
 
 const gradient = { addColorStop() {} };
 globalThis.document = { createElement: () => ({ width: 0, height: 0,
@@ -24,6 +24,8 @@ globalThis.document = { createElement: () => ({ width: 0, height: 0,
 assert(roadConflict({ x: 144, z: 103, width: 10.8, depth: 10 }), 'old Sunset Grill must fail');
 assert(roadConflict({ x: 300, z: -780, width: 1, depth: 1 }), 'northern track must fail');
 assert(roadConflict({ x: -500, z: 84, width: 1, depth: 1 }), 'causeway must fail');
+assert(roadSurfaceConflict({ x: -408.30411, z: 75.34605, width: 0.8, depth: 0.8 }), 'east causeway palm intersects the deck');
+assert(!roadSurfaceConflict({ x: -486.76492, z: 71.17408, width: 0.8, depth: 0.8 }), 'west causeway palm is outside the deck');
 assert(roadConflict({ x: 272, z: 108, width: 1, depth: 1 }), 'freeway shoulder must fail');
 assert(!roadConflict({ x: 108, z: 108, width: 10, depth: 10 }), 'block interior must pass');
 assert(!roadConflict({ x: 720, z: 144, width: 1, depth: 1 }), 'segments must have finite ends');
@@ -47,12 +49,15 @@ function build(seed) {
   scene.add(city.group);
   const districts = createDistricts({ scene, city, random: createRandom(seed ^ 0xd157) });
   const landmarks = createLandmarks({ scene, city, districts });
+  city.finalizePalms();
   const roots = [city.group, districts.group, landmarks.group];
   for (const [list, kind] of groups) for (const place of list) roots.push(createPlaceMarker(scene, { ...place }, { ...place, kind }));
   const report = auditRoadClearance(roots);
   assert.equal(report.violations.length, 0, JSON.stringify(report.violations.slice(0, 8)));
   for (const box of city.buildings) assert(!roadConflict(box), 'grid building footprint');
-  for (const box of city.colliders) if (!box.roadInfrastructure) assert(!roadConflict(box), 'static collider');
+  for (const box of city.colliders) {
+    if (!box.roadInfrastructure) assert(!(box.palmTrunk ? roadSurfaceConflict(box) : roadConflict(box)), 'static collider');
+  }
   assert.deepEqual([city.landmarks.garage.x, city.landmarks.garage.z], [garage.x, garage.z]);
   // Save round trip must restore to the relocated ID, not the original coordinate.
   let respawn;
