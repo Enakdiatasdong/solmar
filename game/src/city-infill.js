@@ -96,11 +96,18 @@ export function createCityInfill({ city, scene, random, reserved = [] }) {
     counts.buildings++;
   }
 
+  function addCollider(x, z, width, depth, height) {
+    const collider = { ...boundsAt(x, z, width, depth), height };
+    if (roadConflict(collider)) throw new RangeError('Infill collider intersects a road corridor');
+    city.colliders.push(collider);
+  }
+
   function addTree(x, z) {
     const height = random.range(2.35, 3.45);
     addPart('trunk', x, height / 2, z, 0.42, height, 0.42, PALETTE.trunk);
     addPart('greenery', x, height + 1.15, z, 3.7, 3.6, 3.7, PALETTE.leaf);
     addPart('greenery', x + 0.64, height + 1.92, z - 0.22, 2.4, 2.9, 2.55, PALETTE.leafLight);
+    addCollider(x, z, 0.84, 0.84, height + GROUND);
     counts.trees++;
   }
 
@@ -108,6 +115,7 @@ export function createCityInfill({ city, scene, random, reserved = [] }) {
     addPart('detail', x, 0.21, z, 1.75, 0.42, 1.16, 0xaf9e89);
     addPart('greenery', x - 0.34, 0.73, z, 1.1, 0.96, 1.12, PALETTE.leaf);
     addPart('greenery', x + 0.34, 0.76, z, 1.05, 1, 1.05, PALETTE.leafLight);
+    addCollider(x, z, 1, 1, 1.5);
     counts.shrubs++;
   }
 
@@ -115,6 +123,7 @@ export function createCityInfill({ city, scene, random, reserved = [] }) {
     for (const side of [-1, 1]) addPart('detail', x + side * 0.92, 0.26, z, 0.18, 0.52, 0.6, 0x56595a);
     addPart('detail', x, 0.55, z, 2.45, 0.13, 0.71, 0x9b6846);
     addPart('detail', x, 0.83, z - 0.31, 2.45, 0.36, 0.12, 0x9b6846);
+    addCollider(x, z, 2.45, 0.71, 1.27);
     counts.benches++;
   }
 
@@ -139,6 +148,7 @@ export function createCityInfill({ city, scene, random, reserved = [] }) {
     addPart('solid', x, 0.61, z, 2.03, 0.54, 4.18, body);
     addPart('detail', x, 1.07, z - front * 0.14, 1.67, 0.49, 2.1, cabin);
     addPart('detail', x, 1.33, z - front * 0.16, 1.56, 0.12, 1.66, body);
+    addCollider(x, z, 2.03, 4.18, 1.14);
     counts.parkedVehicles++;
   }
 
