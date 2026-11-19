@@ -264,6 +264,25 @@ export function createMissions(ctx) {
   function beginCourierRun() {
     state.stage = 'delivery';
     state.timer = COURIER_SECONDS;
+    // Showroom service + staging: the car arrives at the showroom facing east
+    // after transit, but the delivery route heads west along z=-72. Without
+    // this, the first leg needs a U-turn whose arc wedges the car on the
+    // forecourt corner (deterministic stall: the 9 s progress rule fires with
+    // the car at ~(153,-80), speed 0.87). Stage the car facing down the street
+    // grid toward the objective instead, and repair it — the showroom services
+    // the car before the run (transit otherwise leaves it at ~21% HP).
+    const car = inCar();
+    if (car) {
+      vehicles.repair(car);
+      const dx = FIRST_PICKUP.x - car.state.x;
+      const dz = FIRST_PICKUP.z - car.state.z;
+      // Streets are axis-aligned: face the dominant axis toward the objective
+      // (forward = (sin h, cos h): h=+PI/2 east, -PI/2 west, 0 +z, PI -z).
+      const heading = Math.abs(dx) >= Math.abs(dz)
+        ? (dx >= 0 ? Math.PI / 2 : -Math.PI / 2)
+        : (dz >= 0 ? 0 : Math.PI);
+      vehicles.setCarPosition(car, car.state.x, car.state.z, heading);
+    }
     setMarker(FIRST_PICKUP, FIRST_PICKUP.name);
     setObjective(`Deliver Mara’s package to Hotel Azure — ${Math.ceil(state.timer)}s.`);
   }
