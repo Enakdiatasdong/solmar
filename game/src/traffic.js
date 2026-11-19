@@ -17,6 +17,13 @@ const PARKING_SURFACE_Y = 0.26; // Top of the paved block pads in world.js.
 const SIDEWALK_OFFSET = CITY.road / 2 + 3;
 const CROSSING_OFFSET = CITY.road / 2 + 6;
 const trafficGeometry = {
+  // E dropped these when moving traffic switched to the Night City builder,
+  // but I's parked cars still use carMesh — without them the parked-car
+  // Box3 is empty, width/length go -Infinity and buildParkedCars throws
+  // 'Invalid prop footprint' on the first spawnAll (boot crash, seed 1).
+  body: new THREE.BoxGeometry(2, 0.58, 4.1),
+  cabin: new THREE.BoxGeometry(1.7, 0.48, 1.9),
+  wheel: new THREE.CylinderGeometry(0.36, 0.36, 0.24, 8).rotateZ(Math.PI / 2),
   torso: new THREE.BoxGeometry(0.46, 0.62, 0.28),
   head: new THREE.BoxGeometry(0.3, 0.32, 0.28),
   leg: new THREE.BoxGeometry(0.16, 0.72, 0.18),
