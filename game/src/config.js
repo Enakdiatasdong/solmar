@@ -131,6 +131,10 @@ export const VEHICLE = {
   maxYawRateHigh: 1.1,
   handbrakeSteer: 3.6,
   handbrakeDrag: 3.4,
+  // Handbrake pivot fades out by this speed: below it a stopped car can turn
+  // in place with handbrake + steer (base behaviour); above it the bicycle
+  // model owns steering entirely.
+  pivotFadeSpeed: 3,
   dirt: { accel: 0.62, maxSpeed: 0.62, grip: 0.7 },
   radius: 1.15,
   health: 100,

@@ -733,7 +733,19 @@ export function createVehicles(city, scene) {
     // turnCarFootprint below applies this step's heading change (swept, substepped);
     // do not add it to state.heading here or the turn would apply twice.
     const direction = state.speed < 0 ? -1 : 1;
-    const turn = yawRate * dt;
+    // Handbrake pivot (physics-tuning): the bicycle yaw rate is proportional to
+    // speed, so at standstill it is exactly 0 and a stopped car can never turn.
+    // Base c28d8e7 pivoted at handbrakeSteer * 0.35 * grip (3.6 * 0.35 * 0.55 =
+    // 0.693 rad/s; measured 0.693 rad over 60 frames from standstill). Restore
+    // that turn-in-place only at near-zero speed, fading out by pivotFadeSpeed
+    // so the bicycle model owns all driving-speed steering: the term is 0
+    // without handbrake and 0 above pivotFadeSpeed, so S2 radius/lateral are
+    // untouched. A wrecked car gets no pivot.
+    const pivotFade = controls.handbrake && !state.wrecked
+      ? Math.max(0, 1 - Math.abs(state.speed) / T.pivotFadeSpeed)
+      : 0;
+    const pivotTurn = steerInput * pivotFade * T.handbrakeSteer * 0.35 * grip * dt * direction;
+    const turn = yawRate * dt + pivotTurn;
 
     const footprint = car.footprint ?? carFootprint(car.spec, T);
     // A parked or teleported car can start in contact after a world reset.

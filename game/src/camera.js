@@ -49,6 +49,14 @@ export function cameraPositionClear(position, colliders, options = {}) {
   if (position.y - radius < minHeight) return false;
   return !(Array.isArray(colliders) ? colliders : []).some((box) => {
     if (!box || ![box.minX, box.maxX, box.minZ, box.maxZ].every(Number.isFinite)) return false;
+    // Thin poles (streetlight/signal poles: ~0.4 m footprint, ~7 m tall) cannot
+    // occlude the camera: the probe sphere (radius + margin ≈ 1.55 m) would
+    // otherwise collapse the follow distance to 0 whenever the ray passes near
+    // a pole, snapping the camera onto the player's head and flipping yaw
+    // (degenerate lookAt at distance 0). Walls are thin in one axis only, so
+    // require BOTH horizontal extents to be thin; palm trunks (0.72 m) and
+    // piers still block.
+    if ((box.maxX - box.minX) <= 0.5 && (box.maxZ - box.minZ) <= 0.5) return false;
     const top = Number.isFinite(box.height) ? box.height : Infinity;
     const bottom = Number.isFinite(box.minY) ? box.minY : 0;
     if (position.y + radius < bottom - margin || position.y - radius > top + margin) return false;

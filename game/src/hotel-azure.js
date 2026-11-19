@@ -282,7 +282,7 @@ export function createHotelAzure(city) {
   const lampSpots = [[-19.35, -18.05, 1], [19.35, -18.05, -1], [-11.5, 4.2, 1], [11.5, 4.2, -1]];
   const poles = batch('lamp-poles', iron, { geometry: new THREE.CylinderGeometry(0.09, 0.18, 1, 7) });
   const arms = batch('lamp-arms', iron);
-  const spill = batch('lamp-pavement-glow', lampGlow(), {
+  const spill = batch('hotel-lamp-spill', lampGlow(), {
     geometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), shadow: false,
   });
   for (const [x, z, toward] of lampSpots) {
