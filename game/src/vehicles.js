@@ -576,17 +576,21 @@ export function createVehicles(city, scene) {
       state.speed = Math.max(-T.maxReverse, Math.min(maxSpeed, state.speed));
     }
 
-    const speedRatio = Math.min(1, Math.abs(state.speed) / maxSpeed);
+    const speedRatio = Math.min(1, Math.abs(state.speed) / T.steerFadeSpeed);
     const steerInput = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
     const grip = (controls.handbrake ? 0.55 : 1) * (dirt?.grip ?? 1);
     const steeringBoost = dirt ? 1 + (1 - dirt.grip) * 2 : 1;
-    const turnRate = (controls.handbrake ? T.handbrakeSteer : T.steer) * (0.35 + speedRatio * 0.85) * steeringBoost;
-
-    if (state.speed !== 0 || controls.handbrake) {
-      const direction = state.speed < 0 ? -1 : 1;
-      state.heading += steerInput * turnRate * dt * direction * grip;
-    }
-    state.steerAngle += (steerInput * 0.5 - state.steerAngle) * Math.min(1, dt * 8);
+    const handling = (controls.handbrake ? T.handbrakeSteer : T.steer) / VEHICLE.steer;
+    const maxSteer = (T.maxSteerLow + (T.maxSteerHigh - T.maxSteerLow) * speedRatio)
+      * handling * grip * steeringBoost;
+    const maxYawRate = T.maxYawRateLow + (T.maxYawRateHigh - T.maxYawRateLow) * speedRatio;
+    // Limit the physical wheel angle as speed rises; heading and wheel visuals use
+    // the same bicycle geometry. Signed speed naturally reverses the turn in reverse.
+    const steerLimit = Math.min(maxSteer, Math.atan(maxYawRate * T.wheelbase / Math.max(0.001, Math.abs(state.speed))));
+    state.steerAngle += (steerInput * steerLimit - state.steerAngle) * (1 - Math.exp(-dt * T.steerResponse));
+    state.steerAngle = Math.max(-steerLimit, Math.min(steerLimit, state.steerAngle));
+    const yawRate = state.speed / T.wheelbase * Math.tan(state.steerAngle);
+    state.heading += yawRate * dt;
 
     const sin = Math.sin(state.heading);
     const cos = Math.cos(state.heading);
@@ -611,7 +615,7 @@ export function createVehicles(city, scene) {
     const spin = state.steerAngle;
     for (const wheel of car.wheels) {
       wheel.mesh.rotation.x = state.wheelSpin;
-      if (wheel.front) wheel.mesh.rotation.y = spin;
+      if (wheel.front) (wheel.steering ?? wheel.mesh).rotation.y = spin;
     }
     if (car.smoke && car.smoke.group.visible) {
       for (let index = 0; index < car.smoke.puffs.length; index += 1) {
@@ -636,6 +640,11 @@ export function createVehicles(city, scene) {
     car.state.x = x;
     car.state.z = z;
     car.state.heading = heading;
+    // A placement/respawn starts with straight wheels, including the physical angle.
+    car.state.steerAngle = 0;
+    for (const wheel of car.wheels) {
+      if (wheel.front) (wheel.steering ?? wheel.mesh).rotation.y = 0;
+    }
     car.group.position.set(x, 0, z);
     car.group.rotation.y = heading;
   }

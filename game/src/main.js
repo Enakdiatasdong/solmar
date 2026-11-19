@@ -45,7 +45,7 @@ import {
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RADIO, ACTION_RESTART, createInput,
 } from './input.js';
 import { stageShot } from './shots.js';
-import { cameraPositionAtDistance, findRoadRoute, safeCameraDistance } from './camera.js';
+import { cameraPositionAtDistance, cameraPositionClear, findRoadRoute, safeCameraDistance } from './camera.js';
 
 const DOM_IDS = [
   'game', 'status', 'title-screen', 'btn-start', 'btn-walk', 'btn-jobs', 'btn-continue',
@@ -406,22 +406,26 @@ function makeGame(seedValue, shotName = null) {
     const inCar = player.state.inCar;
     const chase = police.state.wanted >= 3;
     const focus = player.state.inCar?.state ?? player.state;
-    const focusY = inCar ? 1.4 : 1.5 + (Number.isFinite(player.state.y) ? player.state.y : 0);
     const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
-    const requestedDistance = inCar ? (chase ? CAMERA.chaseDistance : CAMERA.carDistance) : orbit.distance;
-    const safeDistance = safeCameraDistance(focus, orbit.yaw, orbit.pitch, requestedDistance, city.colliders,
-      { focusY, height });
-    renderer.updateCamera(dt, player, { ...orbit, chase, distance: safeDistance }, 0);
-    const rendererDistance = Math.max(CAMERA.minDistance, Math.min(CAMERA.maxDistance, requestedDistance));
-    // The renderer enforces a minimum zoom. Correct that
-    // final camera point when either clamp would put it back inside a building.
-    if (safeDistance < rendererDistance) {
-      const safePosition = cameraPositionAtDistance(focus, orbit.yaw, orbit.pitch, safeDistance, { focusY, height });
-      renderer.cameraState.pos.set(safePosition.x, safePosition.y, safePosition.z);
-      renderer.cameraState.distance = safeDistance;
-      renderer.camera.position.copy(renderer.cameraState.pos);
-      renderer.camera.lookAt(renderer.cameraState.target);
-    }
+    const requestedDistance = clamp(inCar ? (chase ? CAMERA.chaseDistance : CAMERA.carDistance) : orbit.distance,
+      CAMERA.minDistance, CAMERA.maxDistance);
+    const safeDistance = (yaw, pitch, focusY) => {
+      const options = { focusY, height, step: CAMERA.collisionStep };
+      let distance = safeCameraDistance(focus, yaw, pitch, requestedDistance, city.colliders, options);
+      if (distance < requestedDistance) {
+        // Refine only the last coarse interval: continuous clearance without testing the
+        // entire ray at tiny steps or exposing 25 cm quantization to the follow camera.
+        let blockedDistance = Math.min(requestedDistance, distance + CAMERA.collisionStep);
+        for (let index = 0; index < CAMERA.collisionRefinements; index += 1) {
+          const candidate = (distance + blockedDistance) * 0.5;
+          const position = cameraPositionAtDistance(focus, yaw, pitch, candidate, options);
+          if (cameraPositionClear(position, city.colliders, options)) distance = candidate;
+          else blockedDistance = candidate;
+        }
+      }
+      return distance;
+    };
+    renderer.updateCamera(dt, player, { ...orbit, chase, distance: requestedDistance, safeDistance }, 0);
   }
 
   function leaveCar() {
@@ -1109,7 +1113,7 @@ function makeGame(seedValue, shotName = null) {
           surface: districts.surfaceAt(car.state.x, car.state.z),
         }, city.colliders);
         const angle = Math.atan2(Math.sin(car.state.heading - orbit.yaw), Math.cos(car.state.heading - orbit.yaw));
-        if (!input.isDragging()) orbit.yaw += angle * Math.min(1, dt * 2.4);
+        if (!input.isDragging()) orbit.yaw += angle * (1 - Math.exp(-dt * CAMERA.headingFollow));
         if (state.pedHitCooldown === 0 && Math.abs(car.state.speed) > 3.5) {
           const ped = traffic.nearestPed(car.state.x, car.state.z, 2.8);
           if (ped) {

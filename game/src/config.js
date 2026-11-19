@@ -76,6 +76,14 @@ export const CAMERA = {
   minDistance: 4.5,
   maxDistance: 15,
   follow: 12,
+  // Match position/target response to keep the view angle steady between physics ticks.
+  footDamping: { position: 14, target: 14, focusY: 10, yaw: 14, pitch: 14, distance: 10 },
+  carDamping: { position: 9, target: 9, focusY: 7, yaw: 9, pitch: 10, distance: 8 },
+  headingFollow: 7,
+  collisionIn: 28,
+  collisionOut: 5,
+  collisionStep: 0.25,
+  collisionRefinements: 6,
 };
 
 /** Arcade driving. The handbrake cuts grip and lets the tail slide. */
@@ -88,6 +96,13 @@ export const VEHICLE = {
   drag: 0.75,
   roll: 2.2,
   steer: 2.1,
+  wheelbase: 2.76,
+  maxSteerLow: 0.62,
+  maxSteerHigh: 0.09,
+  steerFadeSpeed: 30,
+  steerResponse: 10,
+  maxYawRateLow: 1.8,
+  maxYawRateHigh: 1.1,
   handbrakeSteer: 3.6,
   handbrakeDrag: 3.4,
   dirt: { accel: 0.62, maxSpeed: 0.62, grip: 0.7 },
