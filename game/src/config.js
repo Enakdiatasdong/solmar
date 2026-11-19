@@ -328,7 +328,7 @@ export const COMBAT = {
 
 export const RADIO = {
   stations: [
-    { id: 'wave-881', freq: '88.1', name: 'Neon Drive', tracks: [{ title: 'Pink Horizon', artist: 'Lumen Kids' }, { title: 'Afterglow Avenue', artist: 'Vela Bloom' }] },
+    { id: 'wave-881', freq: '88.1', name: 'KRADIO', tracks: [{ title: 'Pink Horizon', artist: 'Lumen Kids' }, { title: 'Afterglow Avenue', artist: 'Vela Bloom' }] },
     { id: 'sunset-963', freq: '96.3', name: 'Sunset Static', tracks: [{ title: 'Chrome Palms', artist: 'Mira Vale' }, { title: 'Coastline Echo', artist: 'The Mariner Set' }] },
     { id: 'harbor-1017', freq: '101.7', name: 'Harbor Pulse', tracks: [{ title: 'Signal in the Sand', artist: 'Juno Circuit' }, { title: 'Blue Hour Run', artist: 'Cobalt Youth' }] },
   ],

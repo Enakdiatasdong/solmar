@@ -1583,7 +1583,7 @@ export function createCity(random, reservedPlaces = []) {
 
   addRooftopNeon({ id: 'flamingo-fm', label: 'FLAMINGO FM', caption: 'THE SOUND OF THE COAST',
     color: 0xff2b99, targetX: 36, targetZ: 324, width: 46, height: 11.5 });
-  addRooftopNeon({ id: 'wave-88', label: 'WAVE 88.1', caption: 'AFTER HOURS / ON AIR',
+  addRooftopNeon({ id: 'wave-88', label: 'KRADIO 88.1', caption: 'AFTER HOURS / ON AIR',
     color: 0x46e5dc, targetX: -108, targetZ: 252, width: 22, height: 5.5 });
   addRooftopNeon({ id: 'coral-motel', label: 'CORAL MOTEL', caption: 'VACANCY / OCEAN BREEZE',
     color: 0xffa776, targetX: 108, targetZ: 324, width: 26, height: 6.5 });

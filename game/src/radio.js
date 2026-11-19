@@ -3,7 +3,7 @@ const TRACK_EPSILON = 1e-9;
 
 export const STATIONS = [
   {
-    id: 'solmar-fm', name: 'Solmar FM', tagline: 'Coastline sounds for the long way home.',
+    id: 'kradio', name: 'KRADIO', tagline: 'Coastline sounds for the long way home.',
     tracks: ['Sunset Over Pier 9', 'Salt on the Dashboard', 'Gold Hour Tollbooth'],
     bass: [55, 55, 65.41, 73.42, 55, 98, 87.31, 82.41],
     arp: [220, 261.63, 329.63, 392, 440, 392, 329.63, 261.63],
