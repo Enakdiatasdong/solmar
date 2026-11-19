@@ -1,6 +1,6 @@
 import { auditRoadClearance } from './static-props.js';
 // SOLMAR boot, system adapters and fixed-step simulation. All assets and imports are local.
-// ?seed=N selects the city; ?shot=start|play|end stages a frozen, reproducible scene.
+// ?seed=N selects the city; ?shot=hotel-azure (or another shot name) stages a frozen scene.
 import * as THREE from '../vendor/three.module.min.js';
 import {
   CAMERA, COMBAT, DIFFICULTY, MAX_FRAME, MISSIONS, PLAYER, POLICE, RADIO, REP, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
@@ -11,6 +11,7 @@ import { clampToWorld, createCity, resolveCollisions } from './world.js';
 import { createBeachActivity } from './beach-activity.js';
 import { createCityInfill } from './city-infill.js';
 import { createDistricts } from './districts.js';
+import { createHotelAzure } from './hotel-azure.js';
 import { createLandmarks } from './landmarks.js';
 import { createPlayer } from './player.js';
 import { createJetpack, JETPACK_PRICE } from './jetpack.js';
@@ -46,7 +47,7 @@ import {
   ACTION_BUY_AMMO, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_HORN, ACTION_JETPACK, ACTION_MENU, ACTION_MUTE,
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RADIO, ACTION_RESTART, createInput,
 } from './input.js';
-import { stageShot } from './shots.js';
+import { normalizeShotName, stageShot } from './shots.js';
 import { cameraPositionAtDistance, cameraPositionClear, findRoadRoute, safeCameraDistance } from './camera.js';
 
 const DOM_IDS = [
@@ -104,6 +105,9 @@ function makeGame(seedValue, shotName = null) {
   const random = createRandom(seedValue);
   const renderer = createRenderer(canvas);
   const city = createCity(random, [...ASSETS, ...RESTAURANTS, ...SAFEHOUSES]);
+  city.hotel = createHotelAzure(city);
+  city.group.add(city.hotel.group);
+  city.colliders.push(...city.hotel.colliders);
   renderer.scene.add(city.group);
   const districts = createDistricts({ scene: renderer.scene, city, random: createRandom(seedValue ^ 0xd157) });
   const player = createPlayer(city);
@@ -1337,7 +1341,7 @@ function makeGame(seedValue, shotName = null) {
 
   function beginShot(name) {
     shotMode = true;
-    state.shot = ['play', 'end', 'paper-moon'].includes(name) ? name : 'start';
+    state.shot = normalizeShotName(name);
     const generation = ++shotGeneration;
     window.__shotReady = false;
     window.__gameError = null;

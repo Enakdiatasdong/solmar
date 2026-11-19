@@ -2,6 +2,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, TRAFFIC, VEHICLE } from './config.js';
 import { roadConflict } from './roads.js';
+import { createRandom } from './random.js';
 import { resolveCollisions } from './world.js';
 import { buildNightCityCar, NIGHTCITY_MODELS, NIGHTCITY_PAINTS } from './nightcity-cars.js';
 
@@ -142,6 +143,10 @@ export function createTraffic(city, scene, random) {
   const colliderBuckets = new Map();
   const carSpawnPoints = city.spawnPoints?.trafficCars ?? [];
   const pedSpawnPoints = city.spawnPoints?.sidewalkPedestrians ?? [];
+  const plazaRoutes = city.hotel?.pedestrianRoutes ?? [];
+  const plazaAnchor = plazaRoutes[0]?.[0];
+  const plazaRandom = createRandom(0xa2e6);
+  let plazaLoaded = false;
   const bucketSize = CITY.pitch / 2;
   const graphBounds = roadNetwork.nodes.reduce((bounds, node) => ({
     minX: Math.min(bounds.minX, node.x), maxX: Math.max(bounds.maxX, node.x),
@@ -352,16 +357,28 @@ export function createTraffic(city, scene, random) {
     }
     let pedAttempts = 0;
     let pedFailures = 0;
-    while (peds.length < pedTarget && pedAttempts < pedTarget * 5 && pedFailures < 3) {
+    while (ambientPedCount() < pedTarget && pedAttempts < pedTarget * 5 && pedFailures < 3) {
       const previousCount = peds.length;
       spawnPed(playerX, playerZ, true);
       pedAttempts += 1;
       pedFailures = peds.length === previousCount ? pedFailures + 1 : 0;
     }
+    loadPlazaPeds(playerX, playerZ);
+  }
+
+  function ambientPedCount() {
+    return peds.length - (plazaLoaded ? plazaRoutes.length : 0);
+  }
+
+  function loadPlazaPeds(playerX, playerZ) {
+    if (plazaLoaded || !plazaAnchor
+      || Math.hypot(plazaAnchor.x - playerX, plazaAnchor.z - playerZ) > TRAFFIC.spawnRadius) return;
+    for (const route of plazaRoutes) addPed(route[0], route);
+    plazaLoaded = true;
   }
 
   function spawnPed(playerX, playerZ, preferCenter = false) {
-    if (peds.length >= PED_LIMIT) return;
+    if (ambientPedCount() >= PED_LIMIT) return;
     let position = null;
     const point = spawnPointNear(pedSpawnPoints, playerX, playerZ, 30, TRAFFIC.spawnRadius, peds, 5, preferCenter);
     if (point) position = { x: point.x, z: point.z };
@@ -382,24 +399,35 @@ export function createTraffic(city, scene, random) {
       const inWalkableBounds = isWalkablePosition(resolved);
       if (!resolved.hit && inWalkableBounds) position = { x, z };
     }
-    if (!position) return;
+    if (position) addPed(position);
+  }
+
+  function addPed(position, plazaRoute = null) {
     const { x, z } = position;
-    const built = pedMesh(random);
+    const source = plazaRoute ? plazaRandom : random;
+    const built = pedMesh(source);
+    const routeTarget = plazaRoute?.[1] ?? null;
+    const heading = routeTarget
+      ? Math.atan2(routeTarget.x - x, routeTarget.z - z)
+      : source.range(0, Math.PI * 2);
     built.group.position.set(x, groundHeightAt(x, z) + 0.28, z);
+    if (plazaRoute) built.group.rotation.y = heading;
     scene.add(built.group);
     peds.push({
       group: built.group,
       legs: built.legs,
       x,
       z,
-      heading: random.range(0, Math.PI * 2),
-      speed: random.range(TRAFFIC.pedSpeedMin, TRAFFIC.pedSpeedMax),
-      walk: random.range(0, 10),
+      heading,
+      speed: source.range(TRAFFIC.pedSpeedMin, TRAFFIC.pedSpeedMax),
+      walk: source.range(0, 10),
       wander: 0,
       panicked: 0,
       crossing: false,
-      crossingCooldown: random.range(0, 7),
-      routeTarget: null,
+      crossingCooldown: source.range(0, 7),
+      routeTarget,
+      plazaRoute,
+      plazaRouteIndex: 1,
       reaction: 'walking',
       down: false,
     });
@@ -518,6 +546,10 @@ export function createTraffic(city, scene, random) {
   }
 
   function setPedRoute(ped) {
+    if (ped.plazaRoute) {
+      ped.routeTarget = ped.plazaRoute[ped.plazaRouteIndex];
+      return;
+    }
     const nearest = roadNetwork.nearestEdge(ped.x, ped.z);
     if (!nearest) return;
     const edge = nearest.edge;
@@ -579,8 +611,10 @@ export function createTraffic(city, scene, random) {
 
   function stepPed(ped, dt, player, vehicles) {
     const playerTarget = playerPosition(player);
-    const distance = Math.hypot(ped.x - playerTarget.x, ped.z - playerTarget.z);
+    const anchor = ped.plazaRoute ? plazaAnchor : ped;
+    const distance = Math.hypot(anchor.x - playerTarget.x, anchor.z - playerTarget.z);
     if (distance > TRAFFIC.despawnRadius) {
+      if (ped.plazaRoute) plazaLoaded = false;
       scene.remove(ped.group);
       return false;
     }
@@ -593,8 +627,12 @@ export function createTraffic(city, scene, random) {
       ped.reaction = 'walking';
       if (!ped.routeTarget) setPedRoute(ped);
       const target = ped.routeTarget;
-      if (target && Math.hypot(target.x - ped.x, target.z - ped.z) < 0.9) {
-        if (ped.routeStage === 'approach') {
+      const arrivalDistance = ped.plazaRoute ? 0.18 : 0.9;
+      if (target && Math.hypot(target.x - ped.x, target.z - ped.z) < arrivalDistance) {
+        if (ped.plazaRoute) {
+          ped.plazaRouteIndex = (ped.plazaRouteIndex + 1) % ped.plazaRoute.length;
+          setPedRoute(ped);
+        } else if (ped.routeStage === 'approach') {
           ped.routeTarget = ped.crossingEnd;
           ped.routeStage = 'crossing';
           ped.crossing = true;
@@ -647,16 +685,19 @@ export function createTraffic(city, scene, random) {
       while (delta < -Math.PI) delta += Math.PI * 2;
       ped.heading += delta * Math.min(1, dt * 4.5);
     }
-    const nx = ped.x + Math.sin(ped.heading) * ped.speed * dt;
-    const nz = ped.z + Math.cos(ped.heading) * ped.speed * dt;
+    // Follow the waypoint segment precisely while the pedestrian turns to face it.
+    const heading = ped.plazaRoute && ped.reaction === 'walking' ? ped.targetHeading : ped.heading;
+    const nx = ped.x + Math.sin(heading) * ped.speed * dt;
+    const nz = ped.z + Math.cos(heading) * ped.speed * dt;
     const resolved = resolveAmbientPosition(nx, nz, 0.28);
-    const inWalkableBounds = isWalkablePosition(resolved);
+    const inWalkableBounds = ped.plazaRoute || isWalkablePosition(resolved);
     if (inWalkableBounds) {
       ped.x = resolved.x;
       ped.z = resolved.z;
     }
     if (resolved.hit || !inWalkableBounds) {
-      ped.heading += random.chance(0.5) ? Math.PI * 0.5 : -Math.PI * 0.5;
+      const source = ped.plazaRoute ? plazaRandom : random;
+      ped.heading += source.chance(0.5) ? Math.PI * 0.5 : -Math.PI * 0.5;
       ped.routeTarget = null;
     }
     ped.walk += dt * ped.speed * 4.2;
@@ -688,7 +729,8 @@ export function createTraffic(city, scene, random) {
       if (!stepPed(peds[index], dt, player, vehicles)) peds.splice(index, 1);
     }
     const target = playerPosition(player);
-    if (peds.length < pedTarget && random() < 0.2) spawnPed(target.x, target.z, true);
+    if (ambientPedCount() < pedTarget && random() < 0.2) spawnPed(target.x, target.z, true);
+    loadPlazaPeds(target.x, target.z);
     if (trafficCars.length < carTarget) {
       const point = randomRoadSpawn(target.x, target.z, 45, true);
       if (point) {
@@ -770,6 +812,7 @@ export function createTraffic(city, scene, random) {
     trafficCars.length = 0;
     for (const ped of peds) scene.remove(ped.group);
     peds.length = 0;
+    plazaLoaded = false;
   }
 
   return {

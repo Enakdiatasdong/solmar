@@ -2141,6 +2141,7 @@ export function createCity(random, reservedPlaces = []) {
     colliders,
     cameraBlockers,
     groundHeightAt,
+    lampSpots,
     setNightFactor,
     setSignalClock,
     spawnPoints: {

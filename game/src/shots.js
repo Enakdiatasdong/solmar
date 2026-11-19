@@ -4,6 +4,10 @@ import { CAMERA, MISSIONS, SPAWN, STARTER_CAR, STEP } from './config.js';
 const FIXED_STEP_COUNT = 120;
 const STARTER_POSITION = STARTER_CAR;
 
+export function normalizeShotName(name) {
+  return ['play', 'end', 'paper-moon', 'hotel-azure'].includes(name) ? name : 'start';
+}
+
 function setReady(value) {
   if (typeof window !== 'undefined') window.__shotReady = value;
 }
@@ -106,7 +110,7 @@ function fixedAdvance(game, count, controls = null) {
 }
 
 export function stageShot(name, game) {
-  const shot = ['play', 'end', 'paper-moon'].includes(name) ? name : 'start';
+  const shot = normalizeShotName(name);
   const { player, vehicles, missions, hud, renderer, orbit, state, setScreen } = game;
   setReady(false);
   prepareFreshRun(game);
@@ -177,6 +181,22 @@ export function stageShot(name, game) {
     orbit.distance = 9.4;
     setScreen('playing');
     fixedAdvance(game, 30, { accelerate: true, brake: false, left: false, right: false, handbrake: false });
+    freezeMissionVisuals(renderer.scene);
+    setReady(true);
+    return { screen: 'playing', update() {} };
+  }
+
+  if (shot === 'hotel-azure') {
+    const { x, z, yaw, pitch, distance } = game.city.hotel.shot;
+    Object.assign(player.state, { x, z, heading: yaw });
+    Object.assign(orbit, { yaw, pitch, distance });
+    player.syncMesh();
+    game.traffic.reset();
+    game.traffic.spawnAll(x, z);
+    missions.start('first-fare');
+    setScreen('playing');
+    renderer.applyTimeOfDay(state.clockMinutes, game.city.setNightFactor);
+    fixedAdvance(game, FIXED_STEP_COUNT);
     freezeMissionVisuals(renderer.scene);
     setReady(true);
     return { screen: 'playing', update() {} };
