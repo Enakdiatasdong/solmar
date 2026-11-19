@@ -72,6 +72,7 @@ function copMesh() {
 export function createPolice(city, scene, vehicles) {
   const roadNetwork = city.roadNetwork ?? city.graph;
   const colliders = city.colliders ?? [];
+  const groundHeightAt = city.groundHeightAt ?? (() => 0);
   const laneOffset = Math.min(4.4, CITY.road / 2 - VEHICLE.radius);
   const state = {
     wanted: 0,
@@ -305,7 +306,7 @@ export function createPolice(city, scene, vehicles) {
     const candidateZ = edge.z - (dx / length) * side * (CITY.road / 2 + 3);
     const position = clampToWorld(resolveCollisions(colliders, candidateX, candidateZ, 0.4));
     const built = copMesh();
-    built.group.position.set(position.x, 0.28, position.z);
+    built.group.position.set(position.x, groundHeightAt(position.x, position.z) + 0.28, position.z);
     scene.add(built.group);
     state.cops.push({
       group: built.group,
@@ -423,7 +424,7 @@ export function createPolice(city, scene, vehicles) {
         cop.alive = true;
         cop.health = 60;
         cop.group.rotation.z = 0;
-        cop.group.position.y = 0.28;
+        cop.group.position.y = groundHeightAt(cop.x, cop.z) + 0.28;
       }
       return false;
     }
@@ -446,7 +447,7 @@ export function createPolice(city, scene, vehicles) {
       cop.legs[0].rotation.x = Math.sin(cop.walk) * 0.6;
       cop.legs[1].rotation.x = -cop.legs[0].rotation.x;
     }
-    cop.group.position.set(cop.x, 0.28, cop.z);
+    cop.group.position.set(cop.x, groundHeightAt(cop.x, cop.z) + 0.28, cop.z);
     cop.group.rotation.y = cop.heading;
     cop.shootTimer -= dt;
     const visible = hasLineOfSight(cop, targetFor(player));

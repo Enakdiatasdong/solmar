@@ -7,6 +7,8 @@ import { CAMERA, DEFAULT_OUTFIT, OUTFITS, PALETTE, PLAYER, SPAWN } from './confi
 import { clampToWorld, resolveCollisions } from './world.js';
 
 const SKIN = PALETTE.player;
+// Follow shallow slopes while walking. A drop from a deck starts a fall.
+const MAX_GROUND_DROP = 0.08;
 
 function limb(width, height, depth, color) {
   const mesh = new THREE.Mesh(
@@ -19,6 +21,7 @@ function limb(width, height, depth, color) {
 
 export function createPlayer(city) {
   const cityColliders = city?.colliders ?? [];
+  const groundHeightAt = city?.groundHeightAt ?? (() => 0);
   const root = new THREE.Group();
   root.name = 'Jax';
   const body = new THREE.Group();
@@ -101,7 +104,7 @@ export function createPlayer(city) {
 
   const state = {
     x: SPAWN.x,
-    y: 0,
+    y: groundHeightAt(SPAWN.x, SPAWN.z),
     z: SPAWN.z,
     heading: SPAWN.heading,
     vy: 0,
@@ -129,7 +132,7 @@ export function createPlayer(city) {
       state.inCar.state.occupied = false;
     }
     state.x = SPAWN.x;
-    state.y = 0;
+    state.y = groundHeightAt(SPAWN.x, SPAWN.z);
     state.z = SPAWN.z;
     state.heading = SPAWN.heading;
     state.vy = 0;
@@ -158,6 +161,17 @@ export function createPlayer(city) {
     root.position.set(state.x, state.y, state.z);
     body.rotation.y = state.inCar ? state.inCar.state.heading : state.heading;
     body.visible = !state.inCar;
+  }
+
+  function walkBy(dx, dz, colliders) {
+    // Keep thin rails solid even when several walking steps arrive in one frame.
+    const substeps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (PLAYER.radius / 2)));
+    for (let substep = 0; substep < substeps; substep += 1) {
+      const resolved = resolveCollisions(colliders, state.x + dx / substeps, state.z + dz / substeps, PLAYER.radius);
+      const bounded = clampToWorld(resolved);
+      state.x = bounded.x;
+      state.z = bounded.z;
+    }
   }
 
   function animate(dt) {
@@ -230,29 +244,28 @@ export function createPlayer(city) {
     const actualSpeed = moving ? (state.grounded ? maxSpeed : maxSpeed * 0.82) : 0;
     state.speed = actualSpeed;
 
-    // The jetpack integrates height after this step. Horizontal movement still uses
-    // the same intent and world colliders as walking.
+    walkBy(moveX * actualSpeed * dt, moveZ * actualSpeed * dt, colliders);
+
+    // The jetpack handles its own vertical movement against the same ground.
     if (!intent.jetpack) {
+      const floor = groundHeightAt(state.x, state.z);
       if (intent.jump && state.grounded) {
         state.vy = PLAYER.jumpSpeed;
         state.grounded = false;
+      } else if (state.grounded && state.y - floor <= MAX_GROUND_DROP) {
+        state.y = floor;
+      } else {
+        state.grounded = false;
       }
-      state.vy -= PLAYER.gravity * dt;
-      state.y += state.vy * dt;
-      if (state.y <= 0) {
-        state.y = 0;
-        state.vy = 0;
-        state.grounded = true;
+      if (!state.grounded) {
+        state.vy -= PLAYER.gravity * dt;
+        state.y += state.vy * dt;
+        if (state.y <= floor) {
+          state.y = floor;
+          state.vy = 0;
+          state.grounded = true;
+        }
       }
-    }
-
-    let nextX = state.x + moveX * actualSpeed * dt;
-    let nextZ = state.z + moveZ * actualSpeed * dt;
-    const resolved = resolveCollisions(colliders, nextX, nextZ, PLAYER.radius);
-    const bounded = clampToWorld({ x: resolved.x, z: resolved.z });
-    state.x = bounded.x;
-    state.z = bounded.z;
-    if (!intent.jetpack) {
       syncMesh();
       animate(dt);
     }
@@ -282,7 +295,7 @@ export function createPlayer(city) {
   function enterCar(car) {
     state.inCar = car;
     state.x = car.state.x;
-    state.y = 0;
+    state.y = car.group.position.y;
     state.z = car.state.z;
     state.heading = car.state.heading;
     state.speed = car.state.speed;
@@ -296,9 +309,19 @@ export function createPlayer(city) {
     const car = state.inCar;
     if (!car) return null;
     state.inCar = null;
-    state.x = position.x;
-    state.z = position.z;
-    state.y = 0;
+    const { x, z } = car.state;
+    state.x = x;
+    state.z = z;
+    const dx = position.x - x, dz = position.z - z;
+    walkBy(dx, dz, cityColliders);
+    if (Math.hypot(state.x - x, state.z - z) < Math.hypot(dx, dz) / 2) {
+      state.x = x;
+      state.z = z;
+      walkBy(-dx, -dz, cityColliders);
+    }
+    state.y = groundHeightAt(state.x, state.z);
+    state.grounded = true;
+    state.vy = 0;
     state.heading = heading;
     root.visible = true;
     car.state.occupied = false;

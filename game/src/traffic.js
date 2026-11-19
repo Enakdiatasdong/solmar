@@ -59,6 +59,7 @@ export function createTraffic(city, scene, random) {
   const carSpecs = PALETTE.cars;
   const roadNetwork = city.roadNetwork ?? city.graph;
   const colliders = city.colliders ?? [];
+  const groundHeightAt = city.groundHeightAt ?? (() => 0);
   const colliderBuckets = new Map();
   const carSpawnPoints = city.spawnPoints?.trafficCars ?? [];
   const pedSpawnPoints = city.spawnPoints?.sidewalkPedestrians ?? [];
@@ -205,7 +206,7 @@ export function createTraffic(city, scene, random) {
       group.add(wheel);
       wheels.push(wheel);
     }
-    group.position.set(position.x, 0, position.z);
+    group.position.set(position.x, groundHeightAt(position.x, position.z), position.z);
     group.rotation.y = heading;
     scene.add(group);
     const car = {
@@ -244,7 +245,7 @@ export function createTraffic(city, scene, random) {
     car.speed = TRAFFIC.carSpeedMin;
     car.stuck = 0;
     car.targetSpeed = random.range(TRAFFIC.carSpeedMin, TRAFFIC.carSpeedMax);
-    car.group.position.set(car.x, 0, car.z);
+    car.group.position.set(car.x, groundHeightAt(car.x, car.z), car.z);
     car.group.rotation.y = car.heading;
     return true;
   }
@@ -257,7 +258,7 @@ export function createTraffic(city, scene, random) {
       if (!point) continue;
       const car = makeTrafficCar(point, point.heading);
       routeCarAt(car, point);
-      car.group.position.set(car.x, 0, car.z);
+      car.group.position.set(car.x, groundHeightAt(car.x, car.z), car.z);
       car.group.rotation.y = car.heading;
     }
     let pedAttempts = 0;
@@ -295,7 +296,7 @@ export function createTraffic(city, scene, random) {
     if (!position) return;
     const { x, z } = position;
     const built = pedMesh(random);
-    built.group.position.set(x, 0.28, z);
+    built.group.position.set(x, groundHeightAt(x, z) + 0.28, z);
     scene.add(built.group);
     peds.push({
       group: built.group,
@@ -417,7 +418,7 @@ export function createTraffic(city, scene, random) {
     car.x = resolved.x;
     car.z = resolved.z;
     if (resolved.hit) car.speed = Math.min(car.speed, TRAFFIC.carSpeedMin * 0.65);
-    car.group.position.set(car.x, 0, car.z);
+    car.group.position.set(car.x, groundHeightAt(car.x, car.z), car.z);
     car.group.rotation.y = car.heading;
     car.spin += car.speed * dt * 2.2;
     for (const wheel of car.wheels) wheel.rotation.x = car.spin;
@@ -570,7 +571,7 @@ export function createTraffic(city, scene, random) {
       ped.routeTarget = null;
     }
     ped.walk += dt * ped.speed * 4.2;
-    ped.group.position.set(ped.x, 0.28, ped.z);
+    ped.group.position.set(ped.x, groundHeightAt(ped.x, ped.z) + 0.28, ped.z);
     ped.group.rotation.y = ped.heading;
     const swing = Math.sin(ped.walk) * 0.55;
     ped.legs[0].rotation.x = swing;
@@ -603,7 +604,7 @@ export function createTraffic(city, scene, random) {
       if (point) {
         const car = makeTrafficCar(point, point.heading);
         routeCarAt(car, point);
-        car.group.position.set(car.x, 0, car.z);
+        car.group.position.set(car.x, groundHeightAt(car.x, car.z), car.z);
         car.group.rotation.y = car.heading;
       }
     }

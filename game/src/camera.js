@@ -15,13 +15,14 @@ export function safeCameraDistance(focus, yaw, pitch, desiredDistance, colliders
   const horizontal = Math.cos(pitch);
   const sinPitch = Math.sin(pitch);
   const boxes = Array.isArray(colliders) ? colliders : [];
+  const clearance = { cameraRadius: radius, margin, minHeight: options.minHeight };
   let safe = 0;
 
   for (let distance = 0; distance <= desired + 1e-9;) {
     const x = focus.x - Math.sin(yaw) * horizontal * distance;
     const z = focus.z - Math.cos(yaw) * horizontal * distance;
     const y = focusY + height + sinPitch * distance * 0.55;
-    if (!cameraPositionClear({ x, y, z }, boxes, { cameraRadius: radius, margin })) break;
+    if (!cameraPositionClear({ x, y, z }, boxes, clearance)) break;
     safe = distance;
     if (distance === desired) break;
     distance = Math.min(desired, distance + step);
@@ -44,11 +45,13 @@ export function cameraPositionClear(position, colliders, options = {}) {
   if (!position || ![position.x, position.y, position.z].every(Number.isFinite)) return false;
   const radius = Number.isFinite(options.cameraRadius) ? Math.max(0, options.cameraRadius) : DEFAULT_CAMERA_RADIUS;
   const margin = Number.isFinite(options.margin) ? Math.max(0, options.margin) : DEFAULT_MARGIN;
-  if (position.y - radius < MIN_CAMERA_HEIGHT) return false;
+  const minHeight = options.minHeight ?? MIN_CAMERA_HEIGHT;
+  if (position.y - radius < minHeight) return false;
   return !(Array.isArray(colliders) ? colliders : []).some((box) => {
     if (!box || ![box.minX, box.maxX, box.minZ, box.maxZ].every(Number.isFinite)) return false;
     const top = Number.isFinite(box.height) ? box.height : Infinity;
-    if (position.y + radius < -margin || position.y - radius > top + margin) return false;
+    const bottom = Number.isFinite(box.minY) ? box.minY : 0;
+    if (position.y + radius < bottom - margin || position.y - radius > top + margin) return false;
     const extent = radius + margin;
     return position.x >= box.minX - extent && position.x <= box.maxX + extent
       && position.z >= box.minZ - extent && position.z <= box.maxZ + extent;

@@ -1,10 +1,10 @@
 // Arcade cars: box bodies with cabins, bumpers, lights and spinning wheels. Jax has a starter car,
 // a handful of other cars are parked and stealable, and damaged cars smoke when wrecked. The
 // driving model is deliberately simple: accelerate, brake/reverse, steer with speed-scaled grip,
-// handbrake for a loose tail. Collision with buildings uses the city AABBs and the car's radius.
+// handbrake for a loose tail. The car footprint collides with the city's AABBs.
 import * as THREE from '../vendor/three.module.min.js';
 import { PALETTE, STARTER_CAR, VEHICLE, VEHICLE_TYPES } from './config.js';
-import { clampToWorld, resolveCollisions } from './world.js';
+import { clampToWorld, colliderBlocksAt, resolveCollisions } from './world.js';
 
 const wheelGeometry = new THREE.CylinderGeometry(0.42, 0.42, 0.28, 10);
 wheelGeometry.rotateZ(Math.PI / 2);
@@ -352,8 +352,115 @@ function addSmoke(car) {
   return car.smoke;
 }
 
+// A circle around the vehicle center is not enough for the long car bodies. A
+// three-circle capsule keeps the collision primitive compatible with the
+// world's circle-vs-AABB resolver while covering the nose, middle and tail.
+const FOOTPRINTS = {
+  bike: { length: 2.36, width: 1.12 },
+  truck: { length: 6.56, width: 2.82 },
+  buggy: { length: 3.9, width: 2.64 },
+  sport: { length: 4.56, width: 2.55 },
+  vespera: { length: 4.71, width: 2.88 },
+  cargovan: { length: 5.04, width: 2.4 },
+};
+const STOCK_FOOTPRINT = { length: 4.48, width: 2.36 };
+const COLLISION_STEP = 0.5;
+const CONTACT_MARGIN = 1e-4;
+
+function carFootprint(spec, tuning) {
+  const { length, width } = FOOTPRINTS[spec?.variant] ?? STOCK_FOOTPRINT;
+  // Each circle encloses a third of the body rectangle, including its corners.
+  const offset = length / 3;
+  const radius = Math.max(tuning?.radius ?? VEHICLE.radius, Math.hypot(width / 2, length / 6)) + CONTACT_MARGIN;
+  return { radius, offsets: [-offset, 0, offset], reach: offset + radius };
+}
+
+function footprintIsClear(colliders, x, z, sin, cos, { radius, offsets, reach }) {
+  const limit = (radius - CONTACT_MARGIN / 2) ** 2;
+  for (const box of colliders) {
+    if (box.minX > x + reach || box.maxX < x - reach || box.minZ > z + reach || box.maxZ < z - reach) continue;
+    if (!colliderBlocksAt(box, x, z)) continue;
+    for (const offset of offsets) {
+      const sx = x + sin * offset;
+      const sz = z + cos * offset;
+      const dx = Math.max(box.minX - sx, sx - box.maxX, 0);
+      const dz = Math.max(box.minZ - sz, sz - box.maxZ, 0);
+      if (dx * dx + dz * dz < limit) return false;
+    }
+  }
+  return true;
+}
+
+/** Resolve a vehicle capsule, returning a contact normal for velocity sliding. */
+function resolveCarFootprint(colliders, x, z, heading, footprint, maxPush = COLLISION_STEP) {
+  const start = clampToWorld({ x, z });
+  let px = start.x;
+  let pz = start.z;
+  const sin = Math.sin(heading);
+  const cos = Math.cos(heading);
+  const reach = footprint.reach + maxPush + CONTACT_MARGIN;
+  const nearby = colliders.filter((box) => box
+    && box.minX <= px + reach && box.maxX >= px - reach
+    && box.minZ <= pz + reach && box.maxZ >= pz - reach);
+  if (!nearby.length) return { ...start, hit: false, clear: true, normalX: 0, normalZ: 0 };
+  let hit = false;
+  let normalX = 0;
+  let normalZ = 0;
+  // Each pass may expose a second collider after the first correction. Keep
+  // this bounded just like resolveCollisions to avoid pathological loops.
+  for (let pass = 0; pass < 4; pass += 1) {
+    let moved = false;
+    for (const offset of footprint.offsets) {
+      const sx = px + sin * offset;
+      const sz = pz + cos * offset;
+      const resolved = resolveCollisions(nearby, sx, sz, footprint.radius, { x: px, z: pz });
+      if (!resolved.hit) continue;
+      const dx = resolved.x - sx;
+      const dz = resolved.z - sz;
+      const length = Math.hypot(dx, dz);
+      if (length > 1e-7) {
+        px += dx;
+        pz += dz;
+        normalX += dx / length;
+        normalZ += dz / length;
+        moved = true;
+      }
+      hit = true;
+    }
+    if (!moved) break;
+  }
+  const normalLength = Math.hypot(normalX, normalZ);
+  if (normalLength > 1e-7) {
+    normalX /= normalLength;
+    normalZ /= normalLength;
+  }
+  const bounded = clampToWorld({ x: px, z: pz });
+  const clear = !hit || (
+    Math.hypot(bounded.x - start.x, bounded.z - start.z) <= maxPush + CONTACT_MARGIN
+    && footprintIsClear(nearby, bounded.x, bounded.z, sin, cos, footprint)
+  );
+  return { ...bounded, hit, clear, normalX, normalZ };
+}
+
+function turnCarFootprint(colliders, x, z, heading, turn, footprint) {
+  // Apply steering at the same point in the step, but test the path swept by
+  // the corners. A lag spike can otherwise rotate through a thin obstacle.
+  const steps = Math.ceil(Math.abs(turn) * footprint.reach / COLLISION_STEP);
+  const turnStep = steps ? turn / steps : 0;
+  for (let index = 0; index < steps; index += 1) {
+    const nextHeading = heading + turnStep;
+    const position = resolveCarFootprint(colliders, x, z, nextHeading, footprint);
+    if (!position.clear) break;
+    x = position.x;
+    z = position.z;
+    heading = nextHeading;
+  }
+  return { x, z, heading };
+}
+
 export function createVehicles(city, scene) {
   const cityColliders = city?.colliders ?? [];
+  const groundHeightAt = city?.groundHeightAt ?? (() => 0);
   const cars = [];
   const collisionGroups = [cars];
   const smokeMaterial = new THREE.MeshLambertMaterial({ color: 0x55524e, transparent: true, opacity: 0.5 });
@@ -361,7 +468,7 @@ export function createVehicles(city, scene) {
   function addCar(spec, position, heading, options = {}) {
     const built = buildCarMesh(spec);
     const group = built.group;
-    group.position.set(position.x, 0, position.z);
+    group.position.set(position.x, groundHeightAt(position.x, position.z), position.z);
     group.rotation.y = heading;
     scene.add(group);
     const car = {
@@ -370,6 +477,7 @@ export function createVehicles(city, scene) {
       wheels: built.wheels,
       spec,
       tuning: spec.tuning ?? VEHICLE,
+      footprint: carFootprint(spec, spec.tuning ?? VEHICLE),
       state: {
         x: position.x,
         z: position.z,
@@ -509,7 +617,24 @@ export function createVehicles(city, scene) {
     return best;
   }
 
-  function resolveCarCollisions(car) {
+  function pushCar(car, dx, dz, colliders) {
+    const state = car.state ?? car;
+    if (!car.footprint) {
+      const position = clampToWorld(resolveCollisions(colliders, state.x + dx, state.z + dz, car.tuning?.radius ?? VEHICLE.radius));
+      state.x = position.x;
+      state.z = position.z;
+      return;
+    }
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / COLLISION_STEP));
+    for (let index = 0; index < steps; index += 1) {
+      const position = resolveCarFootprint(colliders, state.x + dx / steps, state.z + dz / steps, state.heading, car.footprint);
+      if (!position.clear) break;
+      state.x = position.x;
+      state.z = position.z;
+    }
+  }
+
+  function resolveCarCollisions(car, colliders = cityColliders) {
     const state = car.state ?? car;
     const radius = car.tuning?.radius ?? VEHICLE.radius;
     for (const group of collisionGroups) {
@@ -525,12 +650,8 @@ export function createVehicles(city, scene) {
         const nx = distance > 0.001 ? dx / distance : Math.sin(state.heading);
         const nz = distance > 0.001 ? dz / distance : Math.cos(state.heading);
         const push = (separation - distance + 0.01) * 0.5;
-        const position = clampToWorld(resolveCollisions(cityColliders, state.x + nx * push, state.z + nz * push, radius));
-        const otherPosition = clampToWorld(resolveCollisions(cityColliders, otherState.x - nx * push, otherState.z - nz * push, otherRadius));
-        state.x = position.x;
-        state.z = position.z;
-        otherState.x = otherPosition.x;
-        otherState.z = otherPosition.z;
+        pushCar(car, nx * push, nz * push, colliders);
+        pushCar(other, -nx * push, -nz * push, colliders);
         const closingSpeed = (Math.sin(otherState.heading) * otherState.speed - Math.sin(state.heading) * state.speed) * nx
           + (Math.cos(otherState.heading) * otherState.speed - Math.cos(state.heading) * state.speed) * nz;
         if (closingSpeed > 0) {
@@ -542,8 +663,8 @@ export function createVehicles(city, scene) {
             if (other.state) damage(other, impactDamage);
           }
         }
-        car.group.position.set(state.x, 0, state.z);
-        other.group.position.set(otherState.x, 0, otherState.z);
+        car.group.position.set(state.x, groundHeightAt(state.x, state.z), state.z);
+        other.group.position.set(otherState.x, groundHeightAt(otherState.x, otherState.z), otherState.z);
       }
     }
   }
@@ -590,26 +711,60 @@ export function createVehicles(city, scene) {
     state.steerAngle += (steerInput * steerLimit - state.steerAngle) * (1 - Math.exp(-dt * T.steerResponse));
     state.steerAngle = Math.max(-steerLimit, Math.min(steerLimit, state.steerAngle));
     const yawRate = state.speed / T.wheelbase * Math.tan(state.steerAngle);
-    state.heading += yawRate * dt;
+    // turnCarFootprint below applies this step's heading change (swept, substepped);
+    // do not add it to state.heading here or the turn would apply twice.
+    const direction = state.speed < 0 ? -1 : 1;
+    const turn = yawRate * dt;
 
-    const sin = Math.sin(state.heading);
-    const cos = Math.cos(state.heading);
-    let nextX = state.x + sin * state.speed * dt;
-    let nextZ = state.z + cos * state.speed * dt;
-    const resolved = resolveCollisions(colliders, nextX, nextZ, T.radius);
-    if (resolved.hit) {
-      const impact = Math.abs(state.speed);
-      if (impact > T.crashSpeed) damage(car, impact * 0.9);
-      state.speed *= 0.25;
-      nextX = resolved.x;
-      nextZ = resolved.z;
+    const footprint = car.footprint ?? carFootprint(car.spec, T);
+    // A parked or teleported car can start in contact after a world reset.
+    const start = resolveCarFootprint(colliders, state.x, state.z, state.heading, footprint, footprint.reach);
+    let pose = turnCarFootprint(colliders, start.clear ? start.x : state.x, start.clear ? start.z : state.z, state.heading, turn, footprint);
+    const substeps = Math.max(1, Math.ceil(Math.abs(state.speed * dt) / COLLISION_STEP));
+    const subDt = dt / substeps;
+    let velocityX = Math.sin(pose.heading) * state.speed;
+    let velocityZ = Math.cos(pose.heading) * state.speed;
+    let damagedThisStep = false;
+    for (let step = 0; step < substeps; step += 1) {
+      const candidateX = pose.x + velocityX * subDt;
+      const candidateZ = pose.z + velocityZ * subDt;
+      const resolved = resolveCarFootprint(colliders, candidateX, candidateZ, pose.heading, footprint);
+      if (resolved.clear) {
+        pose.x = resolved.x;
+        pose.z = resolved.z;
+      }
+      if (!resolved.hit) continue;
+
+      const inwardSpeed = -(velocityX * resolved.normalX + velocityZ * resolved.normalZ);
+      if (!damagedThisStep && inwardSpeed > T.crashSpeed) {
+        damage(car, inwardSpeed * 0.9);
+        damagedThisStep = true;
+      }
+      // Keep the last safe pose when corrections wedge the car between solids.
+      if (car.state.wrecked || (!resolved.clear && inwardSpeed <= 0)) {
+        state.speed = 0;
+        break;
+      }
+      if (inwardSpeed <= 0) continue;
+      velocityX += resolved.normalX * inwardSpeed;
+      velocityZ += resolved.normalZ * inwardSpeed;
+      const slideSpeed = Math.hypot(velocityX, velocityZ);
+      if (slideSpeed < 0.05) {
+        state.speed = 0;
+        break;
+      }
+      state.speed = direction * slideSpeed;
+      const slideHeading = Math.atan2(velocityX * direction, velocityZ * direction);
+      const headingDelta = slideHeading - pose.heading;
+      const angle = Math.atan2(Math.sin(headingDelta), Math.cos(headingDelta));
+      pose = turnCarFootprint(colliders, pose.x, pose.z, pose.heading, angle, footprint);
     }
-    const bounded = clampToWorld({ x: nextX, z: nextZ });
-    state.x = bounded.x;
-    state.z = bounded.z;
-    resolveCarCollisions(car);
+    state.x = pose.x;
+    state.z = pose.z;
+    state.heading = pose.heading;
+    resolveCarCollisions(car, colliders);
 
-    car.group.position.set(state.x, 0, state.z);
+    car.group.position.set(state.x, groundHeightAt(state.x, state.z), state.z);
     car.group.rotation.y = state.heading;
     state.wheelSpin += state.speed * dt * 2.4;
     const spin = state.steerAngle;
@@ -645,7 +800,7 @@ export function createVehicles(city, scene) {
     for (const wheel of car.wheels) {
       if (wheel.front) (wheel.steering ?? wheel.mesh).rotation.y = 0;
     }
-    car.group.position.set(x, 0, z);
+    car.group.position.set(x, groundHeightAt(x, z), z);
     car.group.rotation.y = heading;
   }
 

@@ -12,6 +12,46 @@ const WINDOW_BAY = 2.65;
 const FLOOR_HEIGHT = 2.85;
 const DECO_PASTELS = [0xe9b6ae, 0xb0d0c1, 0xeed0a7, 0xa9c8d7, 0xd5bbd7];
 const CANAL = { startX: -540, endX: -372, z: 0, width: 16 };
+const CANAL_DECKS = [-504, -432].map((x) => ({
+  x, y: 0.14, z: CANAL.z, width: CITY.road + 2, height: 0.3, depth: CANAL.width + 4,
+}));
+const CAUSEWAY = {
+  z: 84, width: 18, thickness: 1.05,
+  profile: [[-648, 0.4], [-600, 1.1], [-552, 1.6], [-504, 1.8], [-456, 1.6], [-408, 1.1], [-360, 0.4]],
+  approachLength: 10,
+};
+const [lastSpanX, lastSpanY] = CAUSEWAY.profile.at(-2);
+const [causewayEastEndX, causewayEastEndY] = CAUSEWAY.profile.at(-1);
+const causewayEastRoadEdge = CITY.nodeMin - CITY.road / 2;
+const eastRampStartX = causewayEastRoadEdge - CAUSEWAY.approachLength;
+const lastSpanSlope = (causewayEastEndY - lastSpanY) / (causewayEastEndX - lastSpanX);
+const CAUSEWAY_DECKS = [
+  [CAUSEWAY.profile[0][0] - CAUSEWAY.approachLength, 0],
+  ...CAUSEWAY.profile.slice(0, -1).map(([x, y]) => [x, y + CAUSEWAY.thickness / 2]),
+  [eastRampStartX, lastSpanY + lastSpanSlope * (eastRampStartX - lastSpanX) + CAUSEWAY.thickness / 2],
+  // The eastern approach meets the western edge of the north/south road.
+  [causewayEastRoadEdge, 0],
+];
+
+/** Height of the bridge surface, in metres above the rest of the terrain. */
+export function groundHeightAt(x, z) {
+  if (Math.abs(z - CAUSEWAY.z) <= CAUSEWAY.width / 2) {
+    for (let index = 0; index < CAUSEWAY_DECKS.length - 1; index++) {
+      const [startX, startY] = CAUSEWAY_DECKS[index];
+      const [endX, endY] = CAUSEWAY_DECKS[index + 1];
+      if (x >= startX && x <= endX) return startY + (endY - startY) * (x - startX) / (endX - startX);
+    }
+  }
+  for (const deck of CANAL_DECKS) {
+    if (Math.abs(x - deck.x) <= deck.width / 2 && Math.abs(z - deck.z) <= deck.depth / 2) return deck.y + deck.height / 2;
+  }
+  return 0;
+}
+
+/** Bridge piers support actors on top of the deck and obstruct actors below it. */
+export function colliderBlocksAt(box, x, z) {
+  return Boolean(box) && (box.bridgePart !== 'causeway-pier' || groundHeightAt(x, z) < box.height);
+}
 
 function inFreewayCorridor(x, z, padding = 0) {
   const { minX, maxX, minZ, maxZ, width } = CITY.freeway;
@@ -311,52 +351,70 @@ function addBoats(parent, name, boats) {
     boats.map((boat) => part(boat, 0.035, 1.26, 0.028, 0.095, 0.052)));
 }
 
-function addCauseway(parent, colliders) {
+function addCauseway(parent, colliders, cameraBlockers) {
   const causeway = new THREE.Group();
   causeway.userData.roadInfrastructure = true;
   causeway.name = 'West Shore Causeway';
   parent.add(causeway);
   const cube = new THREE.BoxGeometry(1, 1, 1);
-  const z = 84;
-  const width = 18;
-  const breaks = [-648, -600, -552, -504, -456, -408, -360];
-  const height = [0.4, 1.1, 1.6, 1.8, 1.6, 1.1, 0.4];
+  const { z, width, thickness, profile } = CAUSEWAY;
   const pillars = [];
   const railPosts = [];
   const deckMaterial = new THREE.MeshLambertMaterial({ color: 0x8c8586 });
   const railMaterial = new THREE.MeshLambertMaterial({ color: 0xd8c3b3 });
-  for (let span = 0; span < breaks.length - 1; span += 1) {
-    const run = breaks[span + 1] - breaks[span];
-    const rise = height[span + 1] - height[span];
+  for (let span = 0; span < CAUSEWAY_DECKS.length - 1; span += 1) {
+    const [startX, startY] = CAUSEWAY_DECKS[span];
+    const [endX, endY] = CAUSEWAY_DECKS[span + 1];
+    const run = endX - startX;
+    const rise = endY - startY;
     const length = Math.hypot(run, rise);
     const pitch = Math.atan2(rise, run);
-    const center = breaks[span] + run / 2;
-    const y = height[span] + rise / 2;
-    const deck = new THREE.Mesh(cube, deckMaterial);
-      deck.position.set(center, y, z);
-      deck.scale.set(length + 0.3, 1.05, width);
-    deck.rotation.z = pitch;
+    const center = startX + run / 2;
+    const y = startY + rise / 2;
+    // Shear the slab so neighboring sections share the exact floor edge.
+    const geometry = new THREE.BoxGeometry(run, thickness, width);
+    const vertices = geometry.getAttribute('position');
+    for (let i = 0; i < vertices.count; i++) {
+      vertices.setY(i, vertices.getY(i) + vertices.getX(i) * rise / run);
+    }
+    geometry.computeVertexNormals();
+    const deck = new THREE.Mesh(geometry, deckMaterial);
+    deck.position.set(center, y - thickness / 2, z);
     causeway.add(deck);
+    cameraBlockers.push({
+      roadInfrastructure: true, bridgePart: 'causeway-deck',
+      minX: startX, maxX: endX, minZ: z - width / 2, maxZ: z + width / 2,
+      minY: Math.min(startY, endY) - thickness, height: Math.max(startY, endY),
+    });
     for (const side of [-1, 1]) {
-      const railZ = z + side * (width / 2 - 0.55);
+      const edgeZ = z + side * width / 2;
+      const railZ = edgeZ - side * 0.55;
       const rail = new THREE.Mesh(cube, railMaterial);
-      rail.position.set(center, y + 1.85, railZ);
-      rail.scale.set(length + 0.2, 0.27, 0.3);
+      rail.position.set(center, y + 1.325, railZ);
+      rail.scale.set(length, 0.27, 0.3);
       rail.rotation.z = pitch;
       causeway.add(rail);
-      for (let step = 0; step < 8; step += 1) {
-        const fraction = step / 8;
-        railPosts.push({ x: breaks[span] + run * fraction, y: height[span] + rise * fraction + 1.05,
+      // The vertical side face guards the entire slab edge, including under the rail.
+      const innerZ = railZ - side * 0.195;
+      colliders.push({
+        roadInfrastructure: true, bridgePart: 'causeway-railing', minX: startX, maxX: endX,
+        minZ: Math.min(edgeZ, innerZ), maxZ: Math.max(edgeZ, innerZ), height: Math.max(startY, endY) + 1.46,
+      });
+      const postCount = Math.ceil(run / 6);
+      for (let step = 0; step < postCount; step += 1) {
+        const fraction = step / postCount;
+        railPosts.push({ x: startX + run * fraction, y: startY + rise * fraction + 0.525,
           z: railZ, width: 0.33, height: 1.28, depth: 0.39 });
       }
     }
   }
-  breaks.forEach((x, index) => {
-    const h = height[index];
+  profile.forEach(([x, y]) => {
+    // The last supports meet the grade under the existing north/south road.
+    const h = x >= causewayEastRoadEdge ? 0 : y;
     for (const side of [-1, 1]) {
       const supportZ = z + side * 4.6;
       pillars.push({ x, y: (h - 4) / 2, z: supportZ, width: 3.6, height: h + 4, depth: 3.25 });
-      colliders.push({ roadInfrastructure: true, minX: x - 1.8, maxX: x + 1.8, minZ: supportZ - 1.625,
+      colliders.push({ roadInfrastructure: true, bridgePart: 'causeway-pier', minX: x - 1.8, maxX: x + 1.8, minZ: supportZ - 1.625,
         maxZ: supportZ + 1.625, height: h });
     }
   });
@@ -364,8 +422,8 @@ function addCauseway(parent, colliders) {
   addWaterfrontInstances(causeway, 'guardrail posts', cube, 0xd8c3b3, railPosts);
   const island = new THREE.CylinderGeometry(0.78, 1, 1, 9);
   addWaterfrontInstances(causeway, 'approach islets', island, 0xb79b7e, [
-    { x: breaks[0] - 5, y: 0.45, z, width: 15, height: 1.2, depth: 22, yaw: 0.13 },
-    { x: breaks.at(-1) + 5, y: 0.45, z, width: 15, height: 1.2, depth: 22, yaw: -0.24 },
+    { x: CAUSEWAY_DECKS[0][0], y: -0.6, z, width: 15, height: 1.2, depth: 22, yaw: 0.13 },
+    { x: causewayEastEndX + 5, y: -0.6, z, width: 15, height: 1.2, depth: 22, yaw: -0.24 },
   ]);
 }
 
@@ -410,7 +468,7 @@ function addMarina(parent, random) {
   addBoats(group, 'Moored boats', boats);
 }
 
-function addCanal(parent, waterMaterial, colliders) {
+function addCanal(parent, waterMaterial, colliders, cameraBlockers) {
   const group = new THREE.Group();
   group.name = 'Lucero Inlet';
   group.userData.roadInfrastructure = true;
@@ -424,19 +482,53 @@ function addCanal(parent, waterMaterial, colliders) {
 
   const cube = new THREE.BoxGeometry(1, 1, 1);
   const banks = [];
+  const railings = [];
+  const copingSegments = [];
+  let startX = CANAL.startX + 5;
+  for (const deck of CANAL_DECKS) {
+    // The coping clears the deck edge but leaves no person-wide gap beside the rail.
+    const halfGap = deck.width / 2 + 0.7;
+    copingSegments.push([startX, deck.x - halfGap]);
+    startX = deck.x + halfGap;
+  }
+  copingSegments.push([startX, CANAL.endX - 5]);
+  for (const deck of CANAL_DECKS) {
+    const top = deck.y + deck.height / 2;
+    const minZ = deck.z - deck.depth / 2;
+    const maxZ = deck.z + deck.depth / 2;
+    cameraBlockers.push({
+      roadInfrastructure: true, bridgePart: 'canal-deck',
+      minX: deck.x - deck.width / 2, maxX: deck.x + deck.width / 2,
+      minZ, maxZ, minY: deck.y - deck.height / 2, height: top,
+    });
+    const thickness = 0.4;
+    for (const side of [-1, 1]) {
+      const edgeX = deck.x + side * deck.width / 2;
+      const innerX = edgeX - side * thickness;
+      const x = (edgeX + innerX) / 2;
+      railings.push({ x, y: top + 0.45, z: deck.z, width: thickness, height: 0.9, depth: deck.depth });
+      colliders.push({
+        roadInfrastructure: true, bridgePart: 'canal-railing',
+        minX: Math.min(edgeX, innerX), maxX: Math.max(edgeX, innerX), minZ, maxZ,
+        height: top + 0.9,
+      });
+    }
+  }
   for (const side of [-1, 1]) {
     const edgeZ = CANAL.z + side * CANAL.width / 2;
-    banks.push({ x: centerX, y: -0.04, z: edgeZ, width: length, height: 0.17, depth: 0.72 });
-    colliders.push({ roadInfrastructure: true, minX: CANAL.startX + 5, maxX: CANAL.endX - 5,
-      minZ: edgeZ - 0.22, maxZ: edgeZ + 0.22, height: 0.23 });
+    for (const [minX, maxX] of copingSegments) {
+      const visualStart = minX === CANAL.startX + 5 ? CANAL.startX : minX;
+      const visualEnd = maxX === CANAL.endX - 5 ? CANAL.endX : maxX;
+      banks.push({ x: (visualStart + visualEnd) / 2, y: -0.04, z: edgeZ,
+        width: visualEnd - visualStart, height: 0.17, depth: 0.72 });
+      colliders.push({ roadInfrastructure: true, bridgePart: 'canal-coping', minX, maxX,
+        minZ: edgeZ - 0.22, maxZ: edgeZ + 0.22, height: 0.23 });
+    }
   }
   addWaterfrontInstances(group, 'limestone coping', cube, 0xd2baa0, banks);
-  const bridges = [-504, -432].map((x) => ({
-    x, y: 0.14, z: CANAL.z,
-    width: CITY.road + 2, height: 0.3, depth: CANAL.width + 4,
-  }));
-  addWaterfrontInstances(group, 'footbridge deck', cube, 0x9f7960, bridges);
-  addCauseway(group, colliders);
+  addWaterfrontInstances(group, 'footbridge deck', cube, 0x9f7960, CANAL_DECKS);
+  addWaterfrontInstances(group, 'footbridge railings', cube, 0xd8c3b3, railings);
+  addCauseway(group, colliders, cameraBlockers);
 }
 
 function addAirport(parent, colliders) {
@@ -763,6 +855,8 @@ export function createCity(random, reservedPlaces = []) {
   const buildings = [];
   const containers = [];
   const colliders = [];
+  const bridgeColliders = [];
+  const cameraBlockers = [];
   const decoCaps = [];
   const labels = [];
   const downtownTowers = [];
@@ -1454,7 +1548,7 @@ export function createCity(random, reservedPlaces = []) {
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.set(CITY.oceanWestStart - 1200, -0.12, 0);
   group.add(ocean);
-  addCanal(group, water, colliders);
+  addCanal(group, water, bridgeColliders, cameraBlockers);
   addAirport(group, colliders);
 
   // Seed the fleet separately so the original lot, prop and spawn sequences stay intact.
@@ -1872,6 +1966,23 @@ export function createCity(random, reservedPlaces = []) {
 
   // Add solid freeway furniture after seeded city dressing, so no RNG decisions shift.
   addFreeway(group, colliders);
+  colliders.push(...bridgeColliders);
+
+  // Match the bodies of business and safehouse meshes created by the place
+  // modules. Add these after dressing so they cannot change seeded prop placement.
+  for (const place of reserved) {
+    const width = Number.isFinite(place.width) && place.width > 0 ? place.width : 8;
+    const depth = Number.isFinite(place.depth) && place.depth > 0 ? place.depth : 6;
+    const bounds = {
+      minX: place.x - width / 2,
+      maxX: place.x + width / 2,
+      minZ: place.z - 1.8 - depth,
+      maxZ: place.z - 1.8,
+    };
+    if (!roadConflict(bounds)) {
+      colliders.push({ ...bounds, height: (place.kind === 'safehouse' ? 4.2 : 3.5) + 0.28, placeId: place.id });
+    }
+  }
 
   enforceRoadClearance(group, colliders);
   const graph = buildRoadGraph();
@@ -1942,6 +2053,8 @@ export function createCity(random, reservedPlaces = []) {
     downtownTowers,
     containers,
     colliders,
+    cameraBlockers,
+    groundHeightAt,
     setNightFactor,
     setSignalClock,
     spawnPoints: {
@@ -1962,7 +2075,7 @@ export function createCity(random, reservedPlaces = []) {
 }
 
 /** Push a circle (x, z, radius) out of every AABB it overlaps; returns the corrected position. */
-export function resolveCollisions(colliders, x, z, radius) {
+export function resolveCollisions(colliders, x, z, radius, support) {
   let px = x;
   let pz = z;
   let hit = false;
@@ -1974,6 +2087,7 @@ export function resolveCollisions(colliders, x, z, radius) {
   for (let pass = 0; pass < maxPasses; pass += 1) {
     let moved = false;
     for (const box of boxes) {
+      if (!colliderBlocksAt(box, support?.x ?? px, support?.z ?? pz)) continue;
       const closestX = Math.max(box.minX, Math.min(box.maxX, px));
       const closestZ = Math.max(box.minZ, Math.min(box.maxZ, pz));
       const dx = px - closestX;
@@ -2019,7 +2133,8 @@ export function clampToWorld(position) {
   // The hills connector reaches the city at z=-360. Choose the west bound from
   // the terrain band so crossing the grid edge can enter the sand or airport apron.
   const rural = position.z < CITY.nodeMin;
-  const minX = rural ? RURAL.minX : CITY.beachWestEnd + 6;
+  const onCauseway = Math.abs(position.z - CAUSEWAY.z) <= CAUSEWAY.width / 2;
+  const minX = rural ? RURAL.minX : onCauseway ? CAUSEWAY_DECKS[0][0] - 5 : CITY.beachWestEnd + 6;
   const maxX = rural ? RURAL.maxX : CITY.edge;
   position.x = Math.max(minX, Math.min(maxX, position.x));
   return position;

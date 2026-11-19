@@ -72,7 +72,7 @@ function buildPack() {
   return { group, exhaust, flames, particles };
 }
 
-export function createJetpack(_scene, player) {
+export function createJetpack(_scene, player, groundHeightAt = () => 0) {
   const { group, exhaust, flames, particles } = buildPack();
   player.body.add(group);
   const state = {
@@ -171,9 +171,10 @@ export function createJetpack(_scene, player) {
         rider.vy = controls.descend ? -DESCENT_SPEED : -GLIDE_SPEED;
         rider.y += rider.vy * dt;
       }
-      rider.grounded = rider.y <= 0;
+      const floor = groundHeightAt(rider.x, rider.z);
+      rider.grounded = rider.y <= floor;
       if (rider.grounded) {
-        rider.y = 0;
+        rider.y = floor;
         rider.vy = 0;
       }
       rider.jetpackFlying = isFlying();

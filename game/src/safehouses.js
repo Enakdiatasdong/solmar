@@ -5,15 +5,15 @@ import { createPlaceMarker, nearestPlace } from './places.js';
 
 const RING = '#b48ce0';
 const GARAGE = placeOffRoad({
-  ...GARAGE_LOCATION, id: 'garage-flat', name: 'Moreno Garage Flat',
+  ...GARAGE_LOCATION, id: 'garage-flat', kind: 'safehouse', name: 'Moreno Garage Flat',
   color: 0xcb9a70, roof: 0x76594c, width: 8, depth: 6,
 }, 'safehouse');
 const LOFT = placeOffRoad({
-  id: 'marina-loft', name: 'Marina Loft', x: -360, z: -108, price: 5000,
+  id: 'marina-loft', kind: 'safehouse', name: 'Marina Loft', x: -360, z: -108, price: 5000,
   color: 0x8db5bb, roof: 0x3c5674, width: 7, depth: 8,
 }, 'safehouse');
 const HILLTOP = placeOffRoad({
-  id: 'hilltop-house', name: 'Hilltop House', x: -288, z: -540, mission: 'beach-run',
+  id: 'hilltop-house', kind: 'safehouse', name: 'Hilltop House', x: -288, z: -540, mission: 'beach-run',
   color: 0xe0c8a0, roof: 0x94534e, width: 10, depth: 7,
 }, 'safehouse');
 

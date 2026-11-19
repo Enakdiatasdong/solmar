@@ -7,7 +7,7 @@ import {
 } from './config.js';
 import { currentDifficulty, setDifficulty } from './difficulty.js';
 import { createRandom, parseSeed } from './random.js';
-import { clampToWorld, createCity, resolveCollisions } from './world.js';
+import { createCity, resolveCollisions } from './world.js';
 import { createDistricts } from './districts.js';
 import { createLandmarks } from './landmarks.js';
 import { createPlayer } from './player.js';
@@ -106,7 +106,7 @@ function makeGame(seedValue, shotName = null) {
   const districts = createDistricts({ scene: renderer.scene, city, random: createRandom(seedValue ^ 0xd157) });
   const player = createPlayer(city);
   renderer.scene.add(player.group);
-  const jetpack = createJetpack(renderer.scene, player);
+  const jetpack = createJetpack(renderer.scene, player, city.groundHeightAt);
   const vehicles = createVehicles(city, renderer.scene);
   vehicles.spawnStarter();
   vehicles.spawnParked(random);
@@ -127,6 +127,7 @@ function makeGame(seedValue, shotName = null) {
   const audio = createAudio();
   const hud = createHud();
   const landmarks = createLandmarks({ scene: renderer.scene, city, districts, hud });
+  const cameraColliders = [...city.colliders, ...city.cameraBlockers];
   let storyObjective = '';
   let vehicleObjective = '';
   let raceObjective = '';
@@ -258,7 +259,7 @@ function makeGame(seedValue, shotName = null) {
     if (!car) return;
     player.state.x = car.state.x;
     player.state.z = car.state.z;
-    player.state.y = 0;
+    player.state.y = car.group.position.y;
     player.state.heading = car.state.heading;
     player.state.speed = Math.abs(car.state.speed);
     player.syncMesh();
@@ -411,7 +412,9 @@ function makeGame(seedValue, shotName = null) {
       CAMERA.minDistance, CAMERA.maxDistance);
     const safeDistance = (yaw, pitch, focusY) => {
       const options = { focusY, height, step: CAMERA.collisionStep };
-      let distance = safeCameraDistance(focus, yaw, pitch, requestedDistance, city.colliders, options);
+      // cameraColliders adds the causeway/canal deck blockers: decks are walkable
+      // (not gameplay colliders) but the camera must never sit inside one.
+      let distance = safeCameraDistance(focus, yaw, pitch, requestedDistance, cameraColliders, options);
       if (distance < requestedDistance) {
         // Refine only the last coarse interval: continuous clearance without testing the
         // entire ray at tiny steps or exposing 25 cm quantization to the follow camera.
@@ -426,18 +429,25 @@ function makeGame(seedValue, shotName = null) {
       return distance;
     };
     renderer.updateCamera(dt, player, { ...orbit, chase, distance: requestedDistance, safeDistance }, 0);
+    // The renderer applies minimum zoom and smoothing. Neither may place the camera inside a deck.
+    const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(player.state.y) ? player.state.y : 0);
+    const safeDistanceValue = safeDistance(orbit.yaw, orbit.pitch, focusY);
+    const rendererDistance = Math.max(CAMERA.minDistance, Math.min(CAMERA.maxDistance, requestedDistance));
+    if (safeDistanceValue < rendererDistance || !cameraPositionClear(renderer.camera.position, city.cameraBlockers)) {
+      const safePosition = cameraPositionAtDistance(focus, orbit.yaw, orbit.pitch, safeDistanceValue, { focusY, height });
+      renderer.cameraState.pos.set(safePosition.x, safePosition.y, safePosition.z);
+      renderer.cameraState.distance = safeDistanceValue;
+      renderer.camera.position.copy(renderer.cameraState.pos);
+      renderer.camera.lookAt(renderer.cameraState.target);
+    }
   }
 
   function leaveCar() {
     const car = player.state.inCar;
     if (!car) return;
-    const spot = exitSpot(car);
-    const resolved = resolveCollisions(city.colliders, spot.x, spot.z, PLAYER.radius);
-    player.exitCar(clampToWorld(resolved), car.state.heading);
+    player.exitCar(exitSpot(car), car.state.heading);
     car.state.speed = 0;
     player.state.speed = 0;
-    player.state.vy = 0;
-    player.state.grounded = true;
     races.fail('You left the car.');
     vehicleJobs.fail('You left the vehicle.');
   }

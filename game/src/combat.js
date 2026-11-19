@@ -102,9 +102,10 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
   const shotEnd = new THREE.Vector3();
 
   function spawnEnemy(x, z, options = {}) {
-    const start = resolveCollisions(getCity()?.colliders ?? [], x, z, COMBAT.enemyRadius);
+    const city = getCity();
+    const start = resolveCollisions(city?.colliders ?? [], x, z, COMBAT.enemyRadius);
     const built = enemyMesh();
-    built.group.position.set(start.x, NPC_GROUND, start.z);
+    built.group.position.set(start.x, NPC_GROUND + (city?.groundHeightAt?.(start.x, start.z) ?? 0), start.z);
     scene.add(built.group);
     const enemy = {
       group: built.group,
@@ -361,15 +362,15 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
     enemy.alive = false;
     if (enemy.isCop) enemy.down = 8;
     enemy.group.rotation.z = Math.PI / 2;
-    enemy.group.position.y = 0.4;
+    enemy.group.position.y = 0.4 + (getCity()?.groundHeightAt?.(enemy.x, enemy.z) ?? 0);
   }
 
   function fireAtPlayer(shooter, originY, player, damage, source, chance, city) {
     if (!player.state.alive) return;
     const car = player.state.inCar?.state;
     const target = car ?? player.state;
-    const origin = new THREE.Vector3(shooter.x, originY, shooter.z);
-    const to = new THREE.Vector3(target.x, 1.2 + (car ? 0 : target.y), target.z);
+    const origin = new THREE.Vector3(shooter.x, originY + (city?.groundHeightAt?.(shooter.x, shooter.z) ?? 0), shooter.z);
+    const to = new THREE.Vector3(target.x, 1.2 + (player.state.y ?? 0), target.z);
     const direction = new THREE.Vector3().subVectors(to, origin);
     const range = direction.length();
     if (range === 0 || range > 30) return;
@@ -429,7 +430,7 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
         enemy.shootTimer = COMBAT.enemyFireRate + random() * 0.6;
         fireAtPlayer(enemy, 1.45, player, COMBAT.enemyDamage, enemy.mission, 0.4, city);
       }
-      enemy.group.position.set(enemy.x, NPC_GROUND, enemy.z);
+      enemy.group.position.set(enemy.x, NPC_GROUND + (city?.groundHeightAt?.(enemy.x, enemy.z) ?? 0), enemy.z);
       enemy.group.rotation.y = enemy.heading;
     }
   }
