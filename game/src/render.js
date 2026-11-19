@@ -251,6 +251,7 @@ export function createRenderer(canvas) {
     distance: CAMERA.modes.near.foot.distance,
     fov: camera.fov,
     focusY: 1.5,
+    horizontalFocus: new THREE.Vector3(),
     target: new THREE.Vector3(),
     pos: new THREE.Vector3(0, 6, 12),
     mode: 'foot',
@@ -321,11 +322,17 @@ export function createRenderer(canvas) {
       cameraState.yaw = requestedYaw;
       cameraState.pitch = requestedPitch;
       cameraState.focusY = focusY;
+      cameraState.horizontalFocus.set(focus.x, 0, focus.z);
     } else {
       const yawDelta = Math.atan2(Math.sin(requestedYaw - cameraState.yaw), Math.cos(requestedYaw - cameraState.yaw));
       cameraState.yaw += yawDelta * blend(damping.yaw);
       cameraState.pitch += (requestedPitch - cameraState.pitch) * blend(damping.pitch);
       cameraState.focusY += (focusY - cameraState.focusY) * blend(damping.focusY);
+      if (inCar) cameraState.horizontalFocus.set(focus.x, 0, focus.z);
+      else {
+        cameraState.horizontalFocus.x += (focus.x - cameraState.horizontalFocus.x) * blend(damping.horizontalFocus);
+        cameraState.horizontalFocus.z += (focus.z - cameraState.horizontalFocus.z) * blend(damping.horizontalFocus);
+      }
     }
     cameraState.yaw = Math.atan2(Math.sin(cameraState.yaw), Math.cos(cameraState.yaw));
 
@@ -350,10 +357,13 @@ export function createRenderer(canvas) {
         desiredPosition.y - Math.sin(pitch) * cameraState.distance,
         desiredPosition.z + Math.cos(yaw) * horizontal);
     } else {
-      desiredTarget.set(focus.x, cameraState.focusY + 0.9 + (chase ? (inCar ? 3.4 : 2.6) : 0), focus.z);
-      desiredPosition.set(focus.x - Math.sin(yaw) * horizontal,
+      // BF2: third-person target follows the damped horizontal anchor, not the
+      // jumping player's x/z (first-person eye above stays exactly on the player).
+      desiredTarget.set(cameraState.horizontalFocus.x,
+        cameraState.focusY + 0.9 + (chase ? (inCar ? 3.4 : 2.6) : 0), cameraState.horizontalFocus.z);
+      desiredPosition.set(cameraState.horizontalFocus.x - Math.sin(yaw) * horizontal,
         cameraState.focusY + height + Math.sin(pitch) * cameraState.distance * 0.55,
-        focus.z - Math.cos(yaw) * horizontal);
+        cameraState.horizontalFocus.z - Math.cos(yaw) * horizontal);
     }
     if (snap) {
       cameraState.pos.copy(desiredPosition);

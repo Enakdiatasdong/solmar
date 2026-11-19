@@ -454,9 +454,28 @@ function makeGame(seedValue, shotName = null) {
     cameraZoomInCar = inCar;
     const requestedDistance = chase ? CAMERA.chaseDistance : zoomable ? orbit.distance : params.distance;
     // Overhead views can cross rooftops. The first-person eye has no orbit arm to retract.
+    // BF2: once settled on foot, test clearance from the damped horizontal anchor so the
+    // safe ray follows the camera's actual path; refine the last coarse interval by
+    // bisection instead of exposing 25 cm quantization to the follow camera.
     const safeDistance = chase || zoomable
-      ? (yaw, pitch, focusY, height) => safeCameraDistance(focus, yaw, pitch, requestedDistance, city.colliders,
-        { focusY, height })
+      ? (yaw, pitch, focusY, height) => {
+        const options = { focusY, height, step: CAMERA.collisionStep };
+        const anchor = renderer.cameraState.horizontalFocus;
+        const anchorNeedsSnap = dt >= 1 || renderer.cameraState.mode !== 'foot'
+          || Math.hypot(focus.x - anchor.x, focus.z - anchor.z) > 80;
+        const cameraFocus = inCar || anchorNeedsSnap ? focus : anchor;
+        let distance = safeCameraDistance(cameraFocus, yaw, pitch, requestedDistance, city.colliders, options);
+        if (distance < requestedDistance) {
+          let blockedDistance = Math.min(requestedDistance, distance + CAMERA.collisionStep);
+          for (let index = 0; index < CAMERA.collisionRefinements; index += 1) {
+            const candidate = (distance + blockedDistance) * 0.5;
+            const position = cameraPositionAtDistance(cameraFocus, yaw, pitch, candidate, options);
+            if (cameraPositionClear(position, city.colliders, options)) distance = candidate;
+            else blockedDistance = candidate;
+          }
+        }
+        return distance;
+      }
       : undefined;
     renderer.updateCamera(dt, player, {
       ...orbit, chase, cameraMode, aiming: player.state.aiming, distance: requestedDistance, safeDistance,
@@ -466,7 +485,7 @@ function makeGame(seedValue, shotName = null) {
     if (safeDistance) {
       const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
       const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(player.state.y) ? player.state.y : 0);
-      const safeDistanceValue = safeDistance(orbit.yaw, orbit.pitch, focusY);
+      const safeDistanceValue = safeDistance(orbit.yaw, orbit.pitch, focusY, height);
       const rendererDistance = Math.max(CAMERA.minDistance, Math.min(CAMERA.maxDistance, requestedDistance));
       if (safeDistanceValue < rendererDistance || !cameraPositionClear(renderer.camera.position, city.cameraBlockers)) {
         const safePosition = cameraPositionAtDistance(focus, orbit.yaw, orbit.pitch, safeDistanceValue, { focusY, height });

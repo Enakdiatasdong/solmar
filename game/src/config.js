@@ -102,8 +102,8 @@ export const CAMERA = {
   minDistance: 4.5,
   maxDistance: 15,
   follow: 12,
-  // Match position/target response to keep the view angle steady between physics ticks.
-  footDamping: { position: 14, target: 14, focusY: 10, yaw: 14, pitch: 14, distance: 10 },
+  // A separate horizontal anchor absorbs on-foot physics-tick changes before camera follow.
+  footDamping: { position: 14, target: 14, horizontalFocus: 14, focusY: 10, yaw: 14, pitch: 14, distance: 10 },
   carDamping: { position: 9, target: 9, focusY: 7, yaw: 9, pitch: 10, distance: 8 },
   headingFollow: 7,
   collisionIn: 28,
