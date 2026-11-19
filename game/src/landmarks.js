@@ -1,6 +1,6 @@
 // Named places and lightweight navigation beacons for the Solmar map.
 import * as THREE from '../vendor/three.module.min.js';
-import { resolveCollisions } from './world.js';
+import { relocateFootprint, roadConflict, footprint } from './roads.js';
 
 const LANDMARKS = [
   ['menara-solmar', 'Menara Solmar', 'menara', 0, -36],
@@ -110,14 +110,23 @@ function addLighthouse(parent, colliders, worldX, worldZ) {
   colliders.push({ minX: worldX + towerOffset - 4.5, maxX: worldX + towerOffset + 4.5, minZ: worldZ - 4.5, maxZ: worldZ + 4.5, height: 15 });
 }
 
-function clearPoint(colliders, x, z) {
-  if (!resolveCollisions(colliders, x, z, 2).hit) return { x, z };
-  // Existing props can occupy a requested center; approach it from a nearby road/clearing.
-  const offsets = [[8, 0], [-8, 0], [0, 8], [0, -8], [12, 0], [0, 12], [-12, 0], [0, -12], [16, 0], [0, 16]];
-  for (const [dx, dz] of offsets) {
-    if (!resolveCollisions(colliders, x + dx, z + dz, 2).hit) return { x: x + dx, z: z + dz };
+function clearPoint(colliders, x, z, shape) {
+  const point = relocateFootprint({ x, z }, shape);
+  const clear = (candidate) => {
+    const bounds = footprint(candidate, shape);
+    return !roadConflict(bounds) && !colliders.some((box) => bounds.maxX > box.minX
+      && bounds.minX < box.maxX && bounds.maxZ > box.minZ && bounds.minZ < box.maxZ);
+  };
+  if (clear(point)) return point;
+  // Find a nearby clear lot, keeping beacon, geometry and discovery blip together.
+  const candidates = [];
+  for (let dx = -432; dx <= 432; dx += 72) for (let dz = -432; dz <= 432; dz += 72) {
+    const candidate = relocateFootprint({ x: point.x + dx, z: point.z + dz }, shape);
+    if (clear(candidate)) candidates.push(candidate);
   }
-  return { x: x + 18, z };
+  candidates.sort((a, b) => (a.x - x) ** 2 + (a.z - z) ** 2 - ((b.x - x) ** 2 + (b.z - z) ** 2));
+  if (!candidates.length) throw new Error('No clear lot for landmark');
+  return candidates[0];
 }
 
 export function createLandmarks({ scene, city, districts, hud }) {
@@ -133,7 +142,11 @@ export function createLandmarks({ scene, city, districts, hud }) {
   let elapsed = 0;
   const colliders = city.colliders;
   for (const [id, name, type, rawX, rawZ] of LANDMARKS) {
-    const point = clearPoint(colliders, rawX, rawZ);
+    const shape = type === 'stadion' ? { width: 36, depth: 40, offsetZ: -5 }
+      : type === 'danau' ? { width: 56, depth: 56 }
+      : type === 'mercusuar' ? { width: 16.5, depth: 9, offsetX: 5.75 }
+      : { width: 5.2, depth: 5.2 };
+    const point = clearPoint(colliders, rawX, rawZ, shape);
     const landmark = { id, name, type, x: point.x, z: point.z, requestedX: rawX, requestedZ: rawZ };
     const holder = new THREE.Group();
     holder.position.set(point.x, 0, point.z);

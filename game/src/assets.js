@@ -1,3 +1,4 @@
+import { placeOffRoad } from './roads.js';
 // Buyable Solmar businesses pay rent for each minute they are owned in play.
 import { createPlaceMarker, nearestPlace } from './places.js';
 
@@ -10,7 +11,7 @@ export const ASSETS = [
   { id: 'sunset-mart', name: 'Sunset Mart', x: 108, z: -236, price: 2500, income: 70, color: 0xec9152, roof: 0x78473d, width: 7, depth: 5.5 },
   { id: 'pier-light-bar', name: 'Pier Light Bar', x: -396, z: 216, price: 6000, income: 180, color: 0x76b099, roof: 0x2f625d, width: 7.5, depth: 6 },
   { id: 'harbor-storage', name: 'Harbor Storage', x: -432, z: -108, price: 8000, income: 240, color: 0xb9a2d2, roof: 0x5b4a75, width: 10, depth: 8 },
-];
+].map((place) => placeOffRoad(place, 'asset'));
 
 export function createAssets({ scene, hud, onIncome, onToast }) {
   const list = ASSETS;

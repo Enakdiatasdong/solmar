@@ -1,3 +1,4 @@
+import { placeOffRoad } from './roads.js';
 import { PALETTE } from './config.js';
 import { createPlaceMarker, nearestPlace } from './places.js';
 
@@ -38,7 +39,7 @@ export const RESTAURANTS = [
       { name: 'Pier Brunch Board', price: 36, heal: 50 },
     ],
   },
-];
+].map((place) => placeOffRoad(place, 'restaurant'));
 
 const RING = PALETTE.css.teal;
 

@@ -1,3 +1,4 @@
+import { auditRoadClearance } from './static-props.js';
 // SOLMAR boot, system adapters and fixed-step simulation. All assets and imports are local.
 // ?seed=N selects the city; ?shot=start|play|end stages a frozen, reproducible scene.
 import * as THREE from '../vendor/three.module.min.js';
@@ -1323,6 +1324,10 @@ function makeGame(seedValue, shotName = null) {
     shotFrameId = requestAnimationFrame(paint);
     return staged;
   }
+
+  window.__roadClear = auditRoadClearance([city.group, districts.group, landmarks.group,
+    ...renderer.scene.children.filter((node) => ['asset', 'restaurant', 'safehouse'].includes(node.userData.kind))]);
+  if (!window.__roadClear.ok) throw new Error('Static props intersect road corridors');
 
   const game = {
 

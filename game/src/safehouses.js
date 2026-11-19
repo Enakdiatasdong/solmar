@@ -1,20 +1,21 @@
 // Jax's homes: a starter flat, a loft for sale, and a house earned through the story.
-import { DEFAULT_OUTFIT, OUTFITS, SPAWN } from './config.js';
+import { DEFAULT_OUTFIT, OUTFITS, SPAWN, GARAGE_LOCATION } from './config.js';
+import { placeOffRoad } from './roads.js';
 import { createPlaceMarker, nearestPlace } from './places.js';
 
 const RING = '#b48ce0';
-const GARAGE = {
-  id: 'garage-flat', name: 'Moreno Garage Flat', x: -216, z: 108,
+const GARAGE = placeOffRoad({
+  ...GARAGE_LOCATION, id: 'garage-flat', name: 'Moreno Garage Flat',
   color: 0xcb9a70, roof: 0x76594c, width: 8, depth: 6,
-};
-const LOFT = {
+}, 'safehouse');
+const LOFT = placeOffRoad({
   id: 'marina-loft', name: 'Marina Loft', x: -360, z: -108, price: 5000,
   color: 0x8db5bb, roof: 0x3c5674, width: 7, depth: 8,
-};
-const HILLTOP = {
+}, 'safehouse');
+const HILLTOP = placeOffRoad({
   id: 'hilltop-house', name: 'Hilltop House', x: -288, z: -540, mission: 'beach-run',
   color: 0xe0c8a0, roof: 0x94534e, width: 10, depth: 7,
-};
+}, 'safehouse');
 
 export const SAFEHOUSES = [GARAGE, LOFT, HILLTOP];
 const byId = new Map(SAFEHOUSES.map((place) => [place.id, place]));

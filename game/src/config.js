@@ -1,6 +1,10 @@
 // Every tuning number and colour for SOLMAR, the original open-world game set in a fictional
 // coastal city. Nothing here touches the DOM; the renderer, simulation and HUD all read from it.
 
+// One garage apron for missions, services, HUD, safehouse respawns and races.
+export const GARAGE_LOCATION = { x: -252, z: 108, name: 'Moreno Garage' };
+export const HOTEL_LOCATION = { x: -288, z: 144, name: 'Hotel Azure' };
+
 export const STEP = 1 / 60;
 export const MAX_FRAME = 0.25;
 
@@ -124,7 +128,7 @@ export const RACES = [
   {
     id: 'harbor-loop', title: 'Harbor Loop', color: '#ff9a72',
     hint: 'Start near Moreno Garage and loop the west-side streets.',
-    start: { landmark: 'garage', x: -216, z: 144 },
+    start: { landmark: 'garage', ...GARAGE_LOCATION },
     checkpoints: [
       { label: 'Harbor approach', x: -288, z: 216 },
       { label: 'West grid', x: -216, z: 288 },
@@ -459,7 +463,7 @@ export const REGIONS = {
   mapLocked: 'rgba(255, 107, 87, 0.25)',
   mapOpen: 'rgba(73, 198, 184, 0.32)',
   mapLineWidth: 8,
-  firstPickup: { x: -288, z: 144, name: 'Hotel Azure' },
+  firstPickup: HOTEL_LOCATION,
 };
 
 

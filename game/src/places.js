@@ -1,4 +1,5 @@
 import * as THREE from '../vendor/three.module.min.js';
+import { placeOffRoad } from './roads.js';
 
 // The place coordinate is the front apron, leaving room to approach or respawn.
 export function createPlaceMarker(scene, place, {
@@ -7,6 +8,8 @@ export function createPlaceMarker(scene, place, {
 } = {}) {
   width = Number.isFinite(width) && width > 0 ? width : 8;
   depth = Number.isFinite(depth) && depth > 0 ? depth : 6;
+  // Update the caller's live place too: interaction, blips and ID-based saves agree.
+  Object.assign(place, placeOffRoad({ ...place, width, depth }, kind));
   const group = new THREE.Group();
   group.name = `${kind}:${place.id ?? 'place'}`;
   group.position.set(place.x, 0, place.z);

@@ -3,8 +3,10 @@
 // streetlights and props. Exports building/container collision AABBs and the road graph the AI and
 // missions navigate by. Everything is generated from the seeded RNG, so a seed rebuilds the city.
 import * as THREE from '../vendor/three.module.min.js';
-import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR, SUNSET_MINUTE, SUNSET_NIGHT_FACTOR } from './config.js';
+import { CITY, PALETTE, RURAL, SPAWN, STARTER_CAR, SUNSET_MINUTE, SUNSET_NIGHT_FACTOR, GARAGE_LOCATION, HOTEL_LOCATION } from './config.js';
 import { createRandom } from './random.js';
+import { buildRoadGraph, roadConflict, fitGridFootprint } from './roads.js';
+import { enforceRoadClearance, relocateProp } from './static-props.js';
 
 const WINDOW_BAY = 2.65;
 const FLOOR_HEIGHT = 2.85;
@@ -311,6 +313,7 @@ function addBoats(parent, name, boats) {
 
 function addCauseway(parent, colliders) {
   const causeway = new THREE.Group();
+  causeway.userData.roadInfrastructure = true;
   causeway.name = 'West Shore Causeway';
   parent.add(causeway);
   const cube = new THREE.BoxGeometry(1, 1, 1);
@@ -353,7 +356,7 @@ function addCauseway(parent, colliders) {
     for (const side of [-1, 1]) {
       const supportZ = z + side * 4.6;
       pillars.push({ x, y: (h - 4) / 2, z: supportZ, width: 3.6, height: h + 4, depth: 3.25 });
-      colliders.push({ minX: x - 1.8, maxX: x + 1.8, minZ: supportZ - 1.625,
+      colliders.push({ roadInfrastructure: true, minX: x - 1.8, maxX: x + 1.8, minZ: supportZ - 1.625,
         maxZ: supportZ + 1.625, height: h });
     }
   });
@@ -410,6 +413,7 @@ function addMarina(parent, random) {
 function addCanal(parent, waterMaterial, colliders) {
   const group = new THREE.Group();
   group.name = 'Lucero Inlet';
+  group.userData.roadInfrastructure = true;
   parent.add(group);
   const length = CANAL.endX - CANAL.startX;
   const centerX = (CANAL.startX + CANAL.endX) / 2;
@@ -423,7 +427,7 @@ function addCanal(parent, waterMaterial, colliders) {
   for (const side of [-1, 1]) {
     const edgeZ = CANAL.z + side * CANAL.width / 2;
     banks.push({ x: centerX, y: -0.04, z: edgeZ, width: length, height: 0.17, depth: 0.72 });
-    colliders.push({ minX: CANAL.startX + 5, maxX: CANAL.endX - 5,
+    colliders.push({ roadInfrastructure: true, minX: CANAL.startX + 5, maxX: CANAL.endX - 5,
       minZ: edgeZ - 0.22, maxZ: edgeZ + 0.22, height: 0.23 });
   }
   addWaterfrontInstances(group, 'limestone coping', cube, 0xd2baa0, banks);
@@ -501,23 +505,23 @@ function addAirport(parent, colliders) {
     doors.push({ x, y: 5, z: 423.06, width: 43, height: 9.6, depth: 0.18 });
     roofs.push({ x, y: 12.2, z: 410, width: 57, height: 0.7, depth: 29 });
   }
-  addSolid(38, 519, 112, 8, 24);
+  addSolid(80, 519, 112, 8, 24);
   addSolid(95, 410, 8, 20, 8);
   roofs.push({ x: 95, y: 24.4, z: 410, width: 16, height: 1.2, depth: 14 });
-  roofs.push({ x: 38, y: 7.3, z: 504, width: 116, height: 0.55, depth: 9 });
+  roofs.push({ x: 80, y: 7.3, z: 504, width: 116, height: 0.55, depth: 9 });
   const solids = addWaterfrontInstances(airport, 'airfield:hangars-terminal-tower', cube, 0xd2d3c5, structures);
   solids.castShadow = solids.receiveShadow = true;
   addWaterfrontInstances(airport, 'airfield:hangar-doors', cube, 0x3a5867, doors);
   addWaterfrontInstances(airport, 'airfield:roofs-canopy', cube, 0x859aa1, roofs).castShadow = true;
   const glazing = [
-    { x: 38, y: 4.6, z: 506.93, width: 103, height: 3.3, depth: 0.16 },
+    { x: 80, y: 4.6, z: 506.93, width: 103, height: 3.3, depth: 0.16 },
     { x: 95, y: 22, z: 410, width: 14, height: 3.6, depth: 12 },
   ];
   const windows = addWaterfrontInstances(airport, 'airfield:terminal-control-glazing', cube, 0x438595, glazing);
   windows.material.emissive.setHex(0x214f60);
   windows.material.emissiveIntensity = 0.5;
   const mullions = [];
-  for (let x = -8; x <= 84; x += 9.2) {
+  for (let x = 34; x <= 126; x += 9.2) {
     mullions.push({ x, y: 4.6, z: 506.8, width: 0.25, height: 3.6, depth: 0.25 });
   }
   addWaterfrontInstances(airport, 'airfield:terminal-window-frames', cube, 0xdde2d8, mullions);
@@ -561,6 +565,7 @@ function addAirport(parent, colliders) {
 
 function addFreeway(parent, colliders) {
   const freeway = new THREE.Group();
+  freeway.userData.roadInfrastructure = true;
   freeway.name = 'Solmar Freeway Loop';
   parent.add(freeway);
   const road = new THREE.MeshLambertMaterial({ color: 0x272d34 });
@@ -585,7 +590,7 @@ function addFreeway(parent, colliders) {
   const posts = [];
   const solid = (items, x, z, w, height, depth, y = height / 2 + 0.06) => {
     items.push({ x, y, z, width: w, height, depth });
-    colliders.push({ minX: x - w / 2, maxX: x + w / 2,
+    colliders.push({ roadInfrastructure: true, minX: x - w / 2, maxX: x + w / 2,
       minZ: z - depth / 2, maxZ: z + depth / 2, height: y + height / 2 });
   };
   // Four lanes, separated from city streets by a divided median and broad shoulders.
@@ -608,7 +613,7 @@ function addFreeway(parent, colliders) {
           white.push(at(center, side * (width / 2 - 1), 0.085, length, 0.018, 0.25));
           const rail = at(center, side * (width / 2 - 0.25), 0.9, length, 0.24, 0.22);
           rails.push(rail);
-          colliders.push({ minX: rail.x - rail.width / 2, maxX: rail.x + rail.width / 2,
+          colliders.push({ roadInfrastructure: true, minX: rail.x - rail.width / 2, maxX: rail.x + rail.width / 2,
             minZ: rail.z - rail.depth / 2, maxZ: rail.z + rail.depth / 2, height: 1.02 });
           for (let offset = -16; offset <= 16; offset += 8) {
             posts.push(at(center + offset, side * (width / 2 - 0.25), 0.49, 0.2, 0.86, 0.2));
@@ -749,115 +754,6 @@ function pointIsClear(colliders, x, z, radius) {
   });
 }
 
-function buildRoadGraph() {
-  const size = CITY.grid + 1;
-  const nodes = [];
-  for (let row = 0; row < size; row += 1) {
-    for (let column = 0; column < size; column += 1) {
-      nodes.push({
-        id: row * size + column,
-        column,
-        row,
-        x: CITY.nodeMin + column * CITY.pitch,
-        z: CITY.nodeMin + row * CITY.pitch,
-        neighbors: [],
-      });
-    }
-  }
-  const edges = [];
-  function connect(a, b, width = CITY.road) {
-    const dx = b.x - a.x;
-    const dz = b.z - a.z;
-    const freeway = (a.x === b.x && Math.abs(a.x) === Math.abs(CITY.freeway.minX)
-      && Math.min(a.z, b.z) >= CITY.freeway.minZ && Math.max(a.z, b.z) <= CITY.freeway.maxZ)
-      || (a.z === b.z && Math.abs(a.z) === Math.abs(CITY.freeway.minZ)
-        && Math.min(a.x, b.x) >= CITY.freeway.minX && Math.max(a.x, b.x) <= CITY.freeway.maxX);
-    const edge = { a, b, dx, dz, length: Math.hypot(dx, dz), freeway, width: freeway ? CITY.freeway.width : width, zone: a.zone ?? b.zone ?? (freeway ? 'freeway' : 'city') };
-    edges.push(edge);
-    a.neighbors.push({ edge, other: b, direction: { x: Math.sign(dx), z: Math.sign(dz) } });
-    b.neighbors.push({ edge, other: a, direction: { x: -Math.sign(dx), z: -Math.sign(dz) } });
-  }
-  for (let row = 0; row < size; row += 1) {
-    for (let column = 0; column < size; column += 1) {
-      const node = nodes[row * size + column];
-      if (column + 1 < size) connect(node, nodes[row * size + column + 1]);
-      if (row + 1 < size) connect(node, nodes[(row + 1) * size + column]);
-    }
-  }
-  const airportRoad = [];
-  // End at the taxiway; the terminal occupies x=0 beyond z=507.
-  for (const z of [432, 504]) {
-    const node = { id: nodes.length, column: null, row: null, x: 0, z, zone: 'airport', neighbors: [] };
-    nodes.push(node);
-    airportRoad.push(node);
-  }
-  connect(nodes[10 * size + 5], airportRoad[0]);
-  connect(airportRoad[0], airportRoad[1]);
-  const addRuralNode = (x, z) => {
-    const node = { id: nodes.length, column: null, row: null, x, z, zone: 'hills', neighbors: [] };
-    nodes.push(node);
-    return node;
-  };
-  // Follow the existing z=-560 cross-country road and x=±300 tracks. Keeping
-  // these in the shared graph gives northern traffic and race checkpoints real roads.
-  const crossroad = new Map();
-  let previous = null;
-  for (const x of [-648, -576, -504, -432, -360, -300, -288, -216, -144, -72, 0, 72, 144, 216, 288, 300, 360, 432, 504, 576, 648]) {
-    const node = addRuralNode(x, -560);
-    crossroad.set(x, node);
-    if (previous) connect(previous, node, 10);
-    previous = node;
-  }
-  for (const x of [-300, 300]) {
-    previous = nodes[x < 0 ? 1 : 9];
-    // The slopes start just north of -888; leave room to turn at the track end.
-    for (const z of [-360, -380, -452, -524, -560, -632, -704, -776, -840, -880]) {
-      const node = z === -560 ? crossroad.get(x) : addRuralNode(x, z);
-      connect(previous, node, 10);
-      previous = node;
-    }
-  }
-  const graph = {
-    nodes,
-    edges,
-    size,
-    nodeAt(column, row) {
-      if (!Number.isInteger(column) || !Number.isInteger(row) || column < 0 || row < 0 || column >= size || row >= size) return null;
-      return nodes[row * size + column];
-    },
-    nearestNode(x, z) {
-      if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-      let best = null;
-      let bestDistance = Infinity;
-      for (const node of nodes) {
-        const distance = (node.x - x) ** 2 + (node.z - z) ** 2;
-        if (distance < bestDistance) { best = node; bestDistance = distance; }
-      }
-      return best;
-    },
-    nearestEdge(x, z) {
-      if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-      let best = null;
-      let bestDistance = Infinity;
-      for (let index = 0; index < edges.length; index += 1) {
-        const edge = edges[index];
-        const minX = Math.min(edge.a.x, edge.b.x);
-        const maxX = Math.max(edge.a.x, edge.b.x);
-        const minZ = Math.min(edge.a.z, edge.b.z);
-        const maxZ = Math.max(edge.a.z, edge.b.z);
-        const px = Math.max(minX, Math.min(maxX, x));
-        const pz = Math.max(minZ, Math.min(maxZ, z));
-        const distance = Math.hypot(px - x, pz - z);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = { edge, x: px, z: pz, distance };
-        }
-      }
-      return best;
-    },
-  };
-  return graph;
-}
 
 export function createCity(random, reservedPlaces = []) {
   validateCityConfig();
@@ -1203,8 +1099,10 @@ export function createCity(random, reservedPlaces = []) {
     const downtown = options.downtown === true;
     const variant = options.variant ?? random.int(0, facadeVariants.length - 1);
     const color = options.color ?? random.pick(PALETTE.buildings);
+    // Clip small lot/setback overruns, then reject any remaining corridor crossing.
+    ({ x: cx, z: cz, width, depth } = fitGridFootprint(cx, cz, width, depth));
     // Consume the usual random choices before leaving room for a place marker.
-    if (isReserved(cx, cz)
+    if (roadConflict({ x: cx, z: cz, width, depth }) || isReserved(cx, cz)
       || (cz - depth / 2 < CANAL.width / 2 + 1.5 && cz + depth / 2 > -CANAL.width / 2 - 1.5)) return null;
     const geometry = new THREE.BoxGeometry(width, height, depth);
     const facadeVariant = tower ? towerPattern : facadePatterns[variant];
@@ -1449,6 +1347,7 @@ export function createCity(random, reservedPlaces = []) {
     sign.userData.kind = 'neon-sign';
     sign.userData.label = label;
     sign.userData.doubleSided = true;
+    ({ x, z } = relocateProp({ x, z }, { width: Math.max(width + 0.7, supportHalfWidth * 2 + 0.6), depth: 0.6 }));
     sign.position.set(x, y, z);
     const frame = new THREE.Mesh(new THREE.BoxGeometry(width + 0.7, height + 0.7, 0.6), signFrameMaterial);
     frame.castShadow = true;
@@ -1503,7 +1402,7 @@ export function createCity(random, reservedPlaces = []) {
     }, null);
     if (!roof) return null;
     return addNeonSign({
-      ...options, x: (roof.minX + roof.maxX) / 2, z: (roof.minZ + roof.maxZ) / 2,
+      ...options, width: Math.min(options.width, 40), x: (roof.minX + roof.maxX) / 2, z: (roof.minZ + roof.maxZ) / 2,
       y: roof.height + 2.8 + options.height / 2, baseY: roof.height,
     });
   }
@@ -1666,7 +1565,7 @@ export function createCity(random, reservedPlaces = []) {
   for (let palm = 0; palm < palmSpots.length; palm += 1) {
     const spot = palmSpots[palm];
     const palmRandom = palm >= firstDowntownPalm ? downtownRandom : random;
-    const hidden = isReserved(spot.x, spot.z) || inCanal(spot.x, spot.z, 2.4)
+    const hidden = Boolean(roadConflict({ x: spot.x, z: spot.z, width: 8 * spot.scale, depth: 8 * spot.scale })) || isReserved(spot.x, spot.z) || inCanal(spot.x, spot.z, 2.4)
       || inFreewayCorridor(spot.x, spot.z, 1.5);
     const height = 7.2 * spot.scale;
     palmPosition.set(spot.x, 0.2, spot.z);
@@ -1745,6 +1644,7 @@ export function createCity(random, reservedPlaces = []) {
   const lampHalos = [];
   for (let lamp = 0; lamp < lampSpots.length; lamp += 1) {
     const spot = lampSpots[lamp];
+    Object.assign(spot, relocateProp(spot, { width: 2.7, depth: 2.7 }));
     palmMatrix.makeTranslation(spot.x, 0.25, spot.z);
     poleMesh.setMatrixAt(lamp, palmMatrix);
     const yaw = spot.yaw ?? 0;
@@ -1781,7 +1681,7 @@ export function createCity(random, reservedPlaces = []) {
     new THREE.MeshLambertMaterial({ color: 0x46ed91, emissive: 0x118c53, emissiveIntensity: 2.0, toneMapped: false }),
   ];
   const signalPoleGeometry = new THREE.CylinderGeometry(0.13, 0.19, 7.1, 6).translate(0, 3.55, 0);
-  const signalArmGeometry = new THREE.BoxGeometry(11, 0.18, 0.18);
+  const signalArmGeometry = new THREE.BoxGeometry(15.5, 0.18, 0.18);
   const signalHousingGeometry = new THREE.BoxGeometry(0.82, 2.1, 0.62);
   const signalLensGeometry = new THREE.SphereGeometry(0.2, 8, 6);
   for (const avenueZ of boulevardAvenues) {
@@ -1789,13 +1689,13 @@ export function createCity(random, reservedPlaces = []) {
     for (let column = 3; column <= 7; column += 1) {
       const nodeX = CITY.nodeMin + column * blockPitch;
       const nodeZ = CITY.nodeMin + row * blockPitch;
-      const poleX = nodeX + 12;
-      const poleZ = nodeZ - 12;
+      const poleX = nodeX + 17;
+      const poleZ = nodeZ - 17;
       const pole = new THREE.Mesh(signalPoleGeometry, signalPoleMaterial);
       pole.position.set(poleX, 0, poleZ);
       pole.castShadow = true;
       const arm = new THREE.Mesh(signalArmGeometry, signalPoleMaterial);
-      arm.position.set(nodeX + 6.5, 7.05, poleZ);
+      arm.position.set(nodeX + 9.25, 7.05, poleZ);
       arm.castShadow = true;
       const housing = new THREE.Mesh(signalHousingGeometry, signalHousingMaterial);
       housing.position.set(nodeX + 1.5, 6.0, poleZ);
@@ -1805,6 +1705,8 @@ export function createCity(random, reservedPlaces = []) {
         return sphere;
       });
       const signal = new THREE.Group();
+      // The checked pole is off-road; the signal arm intentionally spans its lane.
+      signal.userData.roadInfrastructure = true;
       signal.name = `traffic-signal:${column}:${row}`;
       signal.add(pole, arm, housing, ...lenses);
       group.add(signal);
@@ -1971,6 +1873,7 @@ export function createCity(random, reservedPlaces = []) {
   // Add solid freeway furniture after seeded city dressing, so no RNG decisions shift.
   addFreeway(group, colliders);
 
+  enforceRoadClearance(group, colliders);
   const graph = buildRoadGraph();
   const spawnPlayer = { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading ?? 0 };
   const spawnStarterCar = { x: STARTER_CAR.x, z: STARTER_CAR.z, heading: STARTER_CAR.heading ?? 0 };
@@ -2015,12 +1918,12 @@ export function createCity(random, reservedPlaces = []) {
   }
 
   const landmarks = {
-    safehouse: { x: -216, z: 144, name: 'Moreno Garage' },
-    client: { x: -288, z: 144, name: 'Hotel Azure' },
-    garage: { x: -216, z: 144, name: 'Moreno Garage' },
+    safehouse: GARAGE_LOCATION,
+    client: HOTEL_LOCATION,
+    garage: GARAGE_LOCATION,
     coupe: { x: 144, z: -72, name: 'Showroom Row' },
     raceStart: { x: -360, z: 288, name: 'Coast road' },
-    heat: { x: -216, z: 144, name: 'Moreno Garage' },
+    heat: GARAGE_LOCATION,
     harbor: { x: -468, z: -144, name: 'Solmar Harbor' },
     police: { x: 0, z: 0, name: 'SMPD' },
     beach: { x: -468, z: 72, name: 'Solmar Beach' },

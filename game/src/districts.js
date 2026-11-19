@@ -1,5 +1,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY, RURAL, PALETTE } from './config.js';
+import { DIRT_ROADS, roadConflict, relocateFootprint } from './roads.js';
+import { enforceRoadClearance } from './static-props.js';
 import { isOnSand } from './world.js';
 
 // Supplemental northern terrain and downtown details use the caller's seeded RNG.
@@ -12,15 +14,7 @@ export function createDistricts({ scene, city, random }) {
   cityGroup.name = 'Dense downtown';
   group.add(ruralGroup, cityGroup);
   scene.add(group);
-  const dirtRoads = [
-    { minX: -650, maxX: 650, minZ: -565, maxZ: -555 },
-    { minX: -305, maxX: -295, minZ: -900, maxZ: -360 },
-    { minX: 295, maxX: 305, minZ: -900, maxZ: -360 },
-    // Footpaths keep the preserved lake, orchard and viewpoint anchors accessible.
-    { minX: -420, maxX: -300, minZ: -722, maxZ: -718 },
-    { minX: -450, maxX: -300, minZ: -622, maxZ: -618 },
-    { minX: 60, maxX: 300, minZ: -862, maxZ: -858 },
-  ];
+  const dirtRoads = DIRT_ROADS;
   const state = { dirtRoads, rural: { ...RURAL }, landmarks: [], animatables: [] };
   const dirtTexture = new THREE.MeshLambertMaterial({ color: 0x986b43 });
   const ruralGrass = new THREE.MeshLambertMaterial({ color: 0x497447 });
@@ -95,12 +89,13 @@ export function createDistricts({ scene, city, random }) {
   const hillMaterial = new THREE.MeshLambertMaterial({ color: 0x385d3d });
   [-600, -300, 0, 300, 600].forEach((x, index) => {
     const radius = 58 + (index % 3) * 9;
+    const hillX = index === 1 || index === 3 ? x + Math.sign(x) * (radius + 20) : x;
     const height = 17 + (index % 2) * 5;
     const hill = new THREE.Mesh(new THREE.ConeGeometry(radius, height, 12), hillMaterial);
     hill.scale.y = 0.85;
-    hill.position.set(x, height * 0.42, -900 - (index % 2) * 15);
+    hill.position.set(hillX, height * 0.42, -900 - (index % 2) * 15);
     ruralGroup.add(hill);
-    if (index === 1 || index === 3) collider(x, hill.position.z, radius * 1.15, radius * 0.8, height * 0.75);
+    if (index === 1 || index === 3) collider(hillX, hill.position.z, radius * 1.15, radius * 0.8, height * 0.75);
   });
 
   // Avoid all roads, parcels and named clearings when scattering oak trees.
@@ -120,6 +115,7 @@ export function createDistricts({ scene, city, random }) {
     const z = random.range(RURAL.minZ + 15, RURAL.maxZ - 15);
     if (blocked(x, z)) continue;
     const scale = random.range(0.8, 1.25);
+    if (roadConflict({ x, z, width: 6.8 * scale, depth: 6.8 * scale })) continue;
     treeSpots.push({ x, z, scale });
     collider(x, z, 1.5 * scale, 1.5 * scale, 3.6 * scale);
   }
@@ -181,6 +177,7 @@ export function createDistricts({ scene, city, random }) {
   cityGroup.add(fountainJet);
   state.animatables.push({ type: 'fountain', mesh: fountainJet, water });
   [[plazaX - 16, plazaZ - 14], [plazaX + 16, plazaZ - 14], [plazaX - 16, plazaZ + 14], [plazaX + 16, plazaZ + 14]].forEach(([x, z]) => {
+    if (roadConflict({ x, z, width: 5.5, depth: 5.5 })) return;
     box(cityGroup, x, 0, z, 5.4, 2.4, 4.4, new THREE.MeshLambertMaterial({ color: 0xdb9b57 }), true);
     const roof = new THREE.Mesh(new THREE.ConeGeometry(3.8, 1.6, 4), new THREE.MeshLambertMaterial({ color: 0x6d4436 }));
     roof.rotation.y = Math.PI / 4;
@@ -202,7 +199,8 @@ export function createDistricts({ scene, city, random }) {
   const clothMaterial = new THREE.MeshLambertMaterial({ color: 0xe0a34a, side: THREE.DoubleSide });
   [[0, 0], [0, 72], [72, 0], [-36, 36]].forEach(([x, z]) => {
     const cloth = new THREE.Mesh(new THREE.PlaneGeometry(12, 2.8), clothMaterial);
-    cloth.position.set(x, 6.4, z);
+    const point = relocateFootprint({ x, z }, { width: 0.1, depth: 12 });
+    cloth.position.set(point.x, 6.4, point.z);
     cloth.rotation.y = Math.PI / 2;
     cityGroup.add(cloth);
     state.animatables.push({ type: 'banner', mesh: cloth, phase: random.range(0, Math.PI * 2) });
@@ -235,5 +233,6 @@ export function createDistricts({ scene, city, random }) {
     });
     void dt;
   }
+  enforceRoadClearance(group, city.colliders);
   return { group, state, bounds: ruralBounds, districtAt, surfaceAt, update };
 }

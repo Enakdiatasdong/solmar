@@ -1,7 +1,7 @@
 // Repeatable service work. Routes use the city's checked road spawn points and one reusable
 // beacon; only main.js handles the cash award. Leaving a service vehicle ends its current run.
 import * as THREE from '../vendor/three.module.min.js';
-import { CITY } from './config.js';
+import { CITY, GARAGE_LOCATION } from './config.js';
 import { resolveCollisions } from './world.js';
 
 const JOBS = [
@@ -82,7 +82,7 @@ export function createVehicleJobs(ctx) {
     const landmarks = city.landmarks ?? {};
     const hotel = landmarks.client ?? { x: -288, z: 144 };
     const downtown = landmarks.downtown ?? { x: 72, z: 72 };
-    const garage = landmarks.garage ?? { x: -216, z: 144 };
+    const garage = landmarks.garage ?? GARAGE_LOCATION;
     const coast = landmarks.raceStart ?? { x: -360, z: 288 };
     const showroom = landmarks.coupe ?? { x: 144, z: -72 };
     // Reverse the taxi's stops on alternating fares to keep repeat work from being identical.

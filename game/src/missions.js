@@ -1,12 +1,12 @@
 // Story jobs for Jax Moreno in Solmar. Missions use the city's seeded world, the shared HUD,
 // vehicle, police and combat systems, and emit completion events for main.js to award and save.
 import * as THREE from '../vendor/three.module.min.js';
-import { MISSIONS, PALETTE, POLICE } from './config.js';
+import { MISSIONS, PALETTE, POLICE, GARAGE_LOCATION, HOTEL_LOCATION } from './config.js';
 
 const BEACON_COLORS = { available: 0xffc857, active: 0xffc857 };
-const FIRST_PICKUP = { x: -288, z: 144, name: 'Hotel Azure' };
+const FIRST_PICKUP = HOTEL_LOCATION;
 const FIRST_DROPOFF = { x: -360, z: 216, name: 'Pier 9' };
-const GARAGE = { x: -216, z: 144, name: 'Moreno Garage' };
+const GARAGE = GARAGE_LOCATION;
 const BANK = { x: 72, z: -72, name: 'Solmar Bank' };
 const SHOWROOM = { x: 144, z: -72, name: 'Showroom Row' };
 const COAST = { x: -360, z: 72, name: 'Beachfront road' };
