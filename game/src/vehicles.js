@@ -4,6 +4,7 @@
 // handbrake for a loose tail. The car footprint collides with the city's AABBs.
 import * as THREE from '../vendor/three.module.min.js';
 import { PALETTE, STARTER_CAR, VEHICLE, VEHICLE_TYPES } from './config.js';
+import { buildNightCityCar, NIGHTCITY_MODELS, NIGHTCITY_PAINTS } from './nightcity-cars.js';
 import { clampToWorld, colliderBlocksAt, resolveCollisions } from './world.js';
 
 const wheelGeometry = new THREE.CylinderGeometry(0.42, 0.42, 0.28, 10);
@@ -17,6 +18,7 @@ const trimMaterial = new THREE.MeshLambertMaterial({ color: 0x98a5a7 });
 const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
 const tubeGeometry = new THREE.CylinderGeometry(1, 1, 1, 8);
 const up = new THREE.Vector3(0, 1, 0);
+const nightCityModelsById = new Map(NIGHTCITY_MODELS.map((model) => [model.id, model]));
 
 const EXPANSION_SPAWNS = [
   {
@@ -243,6 +245,7 @@ function serviceBox(group, material, x, y, z, width, height, depth) {
 
 
 function buildCarMesh(spec) {
+  if (spec.nightcity) return buildNightCityCar(spec.nightcity, spec.body, { taxi: spec.taxi });
   if (spec.tuning) return buildExpansionMesh(spec);
   const group = new THREE.Group();
   const bodyMaterial = new THREE.MeshLambertMaterial({ color: spec.body });
@@ -503,11 +506,25 @@ export function createVehicles(city, scene) {
 
   function spawnStarter() {
     return addCar(
-      { body: 0xc9a227, cabin: 0x2d2a22, name: 'Cometa GT', variant: 'coupe' },
+      { body: 0xc9a227, name: 'Cometa GT', nightcity: 'standard', tuning: nightCityModelsById.get('standard').tuning },
       { x: STARTER_CAR.x, z: STARTER_CAR.z },
       STARTER_CAR.heading,
       { id: 'starter', stolen: true },
     );
+  }
+
+  function adoptTrafficCar(trafficCar) {
+    const model = nightCityModelsById.get(trafficCar.modelId);
+    if (!model) return null;
+    const car = addCar({
+      nightcity: model.id,
+      body: trafficCar.color,
+      name: model.name,
+      tuning: model.tuning,
+      taxi: trafficCar.taxi,
+    }, trafficCar, trafficCar.heading, { kind: 'traffic', stolen: false });
+    car.state.speed = Math.min(trafficCar.speed, model.tuning.maxSpeed);
+    return car;
   }
 
   function spawnParked(random) {
@@ -540,17 +557,19 @@ export function createVehicles(city, scene) {
       if (spot) addCar(spec, spot, spot.heading, { id: `job-${spec.job}`, kind: 'parked', stolen: true });
     }
     random.shuffle(spots);
+    const legacy = random.pick([
+      { variant: 'van', name: 'Marina Van' },
+      { variant: 'pickup', name: 'Bison Pickup' },
+    ]);
+    const models = random.shuffle([
+      ...NIGHTCITY_MODELS.map(({ id, name, tuning }) => ({ nightcity: id, name, tuning })),
+      { ...legacy, cabin: 0x30343a },
+    ]);
     let spawned = 0;
     for (const spot of spots) {
-      if (spawned >= 9) break;
+      if (spawned >= models.length) break;
       if (cars.some((car) => Math.hypot(car.state.x - spot.x, car.state.z - spot.z) < 12)) continue;
-      const base = PALETTE.cars[spawned % PALETTE.cars.length];
-      const variant = random.pick(['sedan', 'coupe', 'van', 'pickup']);
-      const spec = {
-        ...base,
-        name: variant === 'coupe' ? 'Cometa GT' : variant === 'pickup' ? 'Bison Pickup' : variant === 'sedan' ? 'Vela Sedan' : 'Marina Van',
-        variant,
-      };
+      const spec = { ...models[spawned], body: random.pick(NIGHTCITY_PAINTS) };
       addCar(spec, spot, spot.heading, { kind: 'parked' });
       spawned += 1;
     }
@@ -810,6 +829,7 @@ export function createVehicles(city, scene) {
     scene,
     addCar,
     spawnStarter,
+    adoptTrafficCar,
     spawnParked,
     spawnExpansionVehicles,
     spawnPoliceCar,

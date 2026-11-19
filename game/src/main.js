@@ -959,10 +959,22 @@ function makeGame(seedValue, shotName = null) {
       chooseJob(mission.id);
       return;
     }
-    const car = vehicles.nearest(player.state.x, player.state.z, 4.6);
+    let car = vehicles.nearest(player.state.x, player.state.z, 4.6);
     if (!car || car.state.occupied) {
-      hud.toast('Nothing to use here.', 'info', 1.6);
-      return;
+      const trafficCar = traffic.nearest(player.state.x, player.state.z, 4.6);
+      if (!trafficCar) {
+        hud.toast('Nothing to use here.', 'info', 1.6);
+        return;
+      }
+      const exit = exitSpot({ state: trafficCar });
+      car = vehicles.adoptTrafficCar(trafficCar);
+      if (!car) {
+        hud.toast('Nothing to use here.', 'info', 1.6);
+        return;
+      }
+      traffic.removeCar(trafficCar);
+      traffic.spawnFleeingPed(exit.x, exit.z, exit.heading, { x: trafficCar.x, z: trafficCar.z });
+      state.pedHitCooldown = Math.max(state.pedHitCooldown, 1.4);
     }
     const stealing = !car.state.stolen;
     if (!player.enterCar(car)) return;
@@ -1210,8 +1222,9 @@ function makeGame(seedValue, shotName = null) {
 
     const onGround = !car && player.state.grounded;
     const job = onGround && missions.nearestStart(player.state.x, player.state.z);
-    const nearestCar = onGround && vehicles.nearest(player.state.x, player.state.z, 4.6);
-    const interactHint = job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state.stolen ? 'E — drive' : 'E — use this car') : '';
+    const nearestCar = onGround && (vehicles.nearest(player.state.x, player.state.z, 4.6)
+      || traffic.nearest(player.state.x, player.state.z, 4.6));
+    const interactHint = job ? `E — start ${job.title}` : nearestCar ? (nearestCar.state?.stolen ? 'E — drive' : 'E — use this car') : '';
     const jetpackHint = jetpack.state.owned ? 'J — jetpack' : '';
     const asset = onGround && assets.nearest(player.state.x, player.state.z, 5);
     const restaurant = onGround && restaurants.nearest(player.state.x, player.state.z, 5);

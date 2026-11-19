@@ -3,6 +3,7 @@ import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, TRAFFIC, VEHICLE } from './config.js';
 import { roadConflict } from './roads.js';
 import { resolveCollisions } from './world.js';
+import { buildNightCityCar, NIGHTCITY_MODELS, NIGHTCITY_PAINTS } from './nightcity-cars.js';
 
 const PED_LIMIT = 72;
 const SPAWN_DENSITY = { cars: 2, pedestrians: 2 };
@@ -12,9 +13,6 @@ const CAR_BRAKE = 17;
 const SIDEWALK_OFFSET = CITY.road / 2 + 3;
 const CROSSING_OFFSET = CITY.road / 2 + 6;
 const trafficGeometry = {
-  body: new THREE.BoxGeometry(2, 0.58, 4.1),
-  cabin: new THREE.BoxGeometry(1.7, 0.48, 1.9),
-  wheel: new THREE.CylinderGeometry(0.36, 0.36, 0.24, 8).rotateZ(Math.PI / 2),
   torso: new THREE.BoxGeometry(0.46, 0.62, 0.28),
   head: new THREE.BoxGeometry(0.3, 0.32, 0.28),
   leg: new THREE.BoxGeometry(0.16, 0.72, 0.18),
@@ -23,6 +21,11 @@ const trafficGeometry = {
 const ambientMaterials = new Map();
 const pantsColors = [0x2f3a4a, 0x4a3d2f, 0x2c3230, 0x5a5040];
 const pedStride = (phase) => Math.sin(phase) * 0.55;
+const TRAFFIC_MODEL_WEIGHTS = [
+  ['standard', 24], ['thunder', 18], ['compact', 17], ['suv', 17],
+  ['obsidian', 8], ['grandtourer', 6], ['gullwing', 5], ['teardrop', 5],
+];
+const TRAFFIC_MODEL_WEIGHT = TRAFFIC_MODEL_WEIGHTS.reduce((sum, [, weight]) => sum + weight, 0);
 
 function ambientMaterial(color) {
   if (!ambientMaterials.has(color)) ambientMaterials.set(color, new THREE.MeshLambertMaterial({ color }));
@@ -133,7 +136,6 @@ export function createTraffic(city, scene, random) {
   let sidewalkWalkers = null;
   const carTarget = Math.min(TRAFFIC.cars * SPAWN_DENSITY.cars, 96);
   const pedTarget = Math.min(TRAFFIC.pedestrians * SPAWN_DENSITY.pedestrians, PED_LIMIT);
-  const carSpecs = PALETTE.cars;
   const roadNetwork = city.roadNetwork ?? city.graph;
   const colliders = city.colliders ?? [];
   const groundHeightAt = city.groundHeightAt ?? (() => 0);
@@ -267,28 +269,31 @@ export function createTraffic(city, scene, random) {
     return { x: edgePoint.x, z: edgePoint.z, heading };
   }
 
-  function makeTrafficCar(position, heading) {
-    const spec = random.pick(carSpecs);
-    const group = new THREE.Group();
-    const body = new THREE.Mesh(trafficGeometry.body, ambientMaterial(spec.body));
-    body.position.y = 0.62;
-    group.add(body);
-    const cabin = new THREE.Mesh(trafficGeometry.cabin, ambientMaterial(0x25313a));
-    cabin.position.set(0, 1.14, -0.1);
-    group.add(cabin);
-    const wheels = [];
-    for (const [wx, wz] of [[-0.98, 1.3], [0.98, 1.3], [-0.98, -1.3], [0.98, -1.3]]) {
-      const wheel = new THREE.Mesh(trafficGeometry.wheel, ambientMaterial(0x1a1a1c));
-      wheel.position.set(wx, 0.36, wz);
-      group.add(wheel);
-      wheels.push(wheel);
+  function pickTrafficModel() {
+    let choice = random() * TRAFFIC_MODEL_WEIGHT;
+    for (const [id, weight] of TRAFFIC_MODEL_WEIGHTS) {
+      choice -= weight;
+      if (choice <= 0) return id;
     }
+    return TRAFFIC_MODEL_WEIGHTS.at(-1)[0];
+  }
+
+  function makeTrafficCar(position, heading) {
+    const taxi = random.chance(1 / 12);
+    const modelId = taxi ? 'thunder' : pickTrafficModel();
+    const color = taxi ? 0xd2b24c : random.pick(NIGHTCITY_PAINTS);
+    const { group, wheels } = buildNightCityCar(modelId, color, { detail: 'light', taxi });
+    const { tuning } = NIGHTCITY_MODELS.find((model) => model.id === modelId);
     group.position.set(position.x, groundHeightAt(position.x, position.z), position.z);
     group.rotation.y = heading;
     scene.add(group);
     const car = {
       group,
-      wheels,
+      wheels: wheels.map(({ mesh }) => mesh),
+      modelId,
+      color,
+      taxi,
+      tuning,
       x: position.x,
       z: position.z,
       heading,
@@ -702,6 +707,56 @@ export function createTraffic(city, scene, random) {
     return null;
   }
 
+  function nearest(x, z, maxDistance = 4.6) {
+    let closest = null;
+    let closestDistance = maxDistance;
+    for (const car of trafficCars) {
+      if (!car?.group) continue;
+      const distance = Math.hypot(car.x - x, car.z - z);
+      if (distance <= closestDistance) {
+        closest = car;
+        closestDistance = distance;
+      }
+    }
+    return closest;
+  }
+
+  function removeCar(car) {
+    const index = trafficCars.indexOf(car);
+    if (index < 0) return false;
+    trafficCars.splice(index, 1);
+    scene.remove(car.group);
+    return true;
+  }
+
+  function spawnFleeingPed(x, z, heading, panicTarget = { x: x + Math.cos(heading), z: z - Math.sin(heading) }) {
+    const built = pedMesh(random);
+    const fleeHeading = Math.atan2(x - panicTarget.x, z - panicTarget.z);
+    built.group.position.set(x, 0.28, z);
+    built.group.rotation.y = fleeHeading;
+    scene.add(built.group);
+    const ped = {
+      group: built.group,
+      legs: built.legs,
+      x,
+      z,
+      heading: fleeHeading,
+      speed: TRAFFIC.pedSpeedMax * 2.1,
+      walk: random.range(0, 10),
+      wander: 0,
+      panicked: 3,
+      panicTarget,
+      targetHeading: fleeHeading,
+      crossing: false,
+      crossingCooldown: random.range(0, 7),
+      routeTarget: null,
+      reaction: 'dodge',
+      down: false,
+    };
+    peds.push(ped);
+    return ped;
+  }
+
   function reset() {
     for (const car of trafficCars) scene.remove(car.group);
     trafficCars.length = 0;
@@ -723,6 +778,9 @@ export function createTraffic(city, scene, random) {
     },
     knockPed,
     nearestPed,
+    nearest,
+    removeCar,
+    spawnFleeingPed,
     reset,
     stepCar,
   };
