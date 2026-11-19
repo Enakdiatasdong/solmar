@@ -22,8 +22,8 @@ const ambientMaterials = new Map();
 const pantsColors = [0x2f3a4a, 0x4a3d2f, 0x2c3230, 0x5a5040];
 const pedStride = (phase) => Math.sin(phase) * 0.55;
 const TRAFFIC_MODEL_WEIGHTS = [
-  ['standard', 24], ['thunder', 18], ['compact', 17], ['suv', 17],
-  ['obsidian', 8], ['grandtourer', 6], ['gullwing', 5], ['teardrop', 5],
+  ['standard', 21], ['thunder', 13], ['compact', 21], ['suv', 21],
+  ['obsidian', 6], ['grandtourer', 6], ['gullwing', 6], ['teardrop', 6],
 ];
 const TRAFFIC_MODEL_WEIGHT = TRAFFIC_MODEL_WEIGHTS.reduce((sum, [, weight]) => sum + weight, 0);
 
@@ -730,6 +730,7 @@ export function createTraffic(city, scene, random) {
   }
 
   function spawnFleeingPed(x, z, heading, panicTarget = { x: x + Math.cos(heading), z: z - Math.sin(heading) }) {
+    if (peds.length >= PED_LIMIT) return null;
     const built = pedMesh(random);
     const fleeHeading = Math.atan2(x - panicTarget.x, z - panicTarget.z);
     built.group.position.set(x, 0.28, z);
