@@ -1,4 +1,5 @@
 // Procedural bodies adapted from Night City Rush. The nose faces +Z.
+// Provenance: clean-room rewrite (not copied) of the 7 procedural car models from ~/workspace/makefun-best-game-01-v2/entry/game/src/car-models.js + cars.js; team-authored source, no third-party assets.
 import * as THREE from '../vendor/three.module.min.js';
 import { VEHICLE, VEHICLE_TYPES } from './config.js';
 
