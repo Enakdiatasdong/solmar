@@ -423,7 +423,7 @@ export function createMissions(ctx) {
 
   function carNear(point, radius) {
     const car = inCar();
-    return Boolean(car && Math.hypot(car.state.x - point.x, car.state.z - point.z) < radius);
+    return Boolean(car && Math.hypot(car.state.x - point.x, car.state.z - point.z) <= radius);
   }
 
   function updateFirstWheels() {
@@ -439,7 +439,7 @@ export function createMissions(ctx) {
       const car = inCar();
       if (!car) fail('You left the client before reaching Pier 9.');
       else if (car.state.wrecked) fail('The client’s car was wrecked.');
-      else if (carNear(FIRST_DROPOFF, 12) && Math.abs(car.state.speed) < 5) complete();
+      else if (carNear(FIRST_DROPOFF, 14) && Math.abs(car.state.speed) < 5) complete();
     } else if (state.stage === 'client-pickup' && distanceTo(FIRST_PICKUP.x, FIRST_PICKUP.z) < 6 && !inCar()) {
       setObjective('Get in a car, then drive to Hotel Azure.');
     }
@@ -492,7 +492,7 @@ export function createMissions(ctx) {
   }
 
   function updateBigOne(dt) {
-    if (state.stage === 'bank' && distanceTo(BANK.x, BANK.z) < 10) {
+    if (state.stage === 'bank' && distanceTo(BANK.x, BANK.z) <= 10) {
       state.stage = 'bank-getaway';
       state.timer = PURSUIT_SECONDS;
       spawnDockworkers(GARAGE);
