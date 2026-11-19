@@ -1,8 +1,8 @@
 // Ambient traffic follows the road graph. Pedestrians walk between curbs and cross near corners.
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY, PALETTE, TRAFFIC, VEHICLE } from './config.js';
-import { roadConflict } from './roads.js';
 import { createRandom } from './random.js';
+import { footprint, roadConflict } from './roads.js';
 import { resolveCollisions } from './world.js';
 import { buildNightCityCar, NIGHTCITY_MODELS, NIGHTCITY_PAINTS } from './nightcity-cars.js';
 
@@ -11,6 +11,9 @@ const SPAWN_DENSITY = { cars: 2, pedestrians: 2 };
 const LANE_SHIFT = 2.5;
 const CAR_GAP = 5;
 const CAR_BRAKE = 17;
+const CAR_SPAWN_SPACING = 12;
+const PARKED_CARS_PER_BLOCK = 2;
+const PARKING_SURFACE_Y = 0.26; // Top of the paved block pads in world.js.
 const SIDEWALK_OFFSET = CITY.road / 2 + 3;
 const CROSSING_OFFSET = CITY.road / 2 + 6;
 const trafficGeometry = {
@@ -31,6 +34,68 @@ const TRAFFIC_MODEL_WEIGHT = TRAFFIC_MODEL_WEIGHTS.reduce((sum, [, weight]) => s
 function ambientMaterial(color) {
   if (!ambientMaterials.has(color)) ambientMaterials.set(color, new THREE.MeshLambertMaterial({ color }));
   return ambientMaterials.get(color);
+}
+
+function carMesh(spec) {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(trafficGeometry.body, ambientMaterial(spec.body));
+  body.position.y = 0.62;
+  group.add(body);
+  const cabin = new THREE.Mesh(trafficGeometry.cabin, ambientMaterial(0x25313a));
+  cabin.position.set(0, 1.14, -0.1);
+  group.add(cabin);
+  const wheels = [];
+  for (const [wx, wz] of [[-0.98, 1.3], [0.98, 1.3], [-0.98, -1.3], [0.98, -1.3]]) {
+    const wheel = new THREE.Mesh(trafficGeometry.wheel, ambientMaterial(0x1a1a1c));
+    wheel.position.set(wx, 0.36, wz);
+    group.add(wheel);
+    wheels.push(wheel);
+  }
+  return { group, wheels };
+}
+
+function buildParkedCars(colliders, random) {
+  const parked = new THREE.Group();
+  parked.name = 'parked-traffic';
+  const colors = random.shuffle([...PALETTE.cars]);
+  const model = new THREE.Box3().setFromObject(carMesh(colors[0]).group);
+  const width = 2 * Math.max(-model.min.x, model.max.x) + 0.2;
+  const length = 2 * Math.max(-model.min.z, model.max.z) + 0.2;
+  const halfBlock = CITY.pitch / 2;
+  const corridor = Math.max(15, CITY.road / 2 + 4);
+  const fromCenter = halfBlock - corridor - width / 2 - 0.5;
+  const downtown = CITY.downtown;
+
+  for (let row = 0; row < CITY.grid; row += 1) {
+    const z = CITY.nodeMin + (row + 0.5) * CITY.pitch;
+    if (z - halfBlock < downtown.minZ || z + halfBlock > downtown.maxZ) continue;
+    for (let column = 0; column < CITY.grid; column += 1) {
+      const x = CITY.nodeMin + (column + 0.5) * CITY.pitch;
+      if (x - halfBlock < downtown.minX || x + halfBlock > downtown.maxX) continue;
+      if (CITY.parkBlocks.some(([c, r]) => c === column && r === row)) continue;
+
+      // Use up to two different street frontages per paved block.
+      let count = 0;
+      for (const [dx, dz] of random.shuffle([[1, 0], [-1, 0], [0, 1], [0, -1]])) {
+        const alongX = dz !== 0;
+        const shape = alongX ? { width: length, depth: width } : { width, depth: length };
+        for (const along of random.shuffle([-14, 0, 14])) {
+          const point = { x: x + dx * fromCenter + dz * along, z: z + dz * fromCenter + dx * along };
+          const bounds = footprint(point, shape);
+          if (roadConflict(bounds) || colliders.some((box) => bounds.maxX > box.minX
+            && bounds.minX < box.maxX && bounds.maxZ > box.minZ && bounds.minZ < box.maxZ)) continue;
+          const { group } = carMesh(colors[parked.children.length % colors.length]);
+          group.position.set(point.x, PARKING_SURFACE_Y, point.z);
+          group.rotation.y = (alongX ? Math.PI / 2 : 0) + (random.chance(0.5) ? Math.PI : 0);
+          parked.add(group);
+          count += 1;
+          break;
+        }
+        if (count === PARKED_CARS_PER_BLOCK) break;
+      }
+    }
+  }
+  return parked;
 }
 
 function pedMesh(random) {
@@ -135,6 +200,8 @@ export function createTraffic(city, scene, random) {
   const trafficCars = [];
   const peds = [];
   let sidewalkWalkers = null;
+  const parkingRandom = createRandom(random.int(0, 0xffffffff));
+  let parkedCars;
   const carTarget = Math.min(TRAFFIC.cars * SPAWN_DENSITY.cars, 96);
   const pedTarget = Math.min(TRAFFIC.pedestrians * SPAWN_DENSITY.pedestrians, PED_LIMIT);
   const roadNetwork = city.roadNetwork ?? city.graph;
@@ -217,28 +284,19 @@ export function createTraffic(city, scene, random) {
     return { x: to.x + dz / length * laneOffset, z: to.z - dx / length * laneOffset };
   }
 
-  function setRouteOnEdge(car, edge, t, towardB) {
-    const from = towardB ? edge.a : edge.b;
-    const to = towardB ? edge.b : edge.a;
-    const dx = towardB ? edge.dx : -edge.dx;
-    const dz = towardB ? edge.dz : -edge.dz;
-    const length = edge.length || 1;
-    car.laneOffset = car.laneTarget = Math.min(TRAFFIC.laneOffset + car.laneBias, (edge.width ?? CITY.road) / 2 - VEHICLE.radius - 0.3);
-    car.x = edge.a.x + edge.dx * t + (dz / length) * car.laneOffset;
-    car.z = edge.a.z + edge.dz * t - (dx / length) * car.laneOffset;
-    car.heading = Math.atan2(dx, dz);
-    car.node = from;
-    car.next = { edge, other: to };
+  function spawnIsClear(point, x, z, minRadius, maxRadius, occupied, minSpacing) {
+    const distance = (point.x - x) ** 2 + (point.z - z) ** 2;
+    return distance >= minRadius ** 2
+      && distance <= maxRadius ** 2
+      && !occupied.some((other) => (other.x - point.x) ** 2 + (other.z - point.z) ** 2 < minSpacing ** 2);
   }
 
-  function spawnPointNear(points, x, z, minRadius, maxRadius, occupied, minSpacing, preferCenter = false) {
-    if (points.length === 0) return null;
-    const candidates = points.filter((point) => {
-      const distance = Math.hypot(point.x - x, point.z - z);
-      return distance >= minRadius
-        && distance <= maxRadius
-        && !occupied.some((other) => Math.hypot(other.x - point.x, other.z - point.z) < minSpacing);
-    });
+  function spawnPointNear(points, x, z, minRadius, maxRadius, occupied, minSpacing, preferCenter, project) {
+    const candidates = [];
+    for (const point of points) {
+      const candidate = project ? project(point) : point;
+      if (candidate && spawnIsClear(candidate, x, z, minRadius, maxRadius, occupied, minSpacing)) candidates.push(candidate);
+    }
     if (candidates.length === 0) return null;
     if (!preferCenter) return random.pick(candidates);
     // Weighted sampling keeps traffic near the main grid while still allowing broad coverage.
@@ -257,28 +315,42 @@ export function createTraffic(city, scene, random) {
     return weighted.at(-1).point;
   }
 
-  function routeCarAt(car, point) {
-    const nearest = point.edge ? { edge: point.edge, x: point.x, z: point.z } : roadNetwork.nearestEdge(point.x, point.z);
-    if (!nearest) return;
+  function carSpawnRoute(point, laneBias) {
+    const nearest = point.edge ? point : roadNetwork.nearestEdge(point.x, point.z);
+    if (!nearest) return null;
     const edge = nearest.edge;
-    const dx = edge.b.x - edge.a.x;
-    const dz = edge.b.z - edge.a.z;
+    const { dx, dz } = edge;
     const t = Math.max(0, Math.min(1, point.t ?? (Math.abs(dx) >= Math.abs(dz)
       ? (nearest.x - edge.a.x) / (dx || 1)
       : (nearest.z - edge.a.z) / (dz || 1))));
     const towardB = Math.sin(point.heading) * dx + Math.cos(point.heading) * dz >= 0;
-    setRouteOnEdge(car, edge, t, towardB);
+    const direction = towardB ? 1 : -1;
+    const length = edge.length || 1;
+    const laneOffset = Math.min(TRAFFIC.laneOffset + laneBias, (edge.width ?? CITY.road) / 2 - VEHICLE.radius - 0.3);
+    return {
+      x: edge.a.x + dx * t + direction * dz / length * laneOffset,
+      z: edge.a.z + dz * t - direction * dx / length * laneOffset,
+      heading: Math.atan2(direction * dx, direction * dz),
+      laneOffset,
+      laneTarget: laneOffset,
+      node: towardB ? edge.a : edge.b,
+      next: { edge, other: towardB ? edge.b : edge.a },
+    };
   }
 
-  function randomRoadSpawn(x, z, minRadius = 45, preferCenter = false) {
-    const occupied = trafficCars.map((car) => ({ x: car.x, z: car.z }));
-    const point = spawnPointNear(carSpawnPoints, x, z, minRadius, TRAFFIC.spawnRadius, occupied, 12, preferCenter);
+  function randomRoadSpawn(x, z, laneBias, respawningCar) {
+    const occupied = respawningCar ? trafficCars.filter((car) => car !== respawningCar) : trafficCars;
+    const minRadius = 45;
+    // Check spacing after the candidate has been moved onto its actual lane.
+    const point = spawnPointNear(carSpawnPoints, x, z, minRadius, TRAFFIC.spawnRadius, occupied,
+      CAR_SPAWN_SPACING, true, (anchor) => carSpawnRoute(anchor, laneBias));
     if (point) return point;
     const nearby = randomPointNear(x, z, minRadius, TRAFFIC.spawnRadius);
     const edgePoint = roadNetwork.nearestEdge(nearby.x, nearby.z);
     if (!edgePoint || edgePoint.distance > TRAFFIC.spawnRadius) return null;
     const heading = Math.atan2(edgePoint.edge.dx, edgePoint.edge.dz);
-    return { x: edgePoint.x, z: edgePoint.z, heading };
+    const fallback = carSpawnRoute({ ...edgePoint, heading }, laneBias);
+    return spawnIsClear(fallback, x, z, minRadius, TRAFFIC.spawnRadius, occupied, CAR_SPAWN_SPACING) ? fallback : null;
   }
 
   function pickTrafficModel() {
@@ -290,52 +362,53 @@ export function createTraffic(city, scene, random) {
     return TRAFFIC_MODEL_WEIGHTS.at(-1)[0];
   }
 
-  function makeTrafficCar(position, heading) {
+  // Night City builder (E) on top of I's route pipeline: carSpawnRoute already
+  // placed the car on its lane with node/next; spread the route in and keep the
+  // caller's laneBias so respawn recomputes the same lane offset.
+  function makeTrafficCar(route, laneBias) {
     const taxi = random.chance(1 / 12);
     const modelId = taxi ? 'thunder' : pickTrafficModel();
     const color = taxi ? 0xd2b24c : random.pick(NIGHTCITY_PAINTS);
     const { group, wheels } = buildNightCityCar(modelId, color, { detail: 'light', taxi });
     const { tuning } = NIGHTCITY_MODELS.find((model) => model.id === modelId);
-    group.position.set(position.x, groundHeightAt(position.x, position.z), position.z);
-    group.rotation.y = heading;
+    group.position.set(route.x, groundHeightAt(route.x, route.z), route.z);
+    group.rotation.y = route.heading;
     scene.add(group);
     const car = {
+      ...route,
       group,
       wheels: wheels.map(({ mesh }) => mesh),
       modelId,
       color,
       taxi,
       tuning,
-      x: position.x,
-      z: position.z,
-      heading,
       speed: 0,
-      laneOffset: TRAFFIC.laneOffset,
-      laneTarget: TRAFFIC.laneOffset,
-      laneBias: random.range(-0.12, 0.12),
+      laneBias,
       laneCooldown: random.range(2, 5),
       hornTimer: 0,
       braking: false,
       targetSpeed: random.range(TRAFFIC.carSpeedMin, TRAFFIC.carSpeedMax),
-      node: roadNetwork.nearestNode(position.x, position.z),
-      next: null,
       stuck: 0,
       spin: 0,
     };
-    car.laneOffset = car.laneTarget = TRAFFIC.laneOffset + car.laneBias;
-    car.next = pickDirection(car.node);
     trafficCars.push(car);
     return car;
   }
 
+  function spawnCar(playerX, playerZ) {
+    const laneBias = random.range(-0.12, 0.12);
+    const route = randomRoadSpawn(playerX, playerZ, laneBias);
+    if (!route) return;
+    makeTrafficCar(route, laneBias);
+  }
+
   function respawnCar(car, playerX, playerZ) {
-    const point = randomRoadSpawn(playerX, playerZ, 45, true);
-    if (!point) return false;
-    car.laneOffset = car.laneTarget = TRAFFIC.laneOffset + car.laneBias;
+    const route = randomRoadSpawn(playerX, playerZ, car.laneBias, car);
+    if (!route) return false;
+    Object.assign(car, route);
     car.laneCooldown = random.range(2, 5);
     car.hornTimer = 0;
     car.braking = false;
-    routeCarAt(car, point);
     car.speed = TRAFFIC.carSpeedMin;
     car.stuck = 0;
     car.targetSpeed = random.range(TRAFFIC.carSpeedMin, TRAFFIC.carSpeedMax);
@@ -345,15 +418,12 @@ export function createTraffic(city, scene, random) {
   }
 
   function spawnAll(playerX, playerZ) {
+    parkedCars ??= buildParkedCars(colliders, parkingRandom);
+    if (parkedCars.parent !== scene) scene.add(parkedCars);
     let attempts = 0;
     while (trafficCars.length < carTarget && attempts < carTarget * 16) {
       attempts += 1;
-      const point = randomRoadSpawn(playerX, playerZ, 45, true);
-      if (!point) continue;
-      const car = makeTrafficCar(point, point.heading);
-      routeCarAt(car, point);
-      car.group.position.set(car.x, groundHeightAt(car.x, car.z), car.z);
-      car.group.rotation.y = car.heading;
+      spawnCar(playerX, playerZ);
     }
     let pedAttempts = 0;
     let pedFailures = 0;
@@ -731,15 +801,7 @@ export function createTraffic(city, scene, random) {
     const target = playerPosition(player);
     if (ambientPedCount() < pedTarget && random() < 0.2) spawnPed(target.x, target.z, true);
     loadPlazaPeds(target.x, target.z);
-    if (trafficCars.length < carTarget) {
-      const point = randomRoadSpawn(target.x, target.z, 45, true);
-      if (point) {
-        const car = makeTrafficCar(point, point.heading);
-        routeCarAt(car, point);
-        car.group.position.set(car.x, groundHeightAt(car.x, car.z), car.z);
-        car.group.rotation.y = car.heading;
-      }
-    }
+    if (trafficCars.length < carTarget) spawnCar(target.x, target.z);
   }
 
   function knockPed(ped, direction) {
@@ -808,6 +870,7 @@ export function createTraffic(city, scene, random) {
   }
 
   function reset() {
+    parkedCars?.removeFromParent();
     for (const car of trafficCars) scene.remove(car.group);
     trafficCars.length = 0;
     for (const ped of peds) scene.remove(ped.group);

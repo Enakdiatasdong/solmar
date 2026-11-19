@@ -172,7 +172,7 @@ export const RACES = [
 ];
 
 export const TRAFFIC = {
-  cars: 24,
+  cars: 40,
   pedestrians: 36,
   spawnRadius: 190,
   despawnRadius: 260,
