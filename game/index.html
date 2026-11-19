@@ -89,6 +89,15 @@
   #mission-list .mission-stats:first-line { color: var(--gold); font-weight: 700; }
 
   #weapon-box { max-width: 230px; padding: 8px 12px; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #crosshair { position: fixed; left: 50%; top: 50%; z-index: 15; width: 0; height: 0; pointer-events: none; --gap: 7px; --len: 9px; }
+  #crosshair.hidden { display: none; }
+  #crosshair.aiming { --gap: 4px; --len: 7px; }
+  #crosshair i { position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.85), 0 0 4px rgba(0,0,0,0.6); }
+  #crosshair .ch-t { left: -1px; top: calc(-1 * var(--gap) - var(--len)); width: 2px; height: var(--len); }
+  #crosshair .ch-b { left: -1px; top: var(--gap); width: 2px; height: var(--len); }
+  #crosshair .ch-l { top: -1px; left: calc(-1 * var(--gap) - var(--len)); width: var(--len); height: 2px; }
+  #crosshair .ch-r { top: -1px; left: var(--gap); width: var(--len); height: 2px; }
+  #crosshair .ch-dot { position: absolute; left: -1.5px; top: -1.5px; width: 3px; height: 3px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.85); }
   #weapon-text { color: var(--ink); }
 
   #weapon-slots { display: grid; grid-template-columns: repeat(5, minmax(54px, 1fr)); gap: 4px; width: min(400px, 45vw); padding: 4px; }
@@ -344,6 +353,7 @@
   .touch-actions [data-touch="punch"] { right: 0; top: 62px; }
   .touch-actions [data-touch="run"] { right: 66px; top: 0; font-size: 12px; }
   .touch-actions [data-touch="menu"] { right: 33px; top: 118px; font-size: 12px; }
+  .touch-actions [data-touch="aim"] { right: 132px; top: 62px; font-size: 12px; }
 
   @media (max-width: 1100px) {
     #objective-box { position: static; left: auto; right: auto; width: 100%; max-width: 100%; transform: none; }
@@ -373,6 +383,7 @@
 <p id="status" role="status" aria-live="polite"></p>
 
 <div id="hud" aria-hidden="true">
+  <div id="crosshair" class="hidden" aria-hidden="true"><i class="ch-t"></i><i class="ch-b"></i><i class="ch-l"></i><i class="ch-r"></i><b class="ch-dot"></b></div>
   <div class="hud-top">
     <div class="hud-panel">
       <div class="health-row">
@@ -594,6 +605,7 @@
     <button type="button" data-touch="enter" aria-label="enter car">CAR</button>
     <button type="button" data-touch="fire" aria-label="fire weapon">●</button>
     <button type="button" data-touch="punch" aria-label="punch">✊</button>
+    <button type="button" data-touch="aim" aria-label="aim">AIM</button>
     <button type="button" data-touch="menu" aria-label="jobs">JOBS</button>
   </div>
 </div>

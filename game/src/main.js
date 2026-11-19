@@ -3,7 +3,7 @@ import { auditRoadClearance } from './static-props.js';
 // ?seed=N selects the city; ?shot=start|play|end stages a frozen, reproducible scene.
 import * as THREE from '../vendor/three.module.min.js';
 import {
-  CAMERA, DIFFICULTY, MAX_FRAME, MISSIONS, PLAYER, POLICE, RADIO, REP, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
+  CAMERA, COMBAT, DIFFICULTY, MAX_FRAME, MISSIONS, PLAYER, POLICE, RADIO, REP, SAVE_VERSION, SPAWN, STARTER_CAR, STEP, VEHICLE,
 } from './config.js';
 import { currentDifficulty, setDifficulty } from './difficulty.js';
 import { createRandom, parseSeed } from './random.js';
@@ -383,6 +383,7 @@ function makeGame(seedValue, shotName = null) {
     blips.push(...collectibles.getBlips(), ...races.getBlips());
 
     hud.setWeapon(combat.state.weapon);
+    hud.setCrosshair(state.screen === 'playing' && !player.state.inCar && player.state.alive, player.state.aiming);
     blips.push(...vehicleJobs.getBlips());
 
     for (const car of police.state.copCars) blips.push({ ...car.state, color: '#ff6b57', size: 22 });
@@ -419,32 +420,21 @@ function makeGame(seedValue, shotName = null) {
     return { day: state.day, minutes, isNight: minutes >= 19 * 60 || minutes < 6 * 60 };
   }
 
+  // Crosshair ray: from the (single, damped) follow camera through screen centre.
+  // The direction is the orbit yaw/pitch expressed by the camera itself, so aim can
+  // never drift away from what the player sees (AN1 K-04: no third camera mode).
+  function computeAim() {
+    const direction = new THREE.Vector3();
+    renderer.camera.getWorldDirection(direction);
+    return { origin: renderer.camera.position.clone(), direction, aiming: player.state.aiming };
+  }
+
   function updateCameraSafely(dt) {
     const inCar = player.state.inCar;
     const chase = police.state.wanted >= 3;
     const focus = player.state.inCar?.state ?? player.state;
     const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
-    const requestedDistance = clamp(inCar ? (chase ? CAMERA.chaseDistance : CAMERA.carDistance) : orbit.distance,
-      CAMERA.minDistance, CAMERA.maxDistance);
-    const safeDistance = (yaw, pitch, focusY) => {
-      const options = { focusY, height, step: CAMERA.collisionStep };
-      // cameraColliders adds the causeway/canal deck blockers: decks are walkable
-      // (not gameplay colliders) but the camera must never sit inside one.
-      let distance = safeCameraDistance(focus, yaw, pitch, requestedDistance, cameraColliders, options);
-      if (distance < requestedDistance) {
-        // Refine only the last coarse interval: continuous clearance without testing the
-        // entire ray at tiny steps or exposing 25 cm quantization to the follow camera.
-        let blockedDistance = Math.min(requestedDistance, distance + CAMERA.collisionStep);
-        for (let index = 0; index < CAMERA.collisionRefinements; index += 1) {
-          const candidate = (distance + blockedDistance) * 0.5;
-          const position = cameraPositionAtDistance(focus, yaw, pitch, candidate, options);
-          if (cameraPositionClear(position, city.colliders, options)) distance = candidate;
-          else blockedDistance = candidate;
-        }
-      }
-      return distance;
-    };
-    renderer.updateCamera(dt, player, { ...orbit, chase, distance: requestedDistance, safeDistance }, 0);
+    renderer.updateCamera(dt, player, { ...orbit, chase, aiming: player.state.aiming, distance: requestedDistance, safeDistance }, 0);
     // The renderer applies minimum zoom and smoothing. Neither may place the camera inside a deck.
     const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(player.state.y) ? player.state.y : 0);
     const safeDistanceValue = safeDistance(orbit.yaw, orbit.pitch, focusY);
@@ -1130,6 +1120,11 @@ function makeGame(seedValue, shotName = null) {
     assets.update(dt);
     safehouses.update();
     const controls = hud.isPlaceMenuOpen() ? {} : input.state();
+    // Aim state: held right mouse / Alt / touch AIM, on foot only. This drives the
+    // arms-raised pose (player.js), the FOV zoom, the tighter spread and the slower
+    // on-foot movement below.
+    const aiming = !player.state.inCar && player.state.alive && input.isAiming();
+    player.state.aiming = aiming;
     const { x, z } = player.state;
 
     state.elapsed += dt;
@@ -1168,9 +1163,10 @@ function makeGame(seedValue, shotName = null) {
     } else {
       const forward = Number(Boolean(controls.up)) - Number(Boolean(controls.down));
       const right = Number(Boolean(controls.right)) - Number(Boolean(controls.left));
+      const moveMult = aiming ? COMBAT.aimMoveMult : 1;
       player.step(dt, {
-        x: Math.sin(orbit.yaw) * forward - Math.cos(orbit.yaw) * right,
-        z: Math.cos(orbit.yaw) * forward + Math.sin(orbit.yaw) * right,
+        x: (Math.sin(orbit.yaw) * forward - Math.cos(orbit.yaw) * right) * moveMult,
+        z: (Math.cos(orbit.yaw) * forward + Math.sin(orbit.yaw) * right) * moveMult,
         run: controls.run, jump: controls.jump && player.state.grounded, jetpack: jetpack.state.active,
       }, city.colliders);
     }
@@ -1245,8 +1241,10 @@ function makeGame(seedValue, shotName = null) {
     clock.last = now;
     if (state.screen === 'playing') {
       const drag = input.takeOrbit();
-      orbit.yaw -= drag.x * CAMERA.sensitivity;
-      orbit.pitch = clamp(orbit.pitch + drag.y * CAMERA.sensitivity, CAMERA.minPitch, CAMERA.maxPitch);
+      const orbitSensitivity = CAMERA.sensitivity
+        * (player.state.aiming && !player.state.inCar ? CAMERA.aimSensitivityMult : 1);
+      orbit.yaw -= drag.x * orbitSensitivity;
+      orbit.pitch = clamp(orbit.pitch + drag.y * orbitSensitivity, CAMERA.minPitch, CAMERA.maxPitch);
       orbit.distance = clamp(orbit.distance + input.takeWheel() * 0.9, CAMERA.minDistance, CAMERA.maxDistance);
       clock.accumulator += delta;
       let steps = 0;
@@ -1259,6 +1257,9 @@ function makeGame(seedValue, shotName = null) {
       renderer.applyTimeOfDay(state.clockMinutes, city.setNightFactor);
       city.setSignalClock(state.clockMinutes);
       updateCameraSafely(delta);
+      // Refresh the crosshair ray from this frame's camera, so the next shot (which
+      // is handled before the next camera update) uses fresh aim.
+      combat.setAim(computeAim());
       const car = player.state.inCar;
       const speed = Math.abs(car?.state.speed ?? 0) / (car?.tuning?.maxSpeed ?? VEHICLE.maxSpeed);
       const playing = state.screen === 'playing';

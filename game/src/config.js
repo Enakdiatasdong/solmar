@@ -69,6 +69,9 @@ export const CAMERA = {
   chaseDistance: 12,
   chaseLift: 1,
   chaseFov: 68,
+  // Aim mode (hold right mouse / Alt): slight zoom + steadier orbit.
+  aimFov: 46,
+  aimSensitivityMult: 0.6,
   pitch: 0.3,
   minPitch: -0.08,
   maxPitch: 1.0,
@@ -288,6 +291,16 @@ export const COMBAT = {
   enemyDamage: 7,
   muzzleTime: 0.07,
   enemyRadius: 0.55,
+  // Aim mode: tighter spread, slower on-foot movement while aiming.
+  aimSpreadMult: 0.35,
+  aimMoveMult: 0.45,
+  // Base angular spread (radians) for single-projectile weapons without a spread field.
+  baseSpread: 0.02,
+  // Hit-test body sphere: centre height / radius per target kind.
+  targetCentreY: 1.1,
+  targetRadius: 0.85,
+  pedCentreY: 1.0,
+  pedRadius: 0.65,
 };
 
 export const RADIO = {

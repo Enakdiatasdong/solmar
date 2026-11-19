@@ -249,6 +249,7 @@ export function createRenderer(canvas) {
     pitch: CAMERA.pitch,
     distance: CAMERA.distance,
     focusY: 1.5,
+    fov: 58,
     target: new THREE.Vector3(),
     pos: new THREE.Vector3(0, 6, 12),
     mode: 'foot',
@@ -281,7 +282,18 @@ export function createRenderer(canvas) {
     const chase = Boolean(orbit?.chase);
     const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
     const requestedDistance = orbit?.distance ?? (inCar ? CAMERA.carDistance : CAMERA.distance);
-    const fov = chase ? CAMERA.chaseFov : 58;
+    // Aim zoom lives here and nowhere else: the FOV eases toward the aim FOV while
+    // aiming on foot (never in chase), then eases back. No second camera is created;
+    // the follow camera's exponential position damping below is untouched.
+    const aiming = Boolean(orbit?.aiming) && !inCar && !chase;
+    const targetFov = chase ? CAMERA.chaseFov : aiming ? CAMERA.aimFov : 58;
+    const fovLerp = 1 - Math.exp(-Math.max(0, dt ?? 0) * 10);
+    camera.fov += (targetFov - camera.fov) * fovLerp;
+    if (Math.abs(camera.fov - targetFov) < 0.05) camera.fov = targetFov;
+    if (camera.fov !== cameraState.fov) {
+      cameraState.fov = camera.fov;
+      camera.updateProjectionMatrix();
+    }
     const zoomDistance = THREE.MathUtils.clamp(
       Number.isFinite(requestedDistance) ? requestedDistance : CAMERA.distance,
       CAMERA.minDistance,
@@ -301,8 +313,8 @@ export function createRenderer(canvas) {
     // Runtime frames are capped at MAX_FRAME. A one-second update explicitly settles
     // startRun/beginShot, including repeated shots at the same world position.
     const snap = snapCamera || teleported || cameraState.mode !== mode || elapsed >= 1;
-    if (camera.fov !== fov) {
-      camera.fov += (fov - camera.fov) * (snap ? 1 : blend(damping.distance));
+    if (camera.fov !== targetFov) {
+      camera.fov += (targetFov - camera.fov) * (snap ? 1 : blend(damping.distance));
       camera.updateProjectionMatrix();
     }
     if (snap) {
@@ -386,6 +398,7 @@ export function createRenderer(canvas) {
 
   function frameTitle() {
     camera.fov = 58;
+    cameraState.fov = 58;
     camera.updateProjectionMatrix();
     camera.position.set(TITLE_CAMERA.x, TITLE_CAMERA.y, TITLE_CAMERA.z);
     camera.lookAt(TITLE_CAMERA.lookX, TITLE_CAMERA.lookY, TITLE_CAMERA.lookZ);

@@ -60,6 +60,10 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
     punchTimer: 0,
     muzzle: 0,
     hits: 0,
+    // Camera aim through the crosshair (origin = camera, direction = camera forward,
+    // i.e. orbit yaw/pitch). Set every frame by main.js; null until the first frame.
+    aim: null,
+    aiming: false,
     enemies: [],
     tracers: [],
   };
@@ -98,8 +102,58 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
   const lobRay = new THREE.Ray();
   const lobStep = new THREE.Vector3();
   const shotRay = new THREE.Ray();
-  const shotMuzzle = new THREE.Vector3();
   const shotEnd = new THREE.Vector3();
+  const spreadU = new THREE.Vector3();
+  const spreadV = new THREE.Vector3();
+  const shotDirection = new THREE.Vector3();
+
+  // Camera aim supplied by main.js (from renderer.camera, i.e. orbit yaw/pitch).
+  // direction must be a non-zero vector; it is stored normalized.
+  function setAim(aim) {
+    if (!aim?.origin || !aim?.direction) {
+      state.aim = null;
+      state.aiming = false;
+      return false;
+    }
+    const direction = new THREE.Vector3(aim.direction.x, aim.direction.y, aim.direction.z);
+    if (direction.lengthSq() < 1e-6) {
+      state.aim = null;
+      state.aiming = false;
+      return false;
+    }
+    direction.normalize();
+    state.aim = {
+      origin: new THREE.Vector3(aim.origin.x, aim.origin.y, aim.origin.z),
+      direction,
+      aiming: Boolean(aim.aiming),
+    };
+    state.aiming = state.aim.aiming;
+    return true;
+  }
+
+  // Smallest t >= 0 where the ray meets the sphere, or Infinity on a miss.
+  function raySphere(origin, direction, cx, cy, cz, radius) {
+    const ox = cx - origin.x;
+    const oy = cy - origin.y;
+    const oz = cz - origin.z;
+    const tca = ox * direction.x + oy * direction.y + oz * direction.z;
+    if (tca < 0) return Infinity;
+    const d2 = ox * ox + oy * oy + oz * oz - tca * tca;
+    const r2 = radius * radius;
+    if (d2 > r2) return Infinity;
+    return tca - Math.sqrt(r2 - d2);
+  }
+
+  // Deviate `base` by `angleA`/`angleB` radians along two perpendicular axes.
+  function perturbDirection(base, angleA, angleB, out) {
+    out.copy(base);
+    if (angleA === 0 && angleB === 0) return out;
+    if (Math.abs(base.y) < 0.99) spreadU.set(0, 1, 0).cross(base).normalize();
+    else spreadU.set(1, 0, 0).cross(base).normalize();
+    spreadV.crossVectors(spreadU, base).normalize();
+    out.addScaledVector(spreadU, angleA).addScaledVector(spreadV, angleB).normalize();
+    return out;
+  }
 
   function spawnEnemy(x, z, options = {}) {
     const city = getCity();
@@ -240,28 +294,29 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
     return true;
   }
 
-  function fireRay(origin, heading, weapon, damage, city) {
-    shotRay.origin.copy(origin);
-    shotRay.direction.set(Math.sin(heading), 0, Math.cos(heading));
+  // Hitscan along a true 3D ray (the crosshair ray from the camera). Targets are
+  // body spheres, so a shot only lands when the crosshair is actually on the target;
+  // buildings still block via coverDistance. `muzzle` is where the flash/tracer start.
+  function fireRay(rayOrigin, rayDirection, muzzle, weapon, damage, city) {
+    shotRay.origin.copy(rayOrigin);
+    shotRay.direction.copy(rayDirection);
     const cover = coverDistance(shotRay, weapon.range, city);
     let nearest = Math.min(weapon.range, cover);
     let hit = null;
     let hitPed = false;
     visitTargets(city, (target, isPed) => {
-      const dx = target.x - origin.x;
-      const dz = target.z - origin.z;
-      const depth = dx * shotRay.direction.x + dz * shotRay.direction.z;
-      if (depth <= 0 || depth > nearest || depth >= cover || (hit && depth === nearest)) return;
-      const offset = Math.abs(dx * shotRay.direction.z - dz * shotRay.direction.x);
-      if (offset > (isPed ? 0.65 : 0.85)) return;
-      nearest = depth;
+      const centreY = isPed ? COMBAT.pedCentreY : COMBAT.targetCentreY;
+      const radius = isPed ? COMBAT.pedRadius : COMBAT.targetRadius;
+      const t = raySphere(rayOrigin, rayDirection, target.x, centreY, target.z, radius);
+      if (!Number.isFinite(t) || t <= 0 || t >= nearest || t >= cover) return;
+      nearest = t;
       hit = target;
       hitPed = isPed;
     });
-    if (hit) hitTarget(hit, hitPed, damage, city, heading);
-    shotRay.at(Math.min(0.75, nearest), shotMuzzle);
-    muzzleAt(shotMuzzle);
-    tracer(shotMuzzle, shotRay.at(nearest, shotEnd));
+    if (hit) hitTarget(hit, hitPed, damage, city, Math.atan2(rayDirection.x, rayDirection.z));
+    shotEnd.copy(rayOrigin).addScaledVector(rayDirection, nearest);
+    muzzleAt(muzzle);
+    tracer(muzzle, shotEnd);
   }
 
   function explode(bottle, city) {
@@ -334,25 +389,41 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
     state.ammo -= 1;
     state.fireTimer = weapon.fireCooldown;
     const city = getCity();
-    const origin = new THREE.Vector3(player.x, 1.55 + player.y, player.z);
+    const muzzle = new THREE.Vector3(player.x, 1.55 + player.y, player.z);
+    // Aim follows the camera/crosshair (orbit yaw/pitch via the camera). Only when no
+    // camera aim was ever supplied do we fall back to the old body-heading ray.
+    const aim = state.aim;
+    const aimDir = aim
+      ? aim.direction
+      : new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
+    const aimOrigin = aim ? aim.origin : muzzle.clone();
+    // Face the body toward the aim so the mesh matches the shot.
+    player.heading = Math.atan2(aimDir.x, aimDir.z);
+    const spreadAngle = (weapon.spread ?? COMBAT.baseSpread) * (aim?.aiming ? COMBAT.aimSpreadMult : 1);
     if (bottle) {
-      bottle.mesh.position.copy(origin);
+      bottle.mesh.position.copy(muzzle);
       bottle.mesh.visible = true;
       bottle.ground = city?.groundHeight ?? NPC_GROUND;
       bottle.weapon = { ...weapon };
-      bottle.vx = Math.sin(player.heading) * weapon.range / LOB_TIME;
-      bottle.vz = Math.cos(player.heading) * weapon.range / LOB_TIME;
-      bottle.vy = LOB_GRAVITY * LOB_TIME / 2 - (origin.y - bottle.ground) / LOB_TIME;
+      const flat = new THREE.Vector3(aimDir.x, 0, aimDir.z);
+      if (flat.lengthSq() < 1e-6) flat.set(Math.sin(player.heading), 0, Math.cos(player.heading));
+      flat.normalize();
+      bottle.vx = flat.x * weapon.range / LOB_TIME;
+      bottle.vz = flat.z * weapon.range / LOB_TIME;
+      bottle.vy = LOB_GRAVITY * LOB_TIME / 2 - (muzzle.y - bottle.ground) / LOB_TIME;
       bottle.life = LOB_TIME + 0.3;
-      muzzleAt(origin);
-      shotEnd.copy(origin).addScaledVector(new THREE.Vector3(Math.sin(player.heading), 0.2, Math.cos(player.heading)), 1);
-      tracer(origin, shotEnd);
+      muzzleAt(muzzle);
+      shotEnd.copy(muzzle).addScaledVector(flat, 1);
+      shotEnd.y = muzzle.y + 0.2;
+      tracer(muzzle, shotEnd);
     } else if (weapon.spread) {
       for (const offset of [-weapon.spread, 0, weapon.spread]) {
-        fireRay(origin, player.heading + offset, weapon, weapon.damage / 3, city);
+        perturbDirection(aimDir, offset, (random() - 0.5) * 0.02, shotDirection);
+        fireRay(aimOrigin, shotDirection, muzzle, weapon, weapon.damage / 3, city);
       }
     } else {
-      fireRay(origin, player.heading, weapon, weapon.damage, city);
+      perturbDirection(aimDir, (random() - 0.5) * 2 * spreadAngle, (random() - 0.5) * 2 * spreadAngle, shotDirection);
+      fireRay(aimOrigin, shotDirection, muzzle, weapon, weapon.damage, city);
     }
     return true;
   }
@@ -449,6 +520,8 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
     state.punchTimer = 0;
     state.muzzle = 0;
     state.hits = 0;
+    state.aim = null;
+    state.aiming = false;
     getPlayer().state.punchTimer = 0;
     clearEnemies();
     while (state.tracers.length > 0) removeTracer(state.tracers.length - 1);
@@ -494,6 +567,7 @@ export function createCombat(scene, getPlayer, getCity, seed = 1) {
 
   return {
     state,
+    setAim,
     punch,
     shoot,
     update,

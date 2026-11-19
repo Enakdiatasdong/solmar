@@ -36,6 +36,7 @@ export function createHud() {
     weapon: element('weapon-text'),
     weaponBox: element('weapon-box'),
     weaponSlots: element('weapon-slots'),
+    crosshair: element('crosshair'),
     policeList: element('police-list'),
     missionCard: element('mission-card'),
     missionChapter: element('mission-chapter'),
@@ -100,6 +101,7 @@ export function createHud() {
     dialogue: null,
     vehicleCondition: null,
     weaponSlots: null,
+    crosshair: null,
     policeUnits: null,
     radio: null,
     clock: null,
@@ -247,6 +249,17 @@ export function createHud() {
     if (hud.weaponBox) hud.weaponBox.style.display = visible && weapon ? 'block' : 'none';
     if (!weapon) return;
     setText(hud.weapon, `${weapon.name} ${weapon.ammo}/${weapon.maxAmmo}`);
+  }
+
+  // Centre-screen crosshair: visible while on foot with a weapon in hand, tighter
+  // while aiming. The game drives it from refreshHud; the CSS owns the shape.
+  function setCrosshair(visible, aiming) {
+    if (!hud.crosshair || typeof document === 'undefined') return;
+    const key = `${Boolean(visible)}:${Boolean(aiming)}`;
+    if (cache.crosshair === key) return;
+    cache.crosshair = key;
+    hud.crosshair.classList.toggle('hidden', !visible);
+    hud.crosshair.classList.toggle('aiming', Boolean(aiming));
   }
 
   function setWeaponSlots(weapons, selectedIndex) {
@@ -875,6 +888,7 @@ export function createHud() {
 
     setWeapon,
     setWeaponSlots,
+    setCrosshair,
     setPoliceUnits,
     setRadio,
     setClock,

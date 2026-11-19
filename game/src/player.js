@@ -121,6 +121,7 @@ export function createPlayer(city) {
     invuln: 0,
     walkPhase: 0,
     punchTimer: 0,
+    aiming: false,
     aimPitch: 0,
     aimYaw: 0,
     radius: PLAYER.radius,
@@ -146,6 +147,7 @@ export function createPlayer(city) {
     state.alive = true;
     state.invuln = 0;
     state.punchTimer = 0;
+    state.aiming = false;
     orbit.yaw = 0;
     orbit.pitch = CAMERA.pitch;
     root.visible = true;

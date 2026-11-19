@@ -37,6 +37,11 @@ export function createInput(target, canCycleWeapon = () => false) {
   const touchHeld = { up: false, down: false, left: false, right: false, run: false };
   const directionKeys = new Set();
   const runKeys = new Set();
+  const aimKeys = new Set();
+  // Aim mode (hold right mouse / Alt / touch AIM). Right-button state is tracked
+  // separately from the left-button drag orbit, so aiming never starts a drag.
+  let aiming = false;
+  let touchAim = false;
   let actions = 0;
   let dragX = 0;
   let dragY = 0;
@@ -75,6 +80,10 @@ export function createInput(target, canCycleWeapon = () => false) {
       case 'ShiftLeft':
       case 'ShiftRight':
         runKeys.add(event.code);
+        break;
+      case 'AltLeft':
+      case 'AltRight':
+        aimKeys.add(event.code);
         break;
       case 'Space':
         held.jump = true;
@@ -136,6 +145,7 @@ export function createInput(target, canCycleWeapon = () => false) {
       return;
     }
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') runKeys.delete(event.code);
+    if (event.code === 'AltLeft' || event.code === 'AltRight') aimKeys.delete(event.code);
     if (event.code === 'Space') held.jump = false;
     if (event.code === 'KeyC') held.descend = false;
   });
@@ -149,6 +159,9 @@ export function createInput(target, canCycleWeapon = () => false) {
     held.descend = false;
     directionKeys.clear();
     runKeys.clear();
+    aimKeys.clear();
+    aiming = false;
+    touchAim = false;
     touchHeld.up = false;
     touchHeld.down = false;
     touchHeld.left = false;
@@ -170,6 +183,11 @@ export function createInput(target, canCycleWeapon = () => false) {
   if (target && target.addEventListener) {
     target.addEventListener('contextmenu', (event) => event.preventDefault());
     target.addEventListener('pointerdown', (event) => {
+      // Right button held = aim mode; it never starts a camera drag.
+      if (event.button === 2) {
+        aiming = true;
+        return;
+      }
       if (event.button !== undefined && event.button !== 0) return;
       pointerId = event.pointerId;
       dragging = true;
@@ -190,6 +208,10 @@ export function createInput(target, canCycleWeapon = () => false) {
       moved += Math.abs(dx) + Math.abs(dy);
     });
     const release = (event) => {
+      if (event.button === 2) {
+        aiming = false;
+        return;
+      }
       if (event.pointerId !== pointerId) return;
       const elapsed = performance.now() - downAt;
       if (moved < 7 && elapsed < 380) queue(ACTION_FIRE);
@@ -198,6 +220,7 @@ export function createInput(target, canCycleWeapon = () => false) {
     };
     target.addEventListener('pointerup', release);
     target.addEventListener('pointercancel', () => {
+      aiming = false;
       dragging = false;
       pointerId = null;
     });
@@ -218,12 +241,14 @@ export function createInput(target, canCycleWeapon = () => false) {
       else if (name === 'fire') queue(ACTION_FIRE);
       else if (name === 'punch') queue(ACTION_PUNCH);
       else if (name === 'menu') queue(ACTION_MENU);
+      else if (name === 'aim') touchAim = true;
       else if (name === 'run') touchHeld.run = true;
       else if (touchHeld[name] !== undefined) touchHeld[name] = true;
     };
     const lift = (event) => {
       event.preventDefault();
       if (name === 'run') touchHeld.run = false;
+      else if (name === 'aim') touchAim = false;
       else if (touchHeld[name] !== undefined) touchHeld[name] = false;
     };
     button.addEventListener('pointerdown', press);
@@ -273,6 +298,9 @@ export function createInput(target, canCycleWeapon = () => false) {
     },
     isDragging() {
       return dragging;
+    },
+    isAiming() {
+      return aiming || touchAim || aimKeys.size > 0;
     },
     clearHeld,
   };
