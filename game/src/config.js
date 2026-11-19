@@ -258,7 +258,7 @@ export const GANGS = {
     { id: 'luma', name: 'Luma Centro', rect: { minX: -120, maxX: 120, minZ: -120, maxZ: 240 } },
     { id: 'prisma', name: 'Prisma Heights', rect: { minX: 120, maxX: 360, minZ: -120, maxZ: 120 } },
     { id: 'brisa', name: 'Brisa Harbor', rect: { minX: -360, maxX: -120, minZ: 120, maxZ: 360 } },
-    { id: 'coral', name: 'Coral Strand', rect: { minX: -120, maxX: 120, minZ: 240, maxZ: 360 } },
+    { id: 'coral', name: 'Cala Dorada', rect: { minX: -120, maxX: 120, minZ: 240, maxZ: 360 } },
     { id: 'luz-marina', name: 'Luz Marina', rect: { minX: 120, maxX: 360, minZ: 120, maxZ: 360 } },
   ],
   progressPerKill: 34,

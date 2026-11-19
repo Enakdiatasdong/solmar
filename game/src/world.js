@@ -1672,7 +1672,7 @@ export function createCity(random, reservedPlaces = []) {
       });
     }
   }
-  // Coral Strand and the spawn avenue: paired sidewalk rows, broken at each cross street.
+  // Cala Dorada and the spawn avenue: paired sidewalk rows, broken at each cross street.
   // Block-local jitter keeps the rhythm planted while retaining a seeded, natural variation.
   const boulevardAvenues = [288, 216];
   const boulevardOffset = CITY.road / 2 + 2.5;
