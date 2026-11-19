@@ -62,6 +62,29 @@ export const PLAYER = {
 };
 
 export const CAMERA = {
+  modes: {
+    near: {
+      label: 'Dekat',
+      foot: { distance: 6.5, height: 2.6, pitch: 0.32, fov: 58 },
+      car: { distance: 8.0, height: 2.4, pitch: 0.28, fov: 60 },
+    },
+    far: {
+      label: 'Jauh',
+      foot: { distance: 11.0, height: 3.6, pitch: 0.30, fov: 62 },
+      car: { distance: 13.5, height: 3.2, pitch: 0.26, fov: 66 },
+    },
+    top: {
+      label: 'Atas',
+      foot: { distance: 2.0, height: 22.0, pitch: 1.35, fov: 55 },
+      car: { distance: 2.0, height: 22.0, pitch: 1.35, fov: 55 },
+    },
+    first: {
+      label: 'Orang Pertama',
+      foot: { distance: 0.4, height: 1.6, pitch: null, fov: 70 },
+      car: { distance: 0.4, height: 1.5, pitch: null, fov: 70 },
+    },
+  },
+  aimFovDelta: 12,
   distance: 7,
   carDistance: 10,
   height: 2.9,

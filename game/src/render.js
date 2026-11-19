@@ -3,6 +3,7 @@
 // the player instead of covering the whole city, which keeps the polygon and draw cost modest.
 import * as THREE from '../vendor/three.module.min.js';
 import { CAMERA, CITY, DAYNIGHT, PALETTE, SUNSET_MINUTE, SUNSET_OFFSET, TITLE_CAMERA } from './config.js';
+import { aimFovFor, CAMERA_MODE_ORDER, cameraModeParams } from './camera-modes.js';
 
 // Match the light positions on the car meshes. A motorbike has a single center lamp.
 const HEADLIGHT_POSITIONS = {
@@ -48,7 +49,7 @@ export function createRenderer(canvas) {
   scene.background = new THREE.Color(PALETTE.sky);
   scene.fog = new THREE.Fog(PALETTE.fog, 175, 1050);
 
-  const camera = new THREE.PerspectiveCamera(58, initialSize.width / initialSize.height, 0.1, 1800);
+  const camera = new THREE.PerspectiveCamera(CAMERA.modes.near.foot.fov, initialSize.width / initialSize.height, 0.1, 1800);
   camera.position.set(0, 8, 14);
 
   const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 0.64);
@@ -246,13 +247,14 @@ export function createRenderer(canvas) {
 
   const cameraState = {
     yaw: 0,
-    pitch: CAMERA.pitch,
-    distance: CAMERA.distance,
+    pitch: CAMERA.modes.near.foot.pitch,
+    distance: CAMERA.modes.near.foot.distance,
+    fov: camera.fov,
     focusY: 1.5,
-    fov: 58,
     target: new THREE.Vector3(),
     pos: new THREE.Vector3(0, 6, 12),
     mode: 'foot',
+    view: 'near',
   };
   let snapCamera = true;
   let hasPreviousFocus = false;
@@ -272,82 +274,87 @@ export function createRenderer(canvas) {
   window.addEventListener('resize', resize);
 
   /**
-   * Follow the player or their car. `orbit` is the player's mouse-orbit state ({yaw, pitch});
-   * `cameraYaw` is the direction the minimap uses. The camera's own state is smoothed.
+   * Follow the player or their car with one camera. Resolve the selected view and
+   * ease the camera from its current pose, including when the view changes.
    */
   function updateCamera(dt, player, orbit, shake) {
-    const state = player?.state ?? {};
-    const inCar = state.inCar;
-    const focus = inCar ? inCar.state : player.state;
+    const state = player?.state;
+    const inCar = state?.inCar;
     const chase = Boolean(orbit?.chase);
-    const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
-    const requestedDistance = orbit?.distance ?? (inCar ? CAMERA.carDistance : CAMERA.distance);
-    // Aim zoom lives here and nowhere else: the FOV eases toward the aim FOV while
-    // aiming on foot (never in chase), then eases back. No second camera is created;
-    // the follow camera's exponential position damping below is untouched.
+    const view = !chase && CAMERA_MODE_ORDER.includes(orbit?.cameraMode) ? orbit.cameraMode : 'near';
+    const params = cameraModeParams(view, inCar);
+    const elapsed = Number.isFinite(dt) ? Math.max(0, dt) : 0;
+    const blend = (rate) => 1 - Math.exp(-elapsed * rate);
+    // Aim zoom lives here and nowhere else: FOV eases toward the mode FOV minus
+    // the aim delta (58 -> 46 in near) while aiming on foot, never in chase.
     const aiming = Boolean(orbit?.aiming) && !inCar && !chase;
-    const targetFov = chase ? CAMERA.chaseFov : aiming ? CAMERA.aimFov : 58;
-    const fovLerp = 1 - Math.exp(-Math.max(0, dt ?? 0) * 10);
-    camera.fov += (targetFov - camera.fov) * fovLerp;
+    const targetFov = chase ? CAMERA.chaseFov : aiming ? aimFovFor(params.fov) : params.fov;
+    camera.fov += (targetFov - camera.fov) * blend(10);
     if (Math.abs(camera.fov - targetFov) < 0.05) camera.fov = targetFov;
     if (camera.fov !== cameraState.fov) {
       cameraState.fov = camera.fov;
       camera.updateProjectionMatrix();
     }
-    const zoomDistance = THREE.MathUtils.clamp(
-      Number.isFinite(requestedDistance) ? requestedDistance : CAMERA.distance,
-      CAMERA.minDistance,
-      CAMERA.maxDistance,
+    if (!state) return; // The title view only resets the lens here.
+
+    const focus = inCar?.state ?? state;
+    const mode = inCar ? 'car' : 'foot';
+    const first = view === 'first';
+    const fixedDistance = first || view === 'top';
+    const height = params.height + (chase ? CAMERA.chaseLift : 0);
+    const zoomDistance = chase ? CAMERA.chaseDistance : fixedDistance ? params.distance : THREE.MathUtils.clamp(
+      Number.isFinite(orbit?.distance) ? orbit.distance : params.distance, CAMERA.minDistance, CAMERA.maxDistance,
     );
     const requestedYaw = Number.isFinite(orbit?.yaw) ? orbit.yaw : 0;
-    const requestedPitch = Number.isFinite(orbit?.pitch) ? orbit.pitch : CAMERA.pitch;
-    const pitch = THREE.MathUtils.clamp(requestedPitch, CAMERA.minPitch, CAMERA.maxPitch);
-    // Only simulation height enters the camera. Animated hips/legs never contribute.
-    const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(state.y) ? state.y : 0);
-    const elapsed = Number.isFinite(dt) ? Math.max(0, dt) : 0;
+    const orbitPitch = Number.isFinite(orbit?.pitch) ? orbit.pitch : CAMERA.pitch;
+    const requestedPitch = view === 'top' ? params.pitch : THREE.MathUtils.clamp(
+      first ? orbitPitch : params.pitch + (orbitPitch - CAMERA.pitch), CAMERA.minPitch, CAMERA.maxPitch,
+    );
+    const baseFocusY = inCar ? 1.4 : 1.5;
+    const focusY = baseFocusY + (Number.isFinite(focus.y) ? focus.y : 0);
     const damping = inCar ? CAMERA.carDamping : CAMERA.footDamping;
-    const blend = (rate) => 1 - Math.exp(-elapsed * rate);
-    const mode = inCar ? 'car' : 'foot';
     const teleported = hasPreviousFocus && Math.hypot(focus.x - previousFocus.x, focusY - previousFocus.y,
       focus.z - previousFocus.z) > 80;
-    // Runtime frames are capped at MAX_FRAME. A one-second update explicitly settles
-    // startRun/beginShot, including repeated shots at the same world position.
+    // startRun and staged views pass a one-second update to settle the camera.
     const snap = snapCamera || teleported || cameraState.mode !== mode || elapsed >= 1;
-    if (camera.fov !== targetFov) {
-      camera.fov += (targetFov - camera.fov) * (snap ? 1 : blend(damping.distance));
-      camera.updateProjectionMatrix();
-    }
     if (snap) {
       cameraState.yaw = requestedYaw;
-      cameraState.pitch = pitch;
+      cameraState.pitch = requestedPitch;
       cameraState.focusY = focusY;
     } else {
       const yawDelta = Math.atan2(Math.sin(requestedYaw - cameraState.yaw), Math.cos(requestedYaw - cameraState.yaw));
       cameraState.yaw += yawDelta * blend(damping.yaw);
-      cameraState.pitch += (pitch - cameraState.pitch) * blend(damping.pitch);
+      cameraState.pitch += (requestedPitch - cameraState.pitch) * blend(damping.pitch);
       cameraState.focusY += (focusY - cameraState.focusY) * blend(damping.focusY);
     }
-    // Keep yaw bounded without ever interpolating the long way around +/- PI.
     cameraState.yaw = Math.atan2(Math.sin(cameraState.yaw), Math.cos(cameraState.yaw));
-    // Resolve clearance against the damped ray, including jump height. Checking a raw
-    // mouse-orbit ray could miss a wall still between the camera and the player.
-    const clearance = typeof orbit?.safeDistance === 'function'
-      ? orbit.safeDistance(cameraState.yaw, cameraState.pitch, cameraState.focusY) : orbit?.safeDistance;
-    const safeDistance = Number.isFinite(clearance) ? Math.max(0, clearance) : zoomDistance;
-    const distance = Math.min(zoomDistance, safeDistance);
+
+    const clearance = !fixedDistance && typeof orbit?.safeDistance === 'function'
+      ? orbit.safeDistance(cameraState.yaw, cameraState.pitch, cameraState.focusY, height) : zoomDistance;
+    const distance = Number.isFinite(clearance) ? THREE.MathUtils.clamp(clearance, 0, zoomDistance) : zoomDistance;
+    const distanceRate = distance < zoomDistance
+      ? (distance < cameraState.distance ? CAMERA.collisionIn : CAMERA.collisionOut) : damping.distance;
     if (snap) cameraState.distance = distance;
-    else {
-      // Collision may require less than minimum zoom; retract quickly and extend gently.
-      // Both distance and final position remain on the exponential damping path.
-      const distanceRate = safeDistance < zoomDistance
-        ? (distance < cameraState.distance ? CAMERA.collisionIn : CAMERA.collisionOut) : damping.distance;
-      cameraState.distance += (distance - cameraState.distance) * blend(distanceRate);
+    else cameraState.distance += (distance - cameraState.distance) * blend(distanceRate);
+
+    const { yaw, pitch } = cameraState;
+    const horizontal = Math.cos(pitch) * cameraState.distance;
+    if (first) {
+      // On cars, place the eye at the left seat. Bikes have a centred rider.
+      const heading = inCar ? focus.heading : 0;
+      const seatOffset = inCar && inCar.spec?.variant !== 'bike' ? 0.45 : 0;
+      desiredPosition.set(focus.x - Math.cos(heading) * seatOffset, cameraState.focusY - baseFocusY + height,
+        focus.z + Math.sin(heading) * seatOffset);
+      // Chase sits behind the focus and above the look point for positive pitch.
+      desiredTarget.set(desiredPosition.x + Math.sin(yaw) * horizontal,
+        desiredPosition.y - Math.sin(pitch) * cameraState.distance,
+        desiredPosition.z + Math.cos(yaw) * horizontal);
+    } else {
+      desiredTarget.set(focus.x, cameraState.focusY + 0.9 + (chase ? (inCar ? 3.4 : 2.6) : 0), focus.z);
+      desiredPosition.set(focus.x - Math.sin(yaw) * horizontal,
+        cameraState.focusY + height + Math.sin(pitch) * cameraState.distance * 0.55,
+        focus.z - Math.cos(yaw) * horizontal);
     }
-    const horizontal = Math.cos(cameraState.pitch) * cameraState.distance;
-    desiredTarget.set(focus.x, cameraState.focusY + 0.9 + (chase ? (inCar ? 3.4 : 2.6) : 0), focus.z);
-    desiredPosition.set(focus.x - Math.sin(cameraState.yaw) * horizontal,
-      cameraState.focusY + height + Math.sin(cameraState.pitch) * cameraState.distance * 0.55,
-      focus.z - Math.cos(cameraState.yaw) * horizontal);
     if (snap) {
       cameraState.pos.copy(desiredPosition);
       cameraState.target.copy(desiredTarget);
@@ -368,6 +375,8 @@ export function createRenderer(canvas) {
     }
     camera.lookAt(cameraState.target);
     cameraState.mode = mode;
+    cameraState.view = view;
+    if (player.body) player.body.visible = !inCar && !first;
     skyDome.position.copy(camera.position);
     const { minX, maxX, minZ, maxZ } = CITY.downtown;
     const downtown = focus.x >= minX && focus.x <= maxX && focus.z >= minZ && focus.z <= maxZ;
@@ -397,9 +406,7 @@ export function createRenderer(canvas) {
   }
 
   function frameTitle() {
-    camera.fov = 58;
-    cameraState.fov = 58;
-    camera.updateProjectionMatrix();
+    updateCamera(1);
     camera.position.set(TITLE_CAMERA.x, TITLE_CAMERA.y, TITLE_CAMERA.z);
     camera.lookAt(TITLE_CAMERA.lookX, TITLE_CAMERA.lookY, TITLE_CAMERA.lookZ);
     cameraState.pos.copy(camera.position);

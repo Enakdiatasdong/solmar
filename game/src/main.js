@@ -44,11 +44,12 @@ import { createRaces } from './races.js';
 import { createRenderer } from './render.js';
 import { readSave, writeSave } from './save.js';
 import {
-  ACTION_BUY_AMMO, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_HORN, ACTION_JETPACK, ACTION_MENU, ACTION_MUTE,
+  ACTION_BUY_AMMO, ACTION_CAMERA, ACTION_CONFIRM, ACTION_ENTER, ACTION_FIRE, ACTION_HORN, ACTION_JETPACK, ACTION_MENU, ACTION_MUTE,
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RADIO, ACTION_RESTART, createInput,
 } from './input.js';
 import { normalizeShotName, stageShot } from './shots.js';
 import { cameraPositionAtDistance, cameraPositionClear, findRoadRoute, safeCameraDistance } from './camera.js';
+import { CAMERA_MODE_LABELS, cameraModeParams, nextCameraMode } from './camera-modes.js';
 
 const DOM_IDS = [
   'game', 'status', 'title-screen', 'btn-start', 'btn-walk', 'btn-jobs', 'btn-continue',
@@ -61,6 +62,7 @@ const DOM_IDS = [
 
   'hud', 'health-fill', 'health-text', 'cash-value', 'income-value', 'clock-value', 'wanted-stars', 'speed-value',
   'speed-box', 'vehicle-name', 'jetpack-box', 'jetpack-bar', 'jetpack-fill', 'jetpack-text',
+  'camera-mode',
   'objective-text', 'objective-box', 'toasts', 'minimap', 'zone-label', 'mission-list',
   'dialogue', 'dialogue-text', 'subtitle', 'hint', 'region-panel', 'region-current', 'region-list', 'rep-panel', 'rep-rank', 'rep-points', 'rep-progress', 'rep-next', 'mission-stats', 'place-menu', 'place-menu-title',
   'place-menu-subtitle', 'place-menu-rows', 'place-menu-close',
@@ -192,6 +194,8 @@ function makeGame(seedValue, shotName = null) {
   });
 
   const orbit = player.orbit;
+  let cameraMode = 'near';
+  let cameraZoomInCar = false;
   const input = createInput(canvas, () => state.screen === 'playing' && !player.state.inCar);
   const clock = { accumulator: 0, last: null };
   const state = {
@@ -352,6 +356,7 @@ function makeGame(seedValue, shotName = null) {
     hud.setIncome(assets.ownedIncomePerMin(), assets.state.owned.size);
     hud.setWanted(police.state.wanted);
     hud.setSpeed(player.state.inCar?.state.speed ?? 0, Boolean(player.state.inCar));
+    hud.setCameraMode(CAMERA_MODE_LABELS[cameraMode]);
     const currentCar = player.state.inCar;
     hud.setVehicleName(currentCar?.spec?.name);
     hud.setVehicleCondition(currentCar ? (currentCar.state.health / currentCar.state.maxHealth) * 100 : null, currentCar?.spec?.name);
@@ -436,21 +441,40 @@ function makeGame(seedValue, shotName = null) {
   }
 
   function updateCameraSafely(dt) {
-    const inCar = player.state.inCar;
+    const inCar = Boolean(player.state.inCar);
     const chase = police.state.wanted >= 3;
     const focus = player.state.inCar?.state ?? player.state;
-    const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
-    renderer.updateCamera(dt, player, { ...orbit, chase, aiming: player.state.aiming, distance: requestedDistance, safeDistance }, 0);
-    // The renderer applies minimum zoom and smoothing. Neither may place the camera inside a deck.
-    const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(player.state.y) ? player.state.y : 0);
-    const safeDistanceValue = safeDistance(orbit.yaw, orbit.pitch, focusY);
-    const rendererDistance = Math.max(CAMERA.minDistance, Math.min(CAMERA.maxDistance, requestedDistance));
-    if (safeDistanceValue < rendererDistance || !cameraPositionClear(renderer.camera.position, city.cameraBlockers)) {
-      const safePosition = cameraPositionAtDistance(focus, orbit.yaw, orbit.pitch, safeDistanceValue, { focusY, height });
-      renderer.cameraState.pos.set(safePosition.x, safePosition.y, safePosition.z);
-      renderer.cameraState.distance = safeDistanceValue;
-      renderer.camera.position.copy(renderer.cameraState.pos);
-      renderer.camera.lookAt(renderer.cameraState.target);
+    const params = cameraModeParams(cameraMode, inCar);
+    const zoomable = cameraMode === 'near' || cameraMode === 'far';
+    if (zoomable && cameraZoomInCar !== inCar && !shotMode) {
+      // Keep the wheel offset from this mode's default when entering or leaving a car.
+      const previousDistance = cameraModeParams(cameraMode, cameraZoomInCar).distance;
+      orbit.distance = clamp(orbit.distance + params.distance - previousDistance, CAMERA.minDistance, CAMERA.maxDistance);
+    }
+    cameraZoomInCar = inCar;
+    const requestedDistance = chase ? CAMERA.chaseDistance : zoomable ? orbit.distance : params.distance;
+    // Overhead views can cross rooftops. The first-person eye has no orbit arm to retract.
+    const safeDistance = chase || zoomable
+      ? (yaw, pitch, focusY, height) => safeCameraDistance(focus, yaw, pitch, requestedDistance, city.colliders,
+        { focusY, height })
+      : undefined;
+    renderer.updateCamera(dt, player, {
+      ...orbit, chase, cameraMode, aiming: player.state.aiming, distance: requestedDistance, safeDistance,
+    }, 0);
+    // Deck guard (B): the renderer retracts against the damped ray; re-verify with
+    // the raw orbit ray so a deck can never swallow the camera. Zoomable modes only.
+    if (safeDistance) {
+      const height = (inCar ? CAMERA.carHeight : CAMERA.height) + (chase ? CAMERA.chaseLift : 0);
+      const focusY = (inCar ? 1.4 : 1.5) + (inCar ? 0 : Number.isFinite(player.state.y) ? player.state.y : 0);
+      const safeDistanceValue = safeDistance(orbit.yaw, orbit.pitch, focusY);
+      const rendererDistance = Math.max(CAMERA.minDistance, Math.min(CAMERA.maxDistance, requestedDistance));
+      if (safeDistanceValue < rendererDistance || !cameraPositionClear(renderer.camera.position, city.cameraBlockers)) {
+        const safePosition = cameraPositionAtDistance(focus, orbit.yaw, orbit.pitch, safeDistanceValue, { focusY, height });
+        renderer.cameraState.pos.set(safePosition.x, safePosition.y, safePosition.z);
+        renderer.cameraState.distance = safeDistanceValue;
+        renderer.camera.position.copy(renderer.cameraState.pos);
+        renderer.camera.lookAt(renderer.cameraState.target);
+      }
     }
   }
 
@@ -559,7 +583,11 @@ function makeGame(seedValue, shotName = null) {
     stats.reset();
     if (save) stats.restore(save.stats);
     gangs.reset(save?.districts);
-    Object.assign(orbit, { yaw: SPAWN.heading, pitch: CAMERA.pitch, distance: CAMERA.distance });
+    cameraMode = 'near';
+    cameraZoomInCar = Boolean(player.state.inCar);
+    Object.assign(orbit, {
+      yaw: SPAWN.heading, pitch: CAMERA.pitch, distance: cameraModeParams(cameraMode, cameraZoomInCar).distance,
+    });
     audio.setMuted(state.muted);
     if (!shotMode) audio.unlock();
     setScreen('playing');
@@ -570,7 +598,7 @@ function makeGame(seedValue, shotName = null) {
     hud.toast(save ? 'Welcome back to Solmar.' : 'Solmar. The coast is yours, Jax.', 'mission', 4);
     updateCameraSafely(1);
     refreshHud();
-    announce('Playing SOLMAR. WASD to move, E to use a car or job, M for jobs, P to pause.');
+    announce('Playing SOLMAR. WASD to move, E to use a car or job, C — kamera, M for jobs, P to pause.');
   }
 
   function restart() {
@@ -1085,6 +1113,14 @@ function makeGame(seedValue, shotName = null) {
     }
     if (actions & ACTION_MENU) showJobs(true);
     if (actions & ACTION_ENTER) enterOrExit();
+    if (state.screen === 'playing' && (actions & ACTION_CAMERA)) {
+      cameraMode = nextCameraMode(cameraMode);
+      cameraZoomInCar = Boolean(player.state.inCar);
+      const { distance, label } = cameraModeParams(cameraMode, cameraZoomInCar);
+      orbit.distance = distance;
+      hud.setCameraMode(label);
+      hud.toast(`Kamera: ${label} (C)`, 'info', 2);
+    }
     if (hud.isPlaceMenuOpen()) return;
     if (actions & ACTION_JETPACK) useJetpack();
     if (actions & ACTION_BUY_AMMO) buyAmmo();
@@ -1251,7 +1287,10 @@ function makeGame(seedValue, shotName = null) {
         * (player.state.aiming && !player.state.inCar ? CAMERA.aimSensitivityMult : 1);
       orbit.yaw -= drag.x * orbitSensitivity;
       orbit.pitch = clamp(orbit.pitch + drag.y * orbitSensitivity, CAMERA.minPitch, CAMERA.maxPitch);
-      orbit.distance = clamp(orbit.distance + input.takeWheel() * 0.9, CAMERA.minDistance, CAMERA.maxDistance);
+      const wheel = input.takeWheel();
+      if (cameraMode === 'near' || cameraMode === 'far') {
+        orbit.distance = clamp(orbit.distance + wheel * 0.9, CAMERA.minDistance, CAMERA.maxDistance);
+      }
       clock.accumulator += delta;
       let steps = 0;
       while (state.screen === 'playing' && clock.accumulator >= STEP && steps < MAX_STEPS) {

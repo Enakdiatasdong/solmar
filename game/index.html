@@ -352,6 +352,7 @@
   .touch-actions [data-touch="fire"] { right: 66px; top: 62px; }
   .touch-actions [data-touch="punch"] { right: 0; top: 62px; }
   .touch-actions [data-touch="run"] { right: 66px; top: 0; font-size: 12px; }
+  .touch-actions [data-touch="camera"] { right: 92px; top: 118px; font-size: 12px; }
   .touch-actions [data-touch="menu"] { right: 33px; top: 118px; font-size: 12px; }
   .touch-actions [data-touch="aim"] { right: 132px; top: 62px; font-size: 12px; }
 
@@ -419,6 +420,7 @@
 
       <div class="hud-panel" id="weapon-box"><span id="weapon-text">Pistol 24/60</span></div>
       <div class="hud-panel" id="weapon-slots" aria-label="Weapon slots"></div>
+      <div class="hud-panel" id="camera-mode-box"><span id="camera-mode">Dekat</span></div>
       <div class="hud-panel" id="radio-box" hidden>
         <b id="radio-station"></b><span class="radio-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
         <span id="radio-track"></span><small id="radio-artist"></small>
@@ -492,6 +494,8 @@
         <li><kbd>Space</kbd> Jump / handbrake</li>
         <li><kbd>Drag</kbd> Look around</li>
         <li><kbd>Click</kbd> Fire</li>
+        <li><kbd>C</kbd> Kamera</li>
+        <li><kbd>X</kbd> Descend with jetpack</li>
         <li><kbd>M</kbd> Jobs</li>
         <li><kbd>Esc</kbd> Pause</li>
       </ul>
@@ -603,6 +607,7 @@
   <div class="touch-actions">
     <button type="button" data-touch="run" aria-label="sprint">RUN</button>
     <button type="button" data-touch="enter" aria-label="enter car">CAR</button>
+    <button type="button" data-touch="camera" aria-label="change camera">CAM</button>
     <button type="button" data-touch="fire" aria-label="fire weapon">●</button>
     <button type="button" data-touch="punch" aria-label="punch">✊</button>
     <button type="button" data-touch="aim" aria-label="aim">AIM</button>

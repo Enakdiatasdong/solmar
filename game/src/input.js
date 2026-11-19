@@ -15,6 +15,7 @@ export const ACTION_JETPACK = 256;
 export const ACTION_HORN = 512;
 export const ACTION_BUY_AMMO = 1024;
 export const ACTION_RADIO = 2048;
+export const ACTION_CAMERA = 4096;
 
 
 const KEYMAP = {
@@ -104,6 +105,9 @@ export function createInput(target, canCycleWeapon = () => false) {
         queue(ACTION_JETPACK);
         break;
       case 'KeyC':
+        queue(ACTION_CAMERA);
+        break;
+      case 'KeyX':
         held.descend = true;
         break;
       case 'KeyF':
@@ -151,7 +155,7 @@ export function createInput(target, canCycleWeapon = () => false) {
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') runKeys.delete(event.code);
     if (event.code === 'AltLeft' || event.code === 'AltRight') aimKeys.delete(event.code);
     if (event.code === 'Space') held.jump = false;
-    if (event.code === 'KeyC') held.descend = false;
+    if (event.code === 'KeyX') held.descend = false;
   });
 
   function clearHeld() {
@@ -283,6 +287,7 @@ export function createInput(target, canCycleWeapon = () => false) {
       if (name === 'enter') queue(ACTION_ENTER);
       else if (name === 'fire') queue(ACTION_FIRE);
       else if (name === 'punch') queue(ACTION_PUNCH);
+      else if (name === 'camera') queue(ACTION_CAMERA);
       else if (name === 'menu') queue(ACTION_MENU);
       else if (name === 'aim') touchAim = true;
       else if (name === 'run') touchHeld.run = true;

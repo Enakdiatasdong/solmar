@@ -32,6 +32,7 @@ export function createHud() {
     jetpackBox: element('jetpack-box'),
     jetpackFill: element('jetpack-fill'),
     jetpackText: element('jetpack-text'),
+    cameraMode: element('camera-mode'),
 
     weapon: element('weapon-text'),
     weaponBox: element('weapon-box'),
@@ -97,6 +98,7 @@ export function createHud() {
     inCar: null,
     jetpackPercent: null,
     jetpackColor: null,
+    cameraMode: null,
     objective: null,
     dialogue: null,
     vehicleCondition: null,
@@ -243,6 +245,12 @@ export function createHud() {
     cache.objective = text;
     if (hud.objectiveBox) hud.objectiveBox.style.display = text ? 'block' : 'none';
     setText(hud.objective, text);
+  }
+
+  function setCameraMode(label) {
+    if (cache.cameraMode === label) return;
+    cache.cameraMode = label;
+    setText(hud.cameraMode, label);
   }
 
   function setWeapon(weapon, visible = true) {
@@ -885,6 +893,7 @@ export function createHud() {
     setVehicleName,
     setVehicleCondition,
     setJetpack,
+    setCameraMode,
 
     setWeapon,
     setWeaponSlots,
