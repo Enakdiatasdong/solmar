@@ -151,11 +151,14 @@ export function fitGridFootprint(x, z, width, depth) {
  * the AABB, never just a point/centre check. 15 m reserves the 11 m road half-width
  * plus sidewalk/buffer; the 24 m freeway gets 16 m. Both exceed the 2 m minimum. */
 export function roadConflict(box, corridors = ROAD_CORRIDORS) {
+  const roadInfrastructure = box.roadInfrastructure === true;
   if ('width' in box) box = footprint(box, box);
   if (![box.minX, box.maxX, box.minZ, box.maxZ].every(Number.isFinite)
     || box.minX > box.maxX || box.minZ > box.maxZ) throw new TypeError('Invalid prop footprint');
   return corridors.find(({ a, b, width }) => {
-    const margin = Math.max(15, width / 2 + 4);
+    // Ordinary props need the 15 m setback. Marked infrastructure may occupy
+    // the sidewalk buffer, but its footprint must still clear the road deck.
+    const margin = roadInfrastructure ? width / 2 : Math.max(15, width / 2 + 4);
     return box.maxX > Math.min(a.x, b.x) - margin + 1e-6
       && box.minX < Math.max(a.x, b.x) + margin - 1e-6
       && box.maxZ > Math.min(a.z, b.z) - margin + 1e-6

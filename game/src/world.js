@@ -73,21 +73,22 @@ function stableHash(x, z, salt = 0) {
 }
 
 /** Each tower gets a coordinate-seeded glass pattern without advancing the shared city RNG. */
-function makeTowerFacadeTextures(seed, downtown) {
+function makeTowerFacadeTextures(seed, downtown, litRatioOverride = null, warmPaneRatioOverride = null) {
   const canvas = document.createElement('canvas');
   const emissiveCanvas = document.createElement('canvas');
   canvas.width = emissiveCanvas.width = 256;
   canvas.height = emissiveCanvas.height = 512;
+  const emissiveLitRatio = litRatioOverride ?? (0.35 + stableHash(seed, 17, 1) * 0.2);
+  const warmPaneRatio = warmPaneRatioOverride ?? 0.48;
   const context = canvas.getContext('2d');
   const emissiveContext = emissiveCanvas.getContext('2d');
-  if (!context) return { map: null, emissiveMap: null };
+  if (!context) return { map: null, emissiveMap: null, litRatio: emissiveLitRatio, warmPaneRatio };
 
   const columns = 12;
   const rows = 22;
   const cellW = canvas.width / columns;
   const cellH = canvas.height / rows;
   const diffuseLitRatio = 0.07 + stableHash(seed, 17, 1) * 0.23;
-  const emissiveLitRatio = 0.35 + stableHash(seed, 17, 1) * 0.2;
   const tintShift = Math.floor(stableHash(seed, 29, 2) * 24);
   context.fillStyle = '#142a40';
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -127,7 +128,7 @@ function makeTowerFacadeTextures(seed, downtown) {
       }
       context.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
       if (emissiveLit) {
-        const warm = stableHash(seed + column * 0.61, seed + row * 0.43, 7) < 0.48;
+        const warm = stableHash(seed + column * 0.61, seed + row * 0.43, 7) < warmPaneRatio;
         emissiveContext.fillStyle = warm ? '#ffc77c' : '#7edbff';
         emissiveContext.fillRect(x + 1, y + 1, cellW - 8, cellH - 8);
       }
@@ -158,7 +159,8 @@ function makeTowerFacadeTextures(seed, downtown) {
     texture.anisotropy = 2;
     return texture;
   };
-  return { map: makeTexture(canvas), emissiveMap: makeTexture(emissiveCanvas) };
+  return { map: makeTexture(canvas), emissiveMap: makeTexture(emissiveCanvas),
+    litRatio: emissiveLitRatio, warmPaneRatio };
 }
 
 /** Flat walls and window bays; keep warm panes in neighboring groups on each lit floor. */
@@ -920,17 +922,32 @@ export function createCity(random, reservedPlaces = []) {
   function towerFacadeMaterial(cx, cz, seed = 0, downtown = false) {
     const variant = Math.floor(stableHash(cx + seed * 0.001, cz, 6) * 8);
     const cache = downtown ? downtownFacades : towerFacadeMaterials;
-    if (cache.has(variant)) return cache.get(variant);
+    const targetFacade = downtown
+      && Math.abs(cx + 95.96) < 0.1 && Math.abs(cz - 106.73) < 0.1;
+    const cacheKey = targetFacade ? 'roi-tower-left' : variant;
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    // Keep the extra warm panes local to the exact left-tower ROI; no shared
+    // city RNG draws are added and every other tower retains its texture.
+    // NOTE: the ROI tower's variant is 0 (stableHash), not 7 — matching on the
+    // variant would never fire, so the override keys on coordinates only.
+    const towerTextures = makeTowerFacadeTextures(variant * 137 + 29, downtown,
+      targetFacade ? 0.55 : null, targetFacade ? 0.65 : null);
+    const { litRatio, warmPaneRatio, ...textures } = towerTextures;
     const params = {
       color: shade(downtown ? 0xb4cee7 : 0x739bb0, (variant - 3.5) * 0.012),
-      ...makeTowerFacadeTextures(variant * 137 + 29, downtown),
+      ...textures,
       emissive: 0xffffff,
       emissiveIntensity: 0.08,
     };
     const material = downtown
       ? new THREE.MeshPhongMaterial({ ...params, shininess: 32, specular: 0x607789 })
       : new THREE.MeshLambertMaterial(params);
-    cache.set(variant, material);
+    material.userData.towerVariant = variant;
+    material.userData.towerLitRatio = litRatio;
+    material.userData.towerWarmPaneRatio = warmPaneRatio;
+    material.userData.targetFacade = targetFacade;
+    material.userData.downtownTower = downtown;
+    cache.set(cacheKey, material);
     return material;
   }
 
@@ -1759,6 +1776,18 @@ export function createCity(random, reservedPlaces = []) {
       }
     }
   }
+  // Deterministic top-up along the z=250 playtest road. These curb positions
+  // are checked against current place reservations, colliders and freeway
+  // clearance before entering the same pooled lamp meshes as every other lamp.
+  const supplementalNightRoadLamps = [
+    { x: -82.4, z: 242 }, { x: -82.4, z: 252 }, { x: -82.4, z: 262 }, { x: -82.4, z: 272 },
+    { x: -61.6, z: 246 }, { x: -61.6, z: 256 }, { x: -61.6, z: 266 },
+  ].map((spot) => ({ ...spot, glow: true, yaw: spot.x < -72 ? 0 : Math.PI }));
+  for (const spot of supplementalNightRoadLamps) {
+    if (!isReserved(spot.x, spot.z) && pointIsClear(colliders, spot.x, spot.z, 0.65)
+      && !inFreewayCorridor(spot.x, spot.z, 1.2)) lampSpots.push(spot);
+  }
+  group.userData.streetlightSupplements = supplementalNightRoadLamps;
   // Filter freeway corridor candidates without changing seeded random draw order.
   for (let lamp = lampSpots.length - 1; lamp >= downtownStreetLamps.length; lamp -= 1) {
     if (inFreewayCorridor(lampSpots[lamp].x, lampSpots[lamp].z, 1.2)) lampSpots.splice(lamp, 1);
@@ -1876,15 +1905,18 @@ export function createCity(random, reservedPlaces = []) {
     const evening = Math.min(night / SUNSET_NIGHT_FACTOR, 1);
     const afterSunset = Math.max((night - SUNSET_NIGHT_FACTOR) / (1 - SUNSET_NIGHT_FACTOR), 0);
     const lateGlow = afterSunset * afterSunset * (3 - 2 * afterSunset);
+    // Extra road and tower brightness is reserved for full night; the sunset
+    // factor and daytime look retain the Fix C values exactly.
+    const deepNight = THREE.MathUtils.smoothstep(night, 0.82, 1);
     headMesh.material.emissiveIntensity = 1.3 * evening + 0.75 * lateGlow;
-    lampGlowMaterial.opacity = 0.72 * evening + 0.28 * lateGlow;
-    ordinaryLampGlowMaterial.opacity = 0.95 * lateGlow;
-    pavementGlow.material.opacity = 0.34 * evening + 0.42 * lateGlow;
+    lampGlowMaterial.opacity = 0.72 * evening + 0.28 * lateGlow + 0.25 * deepNight;
+    ordinaryLampGlowMaterial.opacity = 0.95 * lateGlow + 0.15 * deepNight;
+    pavementGlow.material.opacity = 0.34 * evening + 0.42 * lateGlow + 0.45 * deepNight;
     pavementGlow.visible = Boolean(glowTexture) && pavementGlow.material.opacity > 0;
     const facadeEmission = 0.06 + 0.7 * evening + 0.48 * lateGlow;
     for (const material of materialCache.values()) material.emissiveIntensity = facadeEmission;
     for (const material of towerFacadeMaterials.values()) material.emissiveIntensity = facadeEmission;
-    for (const material of downtownFacades.values()) material.emissiveIntensity = 0.08 + 0.82 * evening + 0.7 * lateGlow;
+    for (const material of downtownFacades.values()) material.emissiveIntensity = 0.08 + 0.82 * evening + 0.7 * lateGlow + 0.35 * deepNight;
     for (const material of roofNeon) material.emissiveIntensity = 0.12 + 0.66 * evening + 0.42 * lateGlow;
     for (const { halo, avenue } of lampHalos) {
       halo.visible = avenue ? lampGlowMaterial.opacity > 0 : ordinaryLampGlowMaterial.opacity > 0;
